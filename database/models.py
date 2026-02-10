@@ -8,8 +8,23 @@ class FogDevice(Base):
     __tablename__ = "fog_devices"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100))
+    device_name = Column(String(100), unique=True)
+    location = Column(String(255), nullable=True)
     status = Column(String(50))
+
+class FogMessage(Base):
+    __tablename__ = "fog_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(Integer, ForeignKey("fog_devices.id"), nullable=False)
+    direction = Column(String(20), nullable=False)  # incoming, outgoing
+    message_type = Column(String(50), nullable=False)  # command, alert, data, status, sensor_data
+    content = Column(Text, nullable=False)
+    status = Column(String(20), default="sent")  # sent, delivered, received, failed
+    created_at = Column(DateTime, server_default=func.now())
+
+     # Relationship
+    # device = relationship("FogDevice", back_populates="messages")
 
 # ---------- AUTH / USERS ----------
 class User(Base):
