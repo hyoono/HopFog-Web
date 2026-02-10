@@ -7,12 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import aliased
 
-from sqlalchemy import text
-
-
 from database.connection import engine
-from database.models import Base
-from database.models import Message, MessageRecipient, User
+from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage
 from database.deps import get_db
 
 
@@ -22,6 +18,7 @@ from routes.auth import verify_password, get_password_hash, create_access_token,
 from routes.users import router as users_router
 from routes.messages import router as messages_router
 from routes.admin_messaging import router as admin_messaging_router
+from routes.fog_nodes import fog_router
 
 
 app = FastAPI()
@@ -32,6 +29,7 @@ templates = Jinja2Templates(directory="templates")
 app.include_router(users_router)
 app.include_router(messages_router)
 app.include_router(admin_messaging_router)
+app.include_router(fog_router)
 
 @app.on_event("startup")
 def on_startup():
@@ -85,14 +83,19 @@ async def login(
         
         if not result:
             print(f"Password verification FAILED")
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-            
+            return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Invalid email or password"
+        })           
     except Exception as e:
         print(f"Exception during verification: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Invalid email or password"
+        })
+        
     print(f"Login successful!")
     
     token = create_access_token(data={"sub": user.email})
@@ -144,6 +147,9 @@ def register(
     
     return RedirectResponse(url="/?registered=true", status_code=302)
 
+
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db), current_user: User= Depends(verify_token)):
     Sender = aliased(User)
@@ -188,6 +194,9 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         "storage_used": storage_used
     })
     
+
+
+
 @app.get("/users", response_class=HTMLResponse)
 def users(request: Request, db: Session = Depends(get_db), current_user: User = Depends(verify_token)):
     users_list = db.query(User).all()
@@ -229,14 +238,6 @@ def logs(request: Request, db: Session = Depends(get_db), current_user: User = D
         "current_user": current_user
     })
 
-
-# @app.get("/test-db")
-# def test_db():
-#     return {"ok": True, "db_file": "capstone.db (SQLite)"}
-
-# @app.get("/db-ping")
-# def db_ping(db: Session = Depends(get_db)):
-#     return {"db_ok": db.execute(text("SELECT 1")).scalar()}
 
 @app.delete("/api/messages/{message_id}")
 def delete_message(message_id: int, db: Session = Depends(get_db)):
@@ -295,13 +296,14 @@ def fog_nodes(request: Request, db: Session = Depends(get_db), current_user: Use
     })
 
 
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings(request: Request, db: Session = Depends(get_db), current_user: User = Depends(verify_token)):
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "current_user": current_user
     })
-
 
 @app.post("/settings/change-password", response_class=HTMLResponse)
 async def change_password(
