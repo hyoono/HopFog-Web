@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import aliased
+from sqlalchemy import func as sql_func
 
 from database.connection import engine
 from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage
@@ -154,10 +155,31 @@ def register(
 def dashboard(request: Request, db: Session = Depends(get_db), current_user: User= Depends(verify_token)):
     Sender = aliased(User)
 
-    fog_nodes_count = 2  # Replace with actual count from your data source
-    people_connected = 5  # Replace with actual count
-    storage_used = "7.8GB"  
-
+        # Fog device stats from database
+    fog_nodes_count = db.query(FogDevice).count()
+    active_fog_nodes = db.query(FogDevice).filter(FogDevice.status == "active").count()
+    inactive_fog_nodes = fog_nodes_count - active_fog_nodes
+    
+    # Total connected users across all fog devices
+    people_connected = db.query(sql_func.coalesce(sql_func.sum(FogDevice.connected_users), 0)).scalar()
+    
+    # Storage info - get total storage from all devices
+    devices = db.query(FogDevice).all()
+    storage_used = 0
+    storage_total = 0
+    for device in devices:
+        try:
+            if device.storage_used:
+                storage_used += float(device.storage_used.replace("GB", "").replace("MB", "").strip())
+            if device.storage_total:
+                storage_total += float(device.storage_total.replace("GB", "").replace("MB", "").strip())
+        except (ValueError, AttributeError):
+            pass
+    
+    storage_display = f"{storage_used:.1f}GB / {storage_total:.1f}GB" if storage_total > 0 else "N/A"
+    
+    # Total messages
+    total_messages = db.query(FogMessage).count()
 
     # Query messages with sender and recipients
     messages_query = db.query(
@@ -167,10 +189,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         Sender.username.label('sender_username')
     ).join(Sender, Message.sender_id == Sender.id).all()
     
-    # Format messages for template
     messages = []
     for msg in messages_query:
-        # Get recipients for this message
         recipients = db.query(User.username).join(
             MessageRecipient, User.id == MessageRecipient.user_id
         ).filter(MessageRecipient.message_id == msg.id).all()
@@ -183,16 +203,19 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
             'date': msg.created_at
         })
 
-        
-    
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "messages": messages,
-        "current_user": current_user,
         "fog_nodes_count": fog_nodes_count,
+        "active_fog_nodes": active_fog_nodes,
+        "inactive_fog_nodes": inactive_fog_nodes,
         "people_connected": people_connected,
-        "storage_used": storage_used
+        "storage_display": storage_display,
+        "total_messages": total_messages,
     })
+
+
+
     
 
 
@@ -264,37 +287,43 @@ def delete_message(message_id: int, db: Session = Depends(get_db)):
 
 @app.get("/fog_nodes", response_class=HTMLResponse)
 def fog_nodes(request: Request, db: Session = Depends(get_db), current_user: User = Depends(verify_token)):
-    # This is for connection when the technology is created
-    # For now this is for mock data
-    fog_nodes_data = [
-        {
-            'id': 1,
-            'name': 'Fog_1',
-            'people_connected': 2,
-            'storage_used': '3.9GB',
-            'storage_free': 'free',
-            'status': 'online',
-            'latency': '50ms',
-            'position': {'x': 300, 'y': 200}
-        },
-        {
-            'id': 2,
-            'name': 'Fog_2',
-            'people_connected': 2,
-            'storage_used': '3.9GB',
-            'storage_free': 'free',
-            'status': 'online',
-            'latency': '40ms',
-            'position': {'x': 900, 'y': 200}
-        }
-    ]
+    devices = db.query(FogDevice).all()
     
+    fog_nodes_data = []
+    total_connected_users = 0
+    
+    for device in devices:
+        message_count = db.query(FogMessage).filter(
+            FogMessage.device_id == device.id
+        ).count()
+        
+        total_connected_users += device.connected_users or 0
+        
+        fog_nodes_data.append({
+            'id': device.id,
+            'name': device.device_name,
+            'ip_address': device.ip_address or 'N/A',
+            'status': device.status,
+            'storage_total': device.storage_total or 'N/A',
+            'storage_used': device.storage_used or 'N/A',
+            'connected_users': device.connected_users or 0,
+            'message_count': message_count,
+        })
+    
+    total_devices = len(fog_nodes_data)
+    active_devices = len([d for d in fog_nodes_data if d['status'] == 'active'])
+    inactive_devices = total_devices - active_devices
+
+
     return templates.TemplateResponse("fog_nodes.html", {
         "request": request,
         "current_user": current_user,
-        "fog_nodes": fog_nodes_data
+        "fog_nodes": fog_nodes_data,
+        "total_devices": total_devices,
+        "active_devices": active_devices,
+        "inactive_devices": inactive_devices,
+        "total_connected_users": total_connected_users,
     })
-
 
 
 

@@ -7,146 +7,109 @@ from routes.auth import verify_token
 
 
 fog_router = APIRouter(
-    prefix="/api/fog-nodes",
-    tags=["Fog Nodes"]
+    prefix="/api/fog-devices",
+    tags=["Fog Device API"]
 )
 
-@fog_router.post("/send")
-def send_to_fog_node(
-    device_id: int = Form(...),
-    message_type: str = Form(...),  # command, alert, data, notification
-    content: str = Form(...),
+
+@fog_router.post("/register")
+def register_fog_device(
+    device_name: str = Form(...),
+    storage_total: str = Form(None),
+    storage_used: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    # Find the fog device
+    """
+    Fog device calls this on startup to register or reconnect.
+    """
+    existing = db.query(FogDevice).filter(FogDevice.device_name == device_name).first()
+    
+    if existing:
+        existing.status = "active"
+        if storage_total:
+            existing.storage_total = storage_total
+        if storage_used:
+            existing.storage_used = storage_used
+        db.commit()
+        return {
+            "success": True,
+            "message": "Device reconnected",
+            "device_id": existing.id,
+            "device_name": existing.device_name
+        }
+    new_device = FogDevice(
+    device_name=device_name,
+    status="active",
+    storage_total=storage_total,
+    storage_used=storage_used,
+    )
+    db.add(new_device)
+    db.commit()
+    db.refresh(new_device)
+    
+    return {
+        "success": True,
+        "message": "Device registered",
+        "device_id": new_device.id,
+        "device_name": new_device.device_name
+    }
+
+
+@fog_router.post("/{device_id}/disconnect")
+def fog_device_disconnect(
+    device_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Fog device calls this when shutting down.
+    """
     device = db.query(FogDevice).filter(FogDevice.id == device_id).first()
     
     if not device:
-        raise HTTPException(status_code=404, detail="Fog device not found")
+        raise HTTPException(status_code=404, detail="Device not found")
     
-    if device.status != "active":
-        raise HTTPException(status_code=400, detail="Fog device is not active")
-    
-    # Create message record
-    new_message = FogMessage(
-        device_id=device_id,
-        direction="outgoing",
-        message_type=message_type,
-        content=content,
-        status="sent",
-        created_at=datetime.utcnow()
-    )
-    
-    db.add(new_message)
-    db.commit()
-    db.refresh(new_message)
-    
-    return {
-        "success": True,
-        "message": "Message sent to fog node",
-        "data": {
-            "message_id": new_message.id,
-            "device_id": device_id,
-            "device_name": device.device_name,
-            "device_ip": device.ip_address,
-            "message_type": message_type,
-            "content": content,
-            "status": "sent",
-            "timestamp": new_message.created_at.isoformat()
-        }
-    }
-
-
-@fog_router.post("/broadcast")
-def broadcast_to_fog_nodes(
-    message_type: str = Form(...),
-    content: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(verify_token)
-):
-    # Only admins can broadcast
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can broadcast to all fog nodes")
-    
-    # Get all active fog devices
-    devices = db.query(FogDevice).filter(FogDevice.status == "active").all()
-    
-    if not devices:
-        raise HTTPException(status_code=404, detail="No active fog devices found")
-    
-    sent_messages = []
-    
-    for device in devices:
-        new_message = FogMessage(
-            device_id=device.id,
-            direction="outgoing",
-            message_type=message_type,
-            content=content,
-            status="sent",
-            created_at=datetime.utcnow()
-        )
-        db.add(new_message)
-        sent_messages.append({
-            "device_id": device.id,
-            "device_name": device.device_name
-        })
-    
+    device.status = "inactive"
+    device.connected_users = 0
     db.commit()
     
     return {
         "success": True,
-        "message": f"Message broadcast to {len(devices)} fog nodes",
-        "devices": sent_messages
+        "message": "Device disconnected",
+        "device_id": device_id
     }
 
-#----- Receive from fog node -----
-
-@fog_router.post("/receive")
-def receive_from_fog_node(
-    device_id: int = Form(...),
-    message_type: str = Form(...),  # status, sensor_data, alert, log
-    content: str = Form(...),
+@fog_router.get("/")
+def get_all_fog_devices(
     db: Session = Depends(get_db)
 ):
-    # Find the fog device
-    device = db.query(FogDevice).filter(FogDevice.id == device_id).first()
-    
-    if not device:
-        raise HTTPException(status_code=404, detail="Fog device not found")
-    
-    # Create incoming message record
-    new_message = FogMessage(
-        device_id=device_id,
-        direction="incoming",
-        message_type=message_type,
-        content=content,
-        status="received",
-        created_at=datetime.utcnow()
-    )
-    
-    db.add(new_message)
-    db.commit()
-    db.refresh(new_message)
+    """
+    Returns all fog devices with their current stats.
+    """
+    devices = db.query(FogDevice).all()
     
     return {
-        "success": True,
-        "message": "Data received from fog node",
-        "data": {
-            "message_id": new_message.id,
-            "device_id": device_id,
-            "message_type": message_type,
-            "status": "received",
-            "timestamp": new_message.created_at.isoformat()
-        }
+        "total": len(devices),
+        "active": len([d for d in devices if d.status == "active"]),
+        "inactive": len([d for d in devices if d.status != "active"]),
+        "devices": [
+            {
+                "id": d.id,
+                "device_name": d.device_name,
+                "status": d.status,
+                "storage_total": d.storage_total,
+                "storage_used": d.storage_used,
+                "connected_users": d.connected_users,
+            }
+            for d in devices
+        ]
     }
+
 
 @fog_router.post("{device_id}/status")
 def fog_node_status_update(
     device_id: int,
     status: str = Form(...),  # online, offline, busy, error
-    cpu_usage: float = Form(None),
     memory_usage: float = Form(None),
-    temperature: float = Form(None),
     db: Session = Depends(get_db)
 ):
     device = db.query(FogDevice).filter(FogDevice.id == device_id).first()
@@ -154,17 +117,15 @@ def fog_node_status_update(
     if not device:
         raise HTTPException(status_code=404, detail="Fog device not found")
     
-    # Update device status
     device.status = "active" if status == "online" else "inactive"
+    device.memory_usage = memory_usage
     
-    # Log the status update
     status_log = FogMessage(
         device_id=device_id,
         direction="incoming",
         message_type="status",
-        content=f"Status: {status}, CPU: {cpu_usage}%, Memory: {memory_usage}%, Temp: {temperature}°C",
+        content=f"Status: {status}, Memory: {memory_usage}%", 
         status="received",
-        created_at=datetime.utcnow()
     )
     
     db.add(status_log)
@@ -177,72 +138,27 @@ def fog_node_status_update(
         "status": status
     }
 
-#----Get messages-----
-
-@fog_router.get("/{device_id}/messages")
-def get_fog_node_messages(
+@fog_router.get("/specific/{device_id}")
+def get_fog_device(
     device_id: int,
-    direction: str = None,  # incoming, outgoing, or None for all
-    limit: int = 50,
     db: Session = Depends(get_db)
 ):
+    """
+    Returns details for a specific fog device.
+    """
     device = db.query(FogDevice).filter(FogDevice.id == device_id).first()
     
     if not device:
-        raise HTTPException(status_code=404, detail="Fog device not found")
+        raise HTTPException(status_code=404, detail="Device not found")
     
-    query = db.query(FogMessage).filter(FogMessage.device_id == device_id)
-    
-    if direction:
-        query = query.filter(FogMessage.direction == direction)
-    
-    messages = query.order_by(FogMessage.created_at.desc()).limit(limit).all()
+    message_count = db.query(FogMessage).filter(FogMessage.device_id == device_id).count()
     
     return {
-        "device_id": device_id,
+        "id": device.id,
         "device_name": device.device_name,
-        "count": len(messages),
-        "messages": [
-            {
-                "id": msg.id,
-                "direction": msg.direction,
-                "message_type": msg.message_type,
-                "content": msg.content,
-                "status": msg.status,
-                "timestamp": msg.created_at.isoformat() if msg.created_at else None
-            }
-            for msg in messages
-        ]
-    }
-
-
-@fog_router.get("/{device_id}/pending")
-def get_pending_messages(
-    device_id: int,
-    db: Session = Depends(get_db)
-):
-    device = db.query(FogDevice).filter(FogDevice.id == device_id).first()
-    
-    if not device:
-        raise HTTPException(status_code=404, detail="Fog device not found")
-    
-    # Get outgoing messages that haven't been delivered
-    pending = db.query(FogMessage).filter(
-        FogMessage.device_id == device_id,
-        FogMessage.direction == "outgoing",
-        FogMessage.status == "sent"
-    ).order_by(FogMessage.created_at.asc()).all()
-    
-    return {
-        "device_id": device_id,
-        "count": len(pending),
-        "messages": [
-            {
-                "id": msg.id,
-                "message_type": msg.message_type,
-                "content": msg.content,
-                "timestamp": msg.created_at.isoformat() if msg.created_at else None
-            }
-            for msg in pending
-        ]
+        "status": device.status,
+        "storage_total": device.storage_total,
+        "storage_used": device.storage_used,
+        "connected_users": device.connected_users,
+        "total_messages": message_count,
     }

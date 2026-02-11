@@ -9,8 +9,10 @@ class FogDevice(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     device_name = Column(String(100), unique=True)
-    location = Column(String(255), nullable=True)
-    status = Column(String(50))
+    status = Column(String(50), default="inactive")  
+    storage_total = Column(String(50), nullable=True)
+    storage_used = Column(String(50), nullable=True)
+    connected_users = Column(Integer, default=0)
 
 class FogMessage(Base):
     __tablename__ = "fog_messages"
