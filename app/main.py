@@ -22,6 +22,7 @@ from routes.admin_messaging import router as admin_messaging_router
 from routes.fog_nodes import fog_router
 from routes.bluetooth_api import router as bluetooth_router
 from routes.bluetooth_debug import router as bt_debug_router
+from routes.xbee_api import router as xbee_router
 
 
 
@@ -40,6 +41,7 @@ app.include_router(admin_messaging_router)
 app.include_router(fog_router)
 app.include_router(bluetooth_router)
 app.include_router(bt_debug_router)
+app.include_router(xbee_router)
 
 
 @app.on_event("startup")
