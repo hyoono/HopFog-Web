@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Bluetooth Outbox Debug</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; }
+    .controls { display:flex; gap:12px; margin-bottom: 16px; flex-wrap: wrap; }
+    input, select, button { padding: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+    th { background: #f3f3f3; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <h2>Bluetooth Outbox Debug</h2>
+
+  <div class="controls">
+    <label>Fog ID:
+      <input id="fogId" placeholder="fog-1" />
+    </label>
+
+    <label>Status:
+      <select id="status">
+        <option value="">(any)</option>
+        <option value="queued">queued</option>
+        <option value="sent">sent</option>
+        <option value="acked">acked</option>
+        <option value="failed">failed</option>
+        <option value="delivered">delivered</option>
+        <option value="read">read</option>
+      </select>
+    </label>
+
+    <label>Auto-refresh:
+      <select id="refresh">
+        <option value="0">Off</option>
+        <option value="2000">2s</option>
+        <option value="5000" selected>5s</option>
+        <option value="10000">10s</option>
+      </select>
+    </label>
+
+    <button onclick="loadData()">Refresh Now</button>
+  </div>
+
+  <div id="summary"></div>
+  <br/>
+
+  <table>
+    <thead>
+      <tr>
+        <th>bt_msg_id</th>
+        <th>fog_id</th>
+        <th>channel</th>
+        <th>priority</th>
+        <th>status</th>
+        <th>payload</th>
+        <th>queued_at</th>
+        <th>updated_at</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+<script>
+let timer = null;
+
+function fmtTime(ts){
+  if(!ts) return "";
+  const d = new Date(ts * 1000);
+  return d.toLocaleString();
+}
+
+async function loadData(){
+  const fogId = document.getElementById("fogId").value.trim();
+  const status = document.getElementById("status").value;
+
+  let url = "/api/bluetooth/outbox/list";
+  const params = [];
+  if (fogId) params.push("fog_id=" + encodeURIComponent(fogId));
+  if (status) params.push("status=" + encodeURIComponent(status));
+  if (params.length) url += "?" + params.join("&");
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  document.getElementById("summary").innerHTML =
+    `<b>Count:</b> ${data.count} &nbsp;&nbsp; <span class="mono">${url}</span>`;
+
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = "";
+
+  for(const m of data.messages){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="mono">${m.bt_msg_id || ""}</td>
+      <td>${m.fog_id || ""}</td>
+      <td>${m.channel || ""}</td>
+      <td>${m.priority ?? ""}</td>
+      <td><b>${m.status || ""}</b></td>
+      <td class="mono"><pre style="margin:0; white-space:pre-wrap;">${JSON.stringify(m.payload, null, 2)}</pre></td>
+      <td>${fmtTime(m.queued_at)}</td>
+      <td>${fmtTime(m.updated_at)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function setupAutoRefresh(){
+  if (timer) clearInterval(timer);
+  const ms = parseInt(document.getElementById("refresh").value, 10);
+  if (ms > 0) timer = setInterval(loadData, ms);
+}
+
+document.getElementById("refresh").addEventListener("change", setupAutoRefresh);
+loadData();
+setupAutoRefresh();
+</script>
+
+</body>
+</html>
