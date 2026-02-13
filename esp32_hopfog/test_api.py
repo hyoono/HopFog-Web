@@ -25,7 +25,7 @@ def pretty_print_json(data):
     if isinstance(data, str):
         try:
             data = json.loads(data)
-        except:
+        except json.JSONDecodeError:
             print(data)
             return
     print(json.dumps(data, indent=2))
@@ -53,7 +53,7 @@ def test_get_fognodes():
             pretty_print_json(response.json())
         else:
             print(f"Error: {response.text}")
-        return True
+        return response.status_code == 200
     except Exception as e:
         print(f"Error: {e}")
         return False
@@ -77,7 +77,7 @@ def test_add_fognode():
             pretty_print_json(response.json())
         else:
             print(f"Error: {response.text}")
-        return True
+        return response.status_code == 200
     except Exception as e:
         print(f"Error: {e}")
         return False
@@ -91,7 +91,7 @@ def test_get_messages():
             pretty_print_json(response.json())
         else:
             print(f"Error: {response.text}")
-        return True
+        return response.status_code == 200
     except Exception as e:
         print(f"Error: {e}")
         return False
@@ -115,7 +115,7 @@ def test_add_message():
             pretty_print_json(response.json())
         else:
             print(f"Error: {response.text}")
-        return True
+        return response.status_code == 200
     except Exception as e:
         print(f"Error: {e}")
         return False
@@ -131,7 +131,7 @@ def test_camera():
             print(f"Camera image saved: test_camera.jpg ({len(response.content)} bytes)")
         else:
             print(f"Error: {response.text}")
-        return True
+        return response.status_code == 200
     except Exception as e:
         print(f"Error: {e}")
         return False

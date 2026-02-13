@@ -59,3 +59,9 @@ Thumbs.db
 
 # Alembic
 alembic/versions/*.py[cod]
+
+# ESP32 Config
+esp32_hopfog/config.h
+
+# Test outputs
+test_camera.jpg

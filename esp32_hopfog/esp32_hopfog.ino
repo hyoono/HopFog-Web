@@ -26,11 +26,14 @@
 // Configuration
 // ========================================
 
-// WiFi credentials - Change these to match your network
+// WiFi credentials - CHANGE THESE BEFORE DEPLOYING!
+// For production, move these to a config.h file excluded from git
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
-// Admin credentials - Change these for security
+// Admin credentials - CHANGE THESE BEFORE DEPLOYING!
+// Default credentials are for initial setup only
+// TODO: Implement password change via web interface
 const char* admin_username = "admin";
 const char* admin_password = "admin123";
 
@@ -751,8 +754,12 @@ void handleLogin() {
     StaticJsonDocument<200> doc;
     
     if (username == admin_username && password == admin_password) {
-        // Generate simple token
-        sessionToken = String(random(100000, 999999));
+        // Generate session token using esp_random for better security
+        char token_buffer[32];
+        uint32_t rand1 = esp_random();
+        uint32_t rand2 = esp_random();
+        snprintf(token_buffer, sizeof(token_buffer), "%08x%08x", rand1, rand2);
+        sessionToken = String(token_buffer);
         authenticated = true;
         
         doc["success"] = true;
@@ -773,6 +780,12 @@ void handleDashboard() {
     String token = server.header("Authorization");
     if (token == "" && server.hasArg("token")) {
         token = server.arg("token");
+    }
+    
+    // Validate token before serving dashboard
+    if (token != sessionToken || !authenticated) {
+        server.send(401, "text/plain", "Unauthorized - Please login first");
+        return;
     }
     
     server.send_P(200, "text/html", DASHBOARD_HTML);
