@@ -7,7 +7,7 @@ from digi.xbee.devices import XBeeDevice
 class XBeeService:
 
     def __init__(self):
-        self.port = os.getenv("XBEE_PORT", "COM5")
+        self.port = os.getenv("XBEE_PORT", "COM5") #change for every device
         self.baud = int(os.getenv("XBEE_BAUD", "9600"))
         self._lock = threading.Lock()
         self.device: XBeeDevice | None = None
