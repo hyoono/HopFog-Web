@@ -15,16 +15,30 @@ def info():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/discover")
-def discover(timeout_s: int = 8):
-    try:
-        return {"devices": svc.discover(timeout_s=timeout_s)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.post("/test-broadcast")
 def test_broadcast(req: BroadcastReq):
     try:
         return svc.send_broadcast(req.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/broadcast")
+def broadcast(req: BroadcastReq):
+    try:
+        return svc.send_broadcast(req.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/received")
+def received():
+    try:
+        return {"messages": svc.get_received()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/received/clear")
+def clear_received():
+    try:
+        return svc.clear_received()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

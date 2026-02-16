@@ -1,23 +1,55 @@
-from digi.xbee.devices import XBeeDevice
-from digi.xbee.exception import XBeeException
+# services/xbee_service.py
 import os
+import threading
 import time
+from digi.xbee.devices import XBeeDevice
 
 class XBeeService:
+
     def __init__(self):
-        self.port = os.getenv("XBEE_PORT", "COM5")
+        self.port = os.getenv("XBEE_PORT", "COM5") #change for every device
         self.baud = int(os.getenv("XBEE_BAUD", "9600"))
-        self.device = None
+        self._lock = threading.Lock()
+        self.device: XBeeDevice | None = None
+
+        # ✅ in-memory RX buffer (for testing)
+        self._rx = []  # list of dicts
 
     def open(self):
-        if self.device and self.device.is_open():
-            return
-        self.device = XBeeDevice(self.port, self.baud)
-        self.device.open()
+        with self._lock:
+            if self.device and self.device.is_open():
+                return
+            self.device = XBeeDevice(self.port, self.baud)
+            self.device.open()
+
+            # ✅ attach callback once after opening
+            self.device.add_data_received_callback(self._on_receive)
+
+    def _on_receive(self, xbee_message):
+        """Called automatically when RF data is received."""
+        try:
+            text = xbee_message.data.decode(errors="replace")
+        except Exception:
+            text = "<decode error>"
+
+        item = {
+            "text": text,
+            "from_64bit": str(xbee_message.remote_device.get_64bit_addr()),
+            "ts": time.time(),
+        }
+
+        self._rx.append(item)
+
+        # keep buffer from growing forever
+        if len(self._rx) > 200:
+            self._rx = self._rx[-200:]
+
+        print("XBee RX:", item)
 
     def close(self):
-        if self.device and self.device.is_open():
-            self.device.close()
+        with self._lock:
+            if self.device and self.device.is_open():
+                self.device.close()
 
     def info(self):
         self.open()
@@ -28,22 +60,15 @@ class XBeeService:
             "node_id": self.device.get_node_id(),
         }
 
-    def discover(self, timeout_s: int = 8):
-        self.open()
-        net = self.device.get_network()
-        net.set_discovery_timeout(timeout_s)
-        net.clear()
-        devices = net.discover_devices()
-        out = []
-        if devices:
-            for d in devices:
-                out.append({
-                    "node_id": d.get_node_id(),
-                    "64bit_addr": str(d.get_64bit_addr()),
-                })
-        return out
-
     def send_broadcast(self, text: str):
         self.open()
         self.device.send_data_broadcast(text)
-        return {"sent": True, "text": text, "ts": time.time()}
+        return {"sent": True, "text": text}
+
+    # ✅ expose RX buffer for API
+    def get_received(self):
+        return list(self._rx)
+
+    def clear_received(self):
+        self._rx.clear()
+        return {"cleared": True}
