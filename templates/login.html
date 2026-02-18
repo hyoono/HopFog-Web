@@ -20,39 +20,62 @@
             <main>
                 <div class="container">
                     <div class="row justify-content-center">
-                        <div class="col-lg-5">
-                            <div class="card shadow-lg border-0 rounded-lg mt-5">
-                                <div class="card-header">
-                                    <h3 class="text-center font-weight-light my-4">Login</h3>
-                                </div>
-                                <div class="card-body">
-                                    {% if error %}
-                                    <div
-                                        style="background-color: #f8d7da; color: #721c24; padding: 10px 15px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #f5c6cb; text-align: center;">
-                                        {{ error }}
+                        <div class="col-lg-10 col-xl-9">
+                            <div class="card shadow-lg border-0 rounded-lg mt-5 notebook-card">
+                                <div class="row g-0">
+                                    <!-- Left Side - Login -->
+                                     <div class="col-md-6 notebook-left">
+                                        <h3 class="text-center font-weight-light mb-5">
+                                            <i class="fas fa-sign-in-alt me-2"></i>Admin Login
+                                        </h3>
+                                        {% if error %}
+                                        <div
+                                            style="background-color: #f8d7da; color: #721c24; padding: 10px 15px; border-radius: 5px; margin-bottom: 15px; border: 1px solid #f5c6cb; text-align: center;">
+                                            {{ error }}
+                                        </div>
+                                        {% endif %}
+                                        <form method="POST" action="/login">
+                                            <div class="form-floating mb-4">
+                                                <input class="form-control" id="inputEmail" type="email" name="email"
+                                                    placeholder="name@example.com" required />
+                                                <label for="inputEmail">Email</label>
+                                            </div>
+                                            <div class="form-floating mb-4">
+                                                <input class="form-control" id="inputPassword" type="password"
+                                                    name="password" placeholder="Password" required />
+                                                <label for="inputPassword">Password</label>
+                                            </div>
+                                            <div class="d-flex align-items-center justify-content-between mt-4 mb-3">
+                                                <a class="small" href="#" data-bs-toggle="modal"
+                                                    data-bs-target="#forgotPasswordModal">Forgot Password?</a>
+                                                <button class="btn btn-primary px-4" type="submit">Login</button>
+                                            </div>
+                                        </form>
+                                        <hr class="my-4">
+                                        <div class="text-center">
+                                            <div class="small"><a href="{{ url_for('register') }}">Need an account? Sign
+                                                    up!</a></div>
+                                        </div>
                                     </div>
-                                    {% endif %}
 
-                                    <form method="POST" action="/login">
-                                        <div class="form-floating mb-3">
-                                            <input class="form-control" id="inputEmail" type="email" name="email"
-                                                placeholder="name@example.com" required />
-                                            <label for="inputEmail">Email</label>
-                                        </div>
-                                        <div class="form-floating mb-3">
-                                            <input class="form-control" id="inputPassword" type="password"
-                                                name="password" placeholder="Password" required />
-                                            <label for="inputPassword">Password</label>
-                                        </div>
-                                        <div class="d-flex align-items-center justify-content-between mt-4 mb-0">
-                                            <a class="small" href="#" data-bs-toggle="modal"
-                                                data-bs-target="#forgotPasswordModal">Forgot Password?</a>
-                                            <button class="btn btn-primary" type="submit">Login</button>
-                                        </div>
-                                    </form>
-                                </div>
-                                <div class="card-footer text-center py-3">
-                                    <div class="small"><a href="{{ url_for('register') }}">Need an account? Sign up!</a>
+                                    <!-- Right Side - Download -->
+                                    <div class="col-md-6 notebook-right">
+                                        <!-- <div class="download-icon">
+                                            <i class="fab fa-android"></i>
+                                        </div> -->
+                                        <img src="{{ url_for('static', path='images/HopFog-Logo.png') }}"
+                                            alt="HopFog Logo" class="notebook-logo">
+                                        <h4 class="fw-bold mb-2">HopFog App</h4>
+                                        <p class="notebook-right-desc">
+                                            Download the HopFog mobile app and stay connected on the go.
+                                        </p>
+                                        <a href="{{ url_for('static', path='/') }}"
+                                            class="btn btn-download" download>
+                                            <i class="fas fa-download me-2"></i>Download APK
+                                        </a>
+                                        <p class="notebook-right-info">
+                                            <i class="fas fa-info-circle me-1"></i>Requires Android 8.0+
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -118,9 +141,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"
-        crossorigin="anonymous"></script>
-    <script src="js/scripts.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
     <script>
         document.getElementById('forgotPasswordForm').addEventListener('submit', function (e) {
             e.preventDefault();
@@ -131,7 +152,6 @@
             const messageDiv = document.getElementById('forgotPasswordMessage');
             const submitBtn = document.getElementById('resetPasswordBtn');
 
-            // Check if passwords match
             if (newPassword !== confirmPassword) {
                 messageDiv.className = 'alert alert-danger';
                 messageDiv.innerHTML = '<i class="fas fa-exclamation-circle me-2"></i>Passwords do not match!';
@@ -157,10 +177,8 @@
                         messageDiv.innerHTML = '<i class="fas fa-check-circle me-2"></i>' + data.message;
                         messageDiv.style.display = 'block';
 
-                        // Clear form
                         document.getElementById('forgotPasswordForm').reset();
 
-                        // Close modal after 2 seconds
                         setTimeout(() => {
                             const modal = bootstrap.Modal.getInstance(document.getElementById('forgotPasswordModal'));
                             modal.hide();
