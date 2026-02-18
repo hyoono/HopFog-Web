@@ -217,6 +217,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
+        "current_user": current_user,
         "messages": messages,
         "fog_nodes_count": fog_nodes_count,
         "active_fog_nodes": active_fog_nodes,
