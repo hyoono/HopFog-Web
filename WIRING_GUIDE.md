@@ -1,8 +1,8 @@
-# ESP32-CAM Wiring Guide
+# ESP32-CAM Wiring Guide (No Camera)
 
 ## Overview
 
-This guide shows how to connect your ESP32-CAM for programming and operation.
+This guide shows how to connect your ESP32-CAM for programming and operation. Camera functionality is not used in this version.
 
 ## Components Needed
 
@@ -31,7 +31,7 @@ IO0     ────────── GND (only for programming)
 ### Important Notes:
 - **IO0 to GND**: This connection is ONLY needed during code upload
 - **RX/TX are CROSSED**: ESP32 U0R connects to FTDI TX, and vice versa
-- **Use 5V**: The ESP32-CAM needs 5V, not 3.3V (especially with camera)
+- **Use 5V**: The ESP32-CAM needs 5V, not 3.3V for stable operation
 - **Remove IO0-GND**: After upload, disconnect IO0 from GND before pressing RESET
 
 ### Detailed Connections:
@@ -167,13 +167,13 @@ For standalone operation, you only need power:
 2. Press RESET button
 3. Check connections are secure
 
-### Problem: Camera or SD Card Not Working
+### Problem: SD Card Not Working
 
 **Solutions:**
-1. Camera: Check board selection is "AI Thinker ESP32-CAM"
+1. Check board selection is "AI Thinker ESP32-CAM"
 2. SD Card: Ensure formatted as FAT32
 3. SD Card: Try a different card (some are incompatible)
-4. Power: Ensure adequate 5V supply (camera needs power)
+4. Power: Ensure adequate 5V supply
 
 ---
 
@@ -181,12 +181,11 @@ For standalone operation, you only need power:
 
 ⚠️ **Important Safety Information:**
 
-1. **Never use 3.3V**: The ESP32-CAM with camera requires 5V
+1. **Use 5V**: The ESP32-CAM requires 5V for stable operation
 2. **Check Polarity**: Wrong polarity can damage the board
 3. **Current Requirements**: Provide at least 500mA at 5V
 4. **Hot Surface**: The ESP32 chip can get warm during operation
 5. **Static Electricity**: Handle the board by its edges to avoid ESD damage
-6. **Flash LED**: GPIO4 controls a high-power flash LED - don't stare at it directly
 
 ---
 

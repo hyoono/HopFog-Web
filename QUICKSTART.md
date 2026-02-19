@@ -1,6 +1,8 @@
-# HopFog ESP32-CAM Quick Start Guide
+# HopFog ESP32-CAM Quick Start Guide (No Camera)
 
 Get your HopFog ESP32-CAM web server running in 15 minutes!
+
+**Note:** This version uses the ESP32-CAM hardware but does not use the camera functionality.
 
 ## 📋 What You Need
 
@@ -110,9 +112,6 @@ curl -X POST http://192.168.1.100/api/messages/add \
 
 # Get statistics
 curl http://192.168.1.100/api/stats
-
-# Get camera image
-curl http://192.168.1.100/camera -o photo.jpg
 ```
 
 ## ❓ Troubleshooting
@@ -169,9 +168,8 @@ Then re-upload the code.
 Once running:
 1. Change default credentials
 2. Add your fog nodes via API
-3. Test camera functionality
-4. Set up your HopFog network
-5. Monitor from the dashboard
+3. Set up your HopFog network
+4. Monitor from the dashboard
 
 ## 📞 Need Help?
 
