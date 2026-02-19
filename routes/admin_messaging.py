@@ -314,12 +314,12 @@ def sos_console(
         .all()
     )
 
-    return templates.TemplateResponse("admin_sos.html"), {
+    return templates.TemplateResponse("admin_sos.html", {
         "request": request,
         "current_user": current_user,
         "sos_list": sos_list,
         "incoming_sos_requests": incoming_sos_requests,
-    }
+    })
 @router.post("/sos-requests/{request_id}/escalate")
 def escalate_sos_request(
     request_id: int,
