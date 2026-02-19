@@ -12,9 +12,10 @@ from sqlalchemy import func, desc
 from database.deps import get_db
 from database.models import (
     User, Role, UserRole,
-    BroadcastMessage, BroadcastRecipient, BroadcastEvent
+    BroadcastMessage, BroadcastRecipient, BroadcastEvent, ResidentAdminMessage
 )
 from routes.auth import verify_token
+from services.broadcast_dispatcher import dispatcher
 
 templates = Jinja2Templates(directory="templates")
 
@@ -188,6 +189,15 @@ def create_broadcast(
         db.add(BroadcastRecipient(broadcast_id=b.id, user_id=u.id, status=("queued" if status == "queued" else "queued")))
     db.commit()
 
+    # Priority logic:
+    # - If queued SOS, dispatch immediately.
+    # - Otherwise, wake the dispatcher so it can pick up newly queued items ASAP.
+    if status == "queued":
+        if msg_type == "sos":
+            dispatcher.dispatch_now(b.id)
+        else:
+            dispatcher.wake()
+
     return RedirectResponse(url="/admin/messaging/broadcasts?success=Broadcast%20created", status_code=303)
 
 
@@ -295,11 +305,129 @@ def sos_console(
         .all()
     )
 
+    incoming_sos_requests = (
+        db.query(ResidentAdminMessage)
+        .filter(ResidentAdminMessage.kind == "sos_request")
+        .filter(ResidentAdminMessage.status.in_(["queued", "delivered", "read"]))
+        .order_by(desc(ResidentAdminMessage.priority), desc(ResidentAdminMessage.created_at))
+        .limit(100)
+        .all()
+    )
+
     return templates.TemplateResponse("admin_sos.html", {
         "request": request,
         "current_user": current_user,
         "sos_list": sos_list,
+        "incoming_sos_requests": incoming_sos_requests,
     })
+@router.post("/sos-requests/{request_id}/escalate")
+def escalate_sos_request(
+    request_id: int,
+    escalate_to: str = Form("sos"),  # sos | alert | announcement
+    subject: Optional[str] = Form(None),
+    body: Optional[str] = Form(None),
+    ttl_hours: int = Form(24),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(verify_token),
+):
+    """
+    Resident -> Admin SOS request triage:
+    - admin decides whether to broadcast it (announcement/alert/sos) or handle privately (handled endpoint can be added later)
+    """
+    _require_admin(db, current_user)
+
+    r = db.query(ResidentAdminMessage).filter(ResidentAdminMessage.id == request_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="SOS request not found")
+    if r.kind != "sos_request":
+        raise HTTPException(status_code=400, detail="Only SOS requests can be escalated")
+
+    escalate_to = (escalate_to or "sos").lower().strip()
+    if escalate_to not in {"sos", "alert", "announcement"}:
+        escalate_to = "sos"
+
+    if ttl_hours < 1:
+        ttl_hours = 1
+    if ttl_hours > 24 * 30:
+        ttl_hours = 24 * 30
+
+    # Prepare broadcast content (default: reuse resident content)
+    b_subject = (subject.strip() if subject else (r.subject or "Resident SOS Request"))
+    b_body = (body.strip() if body else r.body)
+
+    severity = "info"
+    if escalate_to == "alert":
+        severity = "warning"
+    if escalate_to == "sos":
+        severity = "critical"
+
+    ttl_expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+    status = "queued"
+    priority = _priority_for(escalate_to)
+
+    b = BroadcastMessage(
+        created_by=current_user.id,
+        msg_type=escalate_to,
+        severity=severity,
+        audience="all_residents",
+        subject=b_subject,
+        body=b_body,
+        status=status,
+        priority=priority,
+        ttl_expires_at=ttl_expires_at,
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+
+    db.add(BroadcastEvent(broadcast_id=b.id, event_type="created", message=f"Created from SOS request #{r.id}"))
+    db.add(BroadcastEvent(broadcast_id=b.id, event_type="queued", message="Queued for dispatch"))
+    db.commit()
+
+    # Pre-create recipients for tracking
+    residents = _get_residents(db)
+    for u in residents:
+        db.add(BroadcastRecipient(broadcast_id=b.id, user_id=u.id, status="queued"))
+    db.commit()
+
+    # Mark SOS request handled
+    r.status = "resolved"
+    r.admin_action = f"escalated_to_{escalate_to}"
+    r.handled_by = current_user.id
+    r.handled_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # Dispatch priority logic (only admin broadcast SOS bypasses normal waiting)
+    if escalate_to == "sos":
+        dispatcher.dispatch_now(b.id)
+    else:
+        dispatcher.wake()
+
+    return RedirectResponse(url="/admin/messaging/sos?success=Escalated", status_code=303)
+
+
+@router.post("/sos-requests/{request_id}/dismiss")
+def dismiss_sos_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(verify_token),
+):
+    _require_admin(db, current_user)
+
+    r = db.query(ResidentAdminMessage).filter(ResidentAdminMessage.id == request_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="SOS request not found")
+
+    r.status = "dismissed"
+    r.admin_action = "handled_privately"
+    r.handled_by = current_user.id
+    r.handled_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return RedirectResponse(url="/admin/messaging/sos?success=Dismissed", status_code=303)
+
+
+    
 
 
 @router.get("/queue", response_class=HTMLResponse)
@@ -313,7 +441,7 @@ def queue_monitor(
     queued_items = (
         db.query(BroadcastMessage)
         .filter(BroadcastMessage.status == "queued")
-        .order_by(desc(BroadcastMessage.priority), desc(BroadcastMessage.created_at))
+        .order_by(desc(BroadcastMessage.priority), BroadcastMessage.created_at.asc())
         .limit(200)
         .all()
     )
