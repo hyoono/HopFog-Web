@@ -1,10 +1,10 @@
-# HopFog ESP32-CAM Web Server
+# HopFog ESP32-CAM Web Server (No Camera)
 
-This is a conversion of the HopFog-Web FastAPI project to run on an ESP32-CAM microcontroller. The ESP32-CAM now acts as a standalone web server for the HopFog admin interface.
+This is a conversion of the HopFog-Web FastAPI project to run on an ESP32-CAM microcontroller. The ESP32-CAM acts as a standalone web server for the HopFog admin interface without using the camera functionality.
 
 ## Hardware Requirements
 
-- **ESP32-CAM** (AI-Thinker model recommended)
+- **ESP32-CAM** (AI-Thinker model - camera not used)
 - **MicroSD Card** (Class 10, 4GB-32GB recommended for database storage)
 - **FTDI Programmer** or USB-to-TTL adapter for uploading code
 - **5V Power Supply** (USB or external)
@@ -14,7 +14,6 @@ This is a conversion of the HopFog-Web FastAPI project to run on an ESP32-CAM mi
 
 - ✅ WiFi web server running on ESP32-CAM
 - ✅ Web-based admin dashboard
-- ✅ Camera streaming capabilities
 - ✅ Basic authentication system
 - ✅ Real-time statistics display
 - ✅ Fog node management interface
@@ -22,6 +21,8 @@ This is a conversion of the HopFog-Web FastAPI project to run on an ESP32-CAM mi
 - ✅ Message logging with persistence
 - ✅ User management on SD card
 - ✅ Lightweight and embedded-friendly
+
+**Note:** This version does not use the camera hardware on the ESP32-CAM module.
 
 ## Installation
 
@@ -46,7 +47,7 @@ Go to **Tools → Manage Libraries** and install:
 
 - **ArduinoJson** by Benoit Blanchon (version 6.x)
 
-Other libraries (WiFi, WebServer, SPIFFS, esp_camera) are included with the ESP32 board package.
+Other libraries (WiFi, WebServer, SPIFFS, SD_MMC) are included with the ESP32 board package.
 
 ### 4. Configure WiFi Credentials
 
@@ -119,7 +120,6 @@ After uploading, power on the ESP32-CAM (disconnect IO0 from GND first, then pre
 The web dashboard provides:
 - **Statistics**: View fog node count, active nodes, connected users, and messages
 - **ESP32-CAM Status**: IP address, free memory, uptime, **SD card status**
-- **Camera Access**: Direct camera image capture endpoint
 - **Real-time Updates**: Dashboard refreshes every 5 seconds
 - **Persistent Storage**: All data is saved to the SD card and survives reboots
 
@@ -238,7 +238,6 @@ The ESP32-CAM web server provides the following endpoints:
 | `/api/fognodes/add` | POST | Add a new fog node |
 | `/api/messages` | GET | Get all messages (JSON) |
 | `/api/messages/add` | POST | Add a new message |
-| `/camera` | GET | Capture and return camera image (JPEG) |
 
 ### Example API Usage
 
@@ -261,22 +260,23 @@ curl http://192.168.1.100/api/stats
 
 ## Configuration
 
-### Camera Settings
+### WiFi Settings
 
-The camera is configured for the AI-Thinker ESP32-CAM module. If you have a different model, you may need to adjust the pin definitions in the code:
+Configure your WiFi credentials in the code:
 
 ```cpp
-#define PWDN_GPIO_NUM     32
-#define RESET_GPIO_NUM    -1
-#define XCLK_GPIO_NUM      0
-// ... etc
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
 ```
 
-### Frame Size and Quality
+### Admin Credentials
 
-The camera automatically selects optimal settings based on available PSRAM:
-- **With PSRAM**: UXGA resolution, quality 10
-- **Without PSRAM**: SVGA resolution, quality 12
+Update the default admin credentials before deployment:
+
+```cpp
+const char* admin_username = "admin";
+const char* admin_password = "admin123";
+```
 
 ## Troubleshooting
 
@@ -285,12 +285,6 @@ The camera automatically selects optimal settings based on available PSRAM:
 - Verify your WiFi SSID and password are correct
 - Ensure the ESP32-CAM is within WiFi range
 - Try using a 2.4GHz network (ESP32 doesn't support 5GHz)
-
-### Camera Initialization Failed
-
-- Check that you selected the correct board (AI Thinker ESP32-CAM)
-- Verify the camera module is properly connected
-- Try pressing the RESET button
 
 ### SD Card Not Detected
 
@@ -378,7 +372,7 @@ To add more features to the ESP32-CAM version:
 ## Power Requirements
 
 - **Voltage**: 5V (via USB or external supply)
-- **Current**: 500mA minimum (camera operation requires significant power)
+- **Current**: 500mA minimum recommended for stable operation
 - **Note**: Some USB ports may not provide enough current; use a powered USB hub or external 5V supply if experiencing brownouts
 
 ## Security Considerations
@@ -394,7 +388,7 @@ To add more features to the ESP32-CAM version:
 ## Performance
 
 - **Response Time**: ~100-300ms for page loads
-- **Camera Capture**: ~50-100ms per frame
+- **API Response**: ~50-150ms
 - **Concurrent Connections**: 4-5 maximum (ESP32 limitation)
 - **Uptime**: Can run continuously for weeks (recommend weekly reboots)
 

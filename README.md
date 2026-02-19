@@ -67,13 +67,13 @@ HopFog-Web/
 
 ---
 
-## 🎯 Version 2: ESP32 Web Server (New)
+## 🎯 Version 2: ESP32-CAM Web Server (No Camera)
 
 ### Overview
-A completely redesigned embedded version that runs directly on an ESP32 microcontroller. The ESP32 acts as a standalone web server.
+A completely redesigned embedded version that runs directly on an ESP32-CAM microcontroller without using the camera functionality. The ESP32-CAM acts as a standalone web server.
 
 ### Features
-- Runs on ESP32 hardware (including ESP32-CAM without camera)
+- Runs on ESP32-CAM hardware (AI-Thinker) - camera not used
 - WiFi web server
 - **SD Card persistent database**
 - Simplified web interface
@@ -83,10 +83,11 @@ A completely redesigned embedded version that runs directly on an ESP32 microcon
 - Low power consumption
 - Portable and embedded
 
-### Why ESP32?
+### Why ESP32-CAM (without camera)?
 - **Cost-effective**: ~$10 device vs dedicated server
 - **Portable**: Battery-powered option
 - **WiFi Built-in**: Direct network connectivity
+- **SD Card Slot**: Built-in storage for database
 - **Low Power**: Can run 24/7 on minimal power
 - **Standalone**: No external dependencies
 
@@ -101,17 +102,17 @@ See **[ESP32_README.md](ESP32_README.md)** for detailed instructions.
 4. Open `esp32_hopfog/esp32_hopfog.ino`
 5. Configure WiFi credentials
 6. Insert microSD card (for persistent storage)
-7. Upload to ESP32
-8. Access web interface at ESP32's IP address
+7. Upload to ESP32-CAM
+8. Access web interface at ESP32-CAM's IP address
 
 ### Hardware Requirements
-- ESP32 module (ESP32-CAM can be used without camera functionality)
+- ESP32-CAM module (AI-Thinker) - camera functionality not used
 - **MicroSD Card (4-32GB, Class 10)**
 - FTDI programmer for uploading
 - 5V power supply
 
 ### API Testing
-Test the ESP32 API with provided scripts:
+Test the ESP32-CAM API with provided scripts:
 
 ```bash
 # Using Python (recommended)
@@ -126,15 +127,16 @@ python test_api.py 192.168.1.100
 
 ## 🔄 Comparison
 
-| Feature | FastAPI Version | ESP32 Version |
+| Feature | FastAPI Version | ESP32-CAM Version |
 |---------|----------------|-------------------|
-| **Platform** | Server/Computer | ESP32 Microcontroller |
+| **Platform** | Server/Computer | ESP32-CAM Microcontroller |
 | **Language** | Python | C++ (Arduino) |
 | **Database** | PostgreSQL/SQLite | **JSON files on SD Card** |
 | **Persistence** | Always | **SD Card required** |
 | **Authentication** | JWT + bcrypt | Simple token |
 | **Power Usage** | High (server) | Low (5V, <500mA) |
 | **Cost** | High (server) | Low (~$10 hardware) |
+| **Camera** | Not included | Hardware present, not used |
 | **Portability** | Requires server | Fully portable |
 | **Setup** | Complex | Simple |
 | **API** | Full REST API | Simplified REST API |
@@ -153,11 +155,12 @@ python test_api.py 192.168.1.100
 - Existing server infrastructure
 - Integration with other systems
 
-### Use ESP32 Version if you need:
+### Use ESP32-CAM Version if you need:
 - Low-cost deployment
 - Edge computing
 - Portable/mobile deployment
 - Battery-powered option
+- Built-in SD card slot
 - Standalone operation
 - IoT integration
 - Quick prototyping
@@ -174,12 +177,12 @@ HopFog-Web/
 ├── services/              # Business logic
 ├── static/                # CSS, JS, images (FastAPI)
 ├── templates/             # HTML templates (FastAPI)
-├── esp32_hopfog/          # ESP32 version
+├── esp32_hopfog/          # ESP32-CAM version (no camera)
 │   ├── esp32_hopfog.ino   # Main Arduino sketch
 │   ├── test_api.py        # Python API test script
 │   └── test_api.sh        # Bash API test script
 ├── README.md              # This file
-└── ESP32_README.md        # Detailed ESP32 documentation
+└── ESP32_README.md        # Detailed ESP32-CAM documentation
 ```
 
 ---
@@ -199,10 +202,10 @@ pip install fastapi uvicorn sqlalchemy python-dotenv bcrypt
 uvicorn app.main:app --reload
 ```
 
-### ESP32 Development
+### ESP32-CAM Development
 1. Open `esp32_hopfog/esp32_hopfog.ino` in Arduino IDE
 2. Make changes
-3. Upload to ESP32
+3. Upload to ESP32-CAM
 4. Monitor Serial output (115200 baud)
 5. Test API with provided scripts
 
@@ -211,7 +214,7 @@ uvicorn app.main:app --reload
 ## 📚 Documentation
 
 - **FastAPI Version**: See code comments in `app/main.py`
-- **ESP32 Version**: See [ESP32_README.md](ESP32_README.md)
+- **ESP32-CAM Version**: See [ESP32_README.md](ESP32_README.md)
 
 ---
 
@@ -224,11 +227,12 @@ Contributions are welcome for both versions! Please follow the existing code sty
 - Add tests for new features
 - Update documentation
 
-### For ESP32 Version:
+### For ESP32-CAM Version:
 - Follow Arduino coding style
 - Test on actual hardware when possible
 - Keep memory usage minimal
 - Update ESP32_README.md
+- Note: Camera functionality is not used
 
 ---
 

@@ -1,16 +1,17 @@
 #!/bin/bash
 
-# HopFog ESP32 API Test Script
-# This script helps test the API endpoints of the ESP32 web server
+# HopFog ESP32-CAM API Test Script (No Camera)
+# This script helps test the API endpoints of the ESP32-CAM web server
+# Camera functionality is not included in this version.
 
-# Configuration - Update this with your ESP32's IP address
+# Configuration - Update this with your ESP32-CAM's IP address
 ESP32_IP="192.168.1.100"
 BASE_URL="http://${ESP32_IP}"
 
 echo "================================"
-echo "HopFog ESP32 API Test Script"
+echo "HopFog ESP32-CAM API Test Script"
 echo "================================"
-echo "Testing ESP32 at: $BASE_URL"
+echo "Testing ESP32-CAM at: $BASE_URL"
 echo ""
 
 # Test 1: Get Statistics

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-HopFog ESP32 API Test Script
-This script helps test the API endpoints of the ESP32 web server
+HopFog ESP32-CAM API Test Script (No Camera)
+This script helps test the API endpoints of the ESP32-CAM web server
+Camera functionality is not included in this version.
 """
 
 import requests
 import json
 import sys
 
-# Configuration - Update this with your ESP32's IP address
+# Configuration - Update this with your ESP32-CAM's IP address
 ESP32_IP = "192.168.1.100"
 BASE_URL = f"http://{ESP32_IP}"
 
@@ -121,18 +122,18 @@ def test_add_message():
         return False
 
 def main():
-    print_header("HopFog ESP32 API Test Script")
-    print(f"Testing ESP32 at: {BASE_URL}")
+    print_header("HopFog ESP32-CAM API Test Script (No Camera)")
+    print(f"Testing ESP32-CAM at: {BASE_URL}")
     
-    # Check if ESP32 is reachable
-    print("\nChecking connection to ESP32...")
+    # Check if ESP32-CAM is reachable
+    print("\nChecking connection to ESP32-CAM...")
     try:
         response = requests.get(BASE_URL, timeout=5)
         print("✓ Connection successful!")
     except Exception as e:
         print(f"✗ Connection failed: {e}")
         print(f"\nPlease check:")
-        print(f"1. ESP32 is powered on and connected to WiFi")
+        print(f"1. ESP32-CAM is powered on and connected to WiFi")
         print(f"2. Your computer is on the same network")
         print(f"3. The IP address is correct (currently: {ESP32_IP})")
         print(f"   Update ESP32_IP variable in this script if needed")
