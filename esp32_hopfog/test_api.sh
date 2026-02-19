@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# HopFog ESP32-CAM API Test Script
-# This script helps test the API endpoints of the ESP32-CAM web server
+# HopFog ESP32 API Test Script
+# This script helps test the API endpoints of the ESP32 web server
 
-# Configuration - Update this with your ESP32-CAM's IP address
+# Configuration - Update this with your ESP32's IP address
 ESP32_IP="192.168.1.100"
 BASE_URL="http://${ESP32_IP}"
 
 echo "================================"
-echo "HopFog ESP32-CAM API Test Script"
+echo "HopFog ESP32 API Test Script"
 echo "================================"
-echo "Testing ESP32-CAM at: $BASE_URL"
+echo "Testing ESP32 at: $BASE_URL"
 echo ""
 
 # Test 1: Get Statistics
@@ -64,21 +64,8 @@ curl -s "${BASE_URL}/api/messages" | python3 -m json.tool
 echo ""
 echo ""
 
-# Test 8: Get Camera Image
-echo "8. Testing GET /camera (saving to test_camera.jpg)"
-echo "   Request: curl ${BASE_URL}/camera -o test_camera.jpg"
-curl -s "${BASE_URL}/camera" -o test_camera.jpg
-if [ -f test_camera.jpg ]; then
-    SIZE=$(stat -f%z test_camera.jpg 2>/dev/null || stat -c%s test_camera.jpg 2>/dev/null)
-    echo "   Camera image saved: test_camera.jpg (${SIZE} bytes)"
-else
-    echo "   Failed to save camera image"
-fi
-echo ""
-echo ""
-
-# Test 9: Get Updated Statistics
-echo "9. Testing GET /api/stats (after additions)"
+# Test 8: Get Updated Statistics
+echo "8. Testing GET /api/stats (after additions)"
 echo "   Request: curl ${BASE_URL}/api/stats"
 curl -s "${BASE_URL}/api/stats" | python3 -m json.tool
 echo ""
