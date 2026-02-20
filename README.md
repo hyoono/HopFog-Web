@@ -3,6 +3,26 @@
 Web-based admin dashboard for the HopFog IoT/Emergency Communication System,
 built as an ESP32 firmware with SD card storage.
 
+> **📖 Full deployment guide:** See **[DEPLOY.md](DEPLOY.md)** for detailed
+> step-by-step instructions, wiring diagrams, and troubleshooting.
+
+## How to Deploy (TL;DR)
+
+```bash
+# 1. Install PlatformIO
+pip install platformio
+
+# 2. Set your WiFi credentials in include/config.h
+
+# 3. Copy web files to a FAT32-formatted SD card
+./scripts/prepare_sd.sh /path/to/sd/card
+
+# 4. Insert SD card into ESP32, then build + flash + monitor
+./scripts/deploy.sh
+```
+
+After boot the serial monitor shows the IP address — open it in a browser.
+
 ## Hardware Requirements
 
 | Component | Notes |
@@ -103,6 +123,10 @@ Open `http://<ESP32-IP>` in a browser to access the admin dashboard.
 
 ```
 ├── platformio.ini          # PlatformIO build configuration
+├── DEPLOY.md               # Full deployment guide & troubleshooting
+├── scripts/
+│   ├── deploy.sh           # Build + flash + monitor automation
+│   └── prepare_sd.sh       # Copy web files to SD card
 ├── include/
 │   ├── config.h            # WiFi, pin, and limit constants
 │   ├── sd_storage.h        # SD card JSON data operations
