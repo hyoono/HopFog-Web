@@ -8,7 +8,11 @@
 #include "config.h"
 
 #include <ArduinoJson.h>
-#include <SD.h>
+#ifdef USE_SD_MMC
+  #include <SD_MMC.h>
+#else
+  #include <SD.h>
+#endif
 #include <time.h>
 
 static unsigned long currentEpoch() {

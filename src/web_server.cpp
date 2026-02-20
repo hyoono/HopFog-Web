@@ -5,7 +5,13 @@
 #include "web_server.h"
 #include "config.h"
 
-#include <SD.h>
+#ifdef USE_SD_MMC
+  #include <SD_MMC.h>
+  #define SD_FS SD_MMC
+#else
+  #include <SD.h>
+  #define SD_FS SD
+#endif
 
 // ── MIME type helper ────────────────────────────────────────────────
 
@@ -26,11 +32,11 @@ static const char *mimeType(const String &path) {
 // ── Static file handler ─────────────────────────────────────────────
 
 static void serveStaticFile(AsyncWebServerRequest *request, const String &sdPath) {
-    if (!SD.exists(sdPath)) {
+    if (!SD_FS.exists(sdPath)) {
         request->send(404, "text/plain", "File not found: " + sdPath);
         return;
     }
-    request->send(SD, sdPath, mimeType(sdPath));
+    request->send(SD_FS, sdPath, mimeType(sdPath));
 }
 
 // ── Setup ───────────────────────────────────────────────────────────

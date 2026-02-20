@@ -9,9 +9,26 @@
 // ── Web Server ──────────────────────────────────────────────────────
 #define HTTP_PORT 80
 
-// ── SD Card SPI Pins (default ESP32 VSPI) ───────────────────────────
-#define SD_CS_PIN   5
-// MOSI = GPIO 23, MISO = GPIO 19, CLK = GPIO 18 (defaults)
+// ── SD Card Configuration ───────────────────────────────────────────
+//
+// Two modes are supported:
+//
+// 1. SPI mode (default) — for generic ESP32 + external SD card module
+//    Wiring: CS→GPIO 5, MOSI→23, MISO→19, CLK→18
+//
+// 2. SD_MMC 1-bit mode — for ESP32-CAM with built-in SD card slot
+//    Enabled automatically when building with: pio run -e esp32cam
+//    No wiring needed (on-board slot uses GPIO 2, 14, 15)
+//
+#ifdef USE_SD_MMC
+  // ESP32-CAM built-in SD slot — 1-bit SD_MMC mode
+  // GPIO 4 is the on-board flash LED; keep it OFF to avoid SD conflicts
+  #define ESP32CAM_FLASH_PIN  4
+#else
+  // Generic ESP32 + external SPI SD module
+  #define SD_CS_PIN   5
+  // MOSI = GPIO 23, MISO = GPIO 19, CLK = GPIO 18 (defaults)
+#endif
 
 // ── SD Card Paths ───────────────────────────────────────────────────
 #define SD_WWW_DIR     "/www"

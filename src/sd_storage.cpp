@@ -5,8 +5,15 @@
 #include "sd_storage.h"
 #include "config.h"
 
-#include <SD.h>
-#include <SPI.h>
+#ifdef USE_SD_MMC
+  #include <SD_MMC.h>
+  #define SD_FS SD_MMC
+#else
+  #include <SD.h>
+  #include <SPI.h>
+  #define SD_FS SD
+#endif
+
 #include <ArduinoJson.h>
 #include <time.h>
 
@@ -20,15 +27,15 @@ static unsigned long currentTimestamp() {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 static void ensureDir(const char *dir) {
-    if (!SD.exists(dir)) {
-        SD.mkdir(dir);
+    if (!SD_FS.exists(dir)) {
+        SD_FS.mkdir(dir);
         Serial.printf("[SD] Created directory: %s\n", dir);
     }
 }
 
 static void seedFileIfMissing(const char *path) {
-    if (!SD.exists(path)) {
-        File f = SD.open(path, FILE_WRITE);
+    if (!SD_FS.exists(path)) {
+        File f = SD_FS.open(path, FILE_WRITE);
         if (f) {
             f.print("[]");
             f.close();
@@ -41,13 +48,28 @@ static void seedFileIfMissing(const char *path) {
 
 bool initSDCard() {
     Serial.println("[SD] Initialising SD card …");
+
+#ifdef USE_SD_MMC
+    // ESP32-CAM: use 1-bit SD_MMC mode (GPIO 2=DATA0, 14=CLK, 15=CMD)
+    // Disable the on-board flash LED (GPIO 4) to avoid SD bus conflicts
+    pinMode(ESP32CAM_FLASH_PIN, OUTPUT);
+    digitalWrite(ESP32CAM_FLASH_PIN, LOW);
+
+    if (!SD_MMC.begin("/sdcard", true)) {   // true = 1-bit mode
+        Serial.println("[SD] SD_MMC mount failed!");
+        return false;
+    }
+    Serial.println("[SD] SD_MMC 1-bit mode — mounted OK");
+#else
+    // Generic ESP32: SPI mode with configurable CS pin
     if (!SD.begin(SD_CS_PIN)) {
         Serial.println("[SD] Mount failed!");
         return false;
     }
+#endif
 
-    uint64_t totalBytes = SD.totalBytes();
-    uint64_t usedBytes  = SD.usedBytes();
+    uint64_t totalBytes = SD_FS.totalBytes();
+    uint64_t usedBytes  = SD_FS.usedBytes();
     Serial.printf("[SD] Mounted — Total: %llu MB, Used: %llu MB\n",
                   totalBytes / (1024 * 1024), usedBytes / (1024 * 1024));
 
@@ -68,7 +90,7 @@ bool initSDCard() {
 // ── Generic JSON helpers ────────────────────────────────────────────
 
 bool readJsonArray(const char *path, JsonDocument &doc) {
-    File f = SD.open(path, FILE_READ);
+    File f = SD_FS.open(path, FILE_READ);
     if (!f) {
         Serial.printf("[SD] Cannot open %s for reading\n", path);
         return false;
@@ -83,7 +105,7 @@ bool readJsonArray(const char *path, JsonDocument &doc) {
 }
 
 bool writeJsonArray(const char *path, const JsonDocument &doc) {
-    File f = SD.open(path, FILE_WRITE);
+    File f = SD_FS.open(path, FILE_WRITE);
     if (!f) {
         Serial.printf("[SD] Cannot open %s for writing\n", path);
         return false;

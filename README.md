@@ -8,16 +8,31 @@ built as an ESP32 firmware with SD card storage.
 
 ## How to Deploy (TL;DR)
 
-```bash
-# 1. Install PlatformIO
+### Windows + ESP32-CAM
+
+```cmd
 pip install platformio
 
-# 2. Set your WiFi credentials in include/config.h
+REM Edit include\config.h with your WiFi SSID and password
 
-# 3. Copy web files to a FAT32-formatted SD card
+REM Copy web files to a FAT32-formatted SD card (e.g. drive E:)
+scripts\prepare_sd.bat E:
+
+REM Insert SD card into ESP32-CAM, then build + flash + monitor
+scripts\deploy.bat all esp32cam
+```
+
+### Linux / macOS + Generic ESP32
+
+```bash
+pip install platformio
+
+# Edit include/config.h with your WiFi SSID and password
+
+# Copy web files to a FAT32-formatted SD card
 ./scripts/prepare_sd.sh /path/to/sd/card
 
-# 4. Insert SD card into ESP32, then build + flash + monitor
+# Insert SD card into ESP32, then build + flash + monitor
 ./scripts/deploy.sh
 ```
 
@@ -25,13 +40,26 @@ After boot the serial monitor shows the IP address — open it in a browser.
 
 ## Hardware Requirements
 
+### Option A: ESP32-CAM (AI-Thinker) — recommended, no wiring needed
+
+| Component | Notes |
+|-----------|-------|
+| ESP32-CAM board | AI-Thinker module (built-in SD card slot) |
+| Micro-SD card | FAT32 formatted, ≥ 1 GB |
+| USB-to-serial adapter | FTDI or CP2102 (for programming — unless board has USB) |
+
+The ESP32-CAM has a built-in micro-SD card slot. No extra wiring is needed.
+The camera module is **not used** by this firmware.
+
+### Option B: Generic ESP32 + external SD card module
+
 | Component | Notes |
 |-----------|-------|
 | ESP32 dev board | Any ESP-WROOM-32 based board |
 | Micro-SD card module | SPI interface (CS → GPIO 5) |
 | Micro-SD card | FAT32 formatted, ≥ 1 GB recommended |
 
-Default SPI wiring:
+Default SPI wiring (generic ESP32 only — not needed for ESP32-CAM):
 
 | SD module pin | ESP32 GPIO |
 |---------------|-----------|
@@ -62,8 +90,19 @@ Edit `include/config.h` and set your network credentials:
 
 ### 3. Prepare the SD Card
 
-Format the SD card as **FAT32**, then copy the contents of `data/sd/` to the
-card root:
+Format the SD card as **FAT32**, then copy the web files to the card:
+
+**Windows:**
+```cmd
+scripts\prepare_sd.bat E:
+```
+
+**Linux / macOS:**
+```bash
+./scripts/prepare_sd.sh /media/$USER/SD_CARD
+```
+
+Or manually copy the contents of `data/sd/` to the card root:
 
 ```
 SD Card Root/
@@ -97,14 +136,27 @@ SD Card Root/
 
 ### 4. Build & Flash
 
+**Windows + ESP32-CAM:**
+```cmd
+REM Build + flash + monitor in one step
+scripts\deploy.bat all esp32cam
+```
+
+**Linux / macOS + generic ESP32:**
 ```bash
-# Build the firmware
+./scripts/deploy.sh
+```
+
+**Or use PlatformIO directly:**
+```bash
+# Generic ESP32
 pio run
-
-# Upload to ESP32
 pio run --target upload
+pio device monitor
 
-# Monitor serial output
+# ESP32-CAM
+pio run -e esp32cam
+pio run -e esp32cam --target upload
 pio device monitor
 ```
 
@@ -125,8 +177,10 @@ Open `http://<ESP32-IP>` in a browser to access the admin dashboard.
 ├── platformio.ini          # PlatformIO build configuration
 ├── DEPLOY.md               # Full deployment guide & troubleshooting
 ├── scripts/
-│   ├── deploy.sh           # Build + flash + monitor automation
-│   └── prepare_sd.sh       # Copy web files to SD card
+│   ├── deploy.sh           # Build + flash + monitor (Linux/macOS)
+│   ├── deploy.bat          # Build + flash + monitor (Windows)
+│   ├── prepare_sd.sh       # Copy web files to SD card (Linux/macOS)
+│   └── prepare_sd.bat      # Copy web files to SD card (Windows)
 ├── include/
 │   ├── config.h            # WiFi, pin, and limit constants
 │   ├── sd_storage.h        # SD card JSON data operations

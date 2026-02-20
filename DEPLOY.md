@@ -3,6 +3,12 @@
 Complete step-by-step instructions for deploying HopFog-Web to an ESP32
 microcontroller with an SD card.
 
+**Supported boards:**
+- **ESP32-CAM** (AI-Thinker) — built-in SD card slot, no extra wiring
+- **Generic ESP32** + external SPI SD card module
+
+**Supported OS:** Windows, Linux, macOS
+
 ---
 
 ## Table of Contents
@@ -24,13 +30,24 @@ microcontroller with an SD card.
 
 ### Hardware
 
+**Option A — ESP32-CAM (recommended):**
+
+| Item | Notes |
+|------|-------|
+| ESP32-CAM board | AI-Thinker module with built-in SD card slot |
+| Micro-SD card | FAT32 formatted, ≥ 1 GB |
+| USB-to-serial adapter | FTDI or CP2102 (3.3 V) — unless your board has USB-C |
+| Jumper wires | 4 wires for programming (see wiring below) |
+
+**Option B — Generic ESP32 + external SD module:**
+
 | Item | Notes |
 |------|-------|
 | ESP32 development board | Any ESP-WROOM-32 board (e.g., DevKitC, NodeMCU-32S) |
 | Micro-SD card module | SPI-based breakout (e.g., HW-125 or built-in slot) |
 | Micro-SD card | FAT32 formatted, ≥ 1 GB |
 | USB cable | Micro-USB or USB-C depending on your board |
-| Jumper wires | 6 wires for SD card module (if not built-in) |
+| Jumper wires | 6 wires for SD card module |
 
 ### Software
 
@@ -46,6 +63,33 @@ microcontroller with an SD card.
 ---
 
 ## 2. Hardware Setup
+
+### ESP32-CAM (AI-Thinker)
+
+The SD card slot is **built in** — no SD wiring needed.
+
+The camera module is present but **not used** by this firmware. You can leave
+it attached or remove it.
+
+**Programming wiring** (with a USB-to-serial adapter like FTDI/CP2102):
+
+```
+USB-to-Serial        ESP32-CAM
+─────────────        ─────────
+TX           ──────► U0R  (GPIO 3)
+RX           ──────► U0T  (GPIO 1)
+GND          ──────► GND
+3.3V (or 5V) ──────► 5V
+                     GPIO 0 ──► GND  (only during upload, then remove)
+```
+
+> **To flash:** connect GPIO 0 to GND, press the reset button, upload, then
+> disconnect GPIO 0 from GND and press reset again to run normally.
+>
+> If your ESP32-CAM board has a USB-C port (e.g. ESP32-CAM-MB), just plug
+> it in — no adapter or GPIO 0 jumper needed.
+
+### Generic ESP32 + external SD card module
 
 Wire the SD card module to the ESP32 using the default VSPI bus:
 
@@ -82,6 +126,9 @@ pip install platformio
 pio --version
 ```
 
+> **Windows note:** Use Command Prompt or PowerShell. If `pio` is not found
+> after install, try `python -m platformio` or restart your terminal.
+
 ---
 
 ## 4. Configure WiFi
@@ -107,8 +154,15 @@ If your SD module uses a different chip-select pin:
 
 ## 5. Prepare the SD Card
 
-### Option A: Use the helper script (Linux/macOS)
+### Option A: Use the helper script
 
+**Windows:**
+```cmd
+REM Insert SD card — check which drive letter Windows assigns (e.g. E:)
+scripts\prepare_sd.bat E:
+```
+
+**Linux / macOS:**
 ```bash
 # Insert SD card and find its mount point
 # Linux:  usually /media/$USER/<CARD_NAME>
@@ -161,15 +215,24 @@ SD Card Root/
 
 ### Option A: Use the deploy script
 
+**Windows + ESP32-CAM:**
+```cmd
+scripts\deploy.bat build esp32cam
+```
+
+**Linux / macOS + generic ESP32:**
 ```bash
-# Build only
 ./scripts/deploy.sh build
 ```
 
 ### Option B: Use PlatformIO directly
 
 ```bash
+# Generic ESP32
 pio run
+
+# ESP32-CAM
+pio run -e esp32cam
 ```
 
 A successful build prints something like:
@@ -186,10 +249,17 @@ Flash: [======    ]  58.3% (used 764321 bytes from 1310720 bytes)
 ## 7. Flash the ESP32
 
 1. Connect the ESP32 to your computer via USB
-2. Run one of:
+2. **ESP32-CAM only:** connect GPIO 0 to GND before pressing reset (skip if using USB-C board)
+3. Run one of:
 
 ### Option A: Deploy script (build + flash + monitor)
 
+**Windows + ESP32-CAM:**
+```cmd
+scripts\deploy.bat all esp32cam
+```
+
+**Linux / macOS:**
 ```bash
 ./scripts/deploy.sh
 ```
@@ -197,10 +267,12 @@ Flash: [======    ]  58.3% (used 764321 bytes from 1310720 bytes)
 ### Option B: PlatformIO commands
 
 ```bash
-# Flash the firmware
+# Generic ESP32
 pio run --target upload
+pio device monitor
 
-# Open serial monitor to see output
+# ESP32-CAM
+pio run -e esp32cam --target upload
 pio device monitor
 ```
 
@@ -209,15 +281,19 @@ pio device monitor
 If auto-detection fails, specify the port manually:
 
 ```bash
+# Windows
+pio run -e esp32cam --target upload --upload-port COM3
+pio device monitor --port COM3
+
 # Linux
 ./scripts/deploy.sh all --port /dev/ttyUSB0
 
 # macOS
 ./scripts/deploy.sh all --port /dev/cu.usbserial-0001
-
-# Windows (in PlatformIO terminal)
-pio run --target upload --upload-port COM3
 ```
+
+> **ESP32-CAM note:** After flashing, disconnect GPIO 0 from GND and press
+> the reset button to boot normally.
 
 ---
 
@@ -259,7 +335,13 @@ You should see the HopFog login page. Register an admin account to get started.
 [FATAL] SD card init failed – halting.
 ```
 
-**Fix:**
+**Fix (ESP32-CAM):**
+- Make sure you built with the `esp32cam` environment: `pio run -e esp32cam`
+- Push the SD card firmly into the slot until it clicks
+- Ensure the card is formatted as FAT32 (not exFAT or NTFS)
+- Try a different SD card (some high-capacity cards have compatibility issues)
+
+**Fix (generic ESP32):**
 - Check wiring (CS → GPIO 5, MOSI → 23, MISO → 19, CLK → 18)
 - Ensure the card is formatted as FAT32 (not exFAT or NTFS)
 - Try a different SD card
@@ -282,20 +364,40 @@ You should see the HopFog login page. Register an admin account to get started.
 ```
 Error: Could not open port /dev/ttyUSB0
 ```
+or on Windows:
+```
+Error: Could not open port COM3
+```
 
-**Fix:**
-- Check the USB cable (some are charge-only with no data)
-- Install the USB-to-serial driver for your board:
+**Fix (Windows):**
+- Open Device Manager → Ports (COM & LPT) to find the correct COM port
+- Install the USB-to-serial driver for your adapter:
   - **CP2102**: [Silicon Labs driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)
   - **CH340**: [CH340 driver](http://www.wch-ic.com/downloads/CH341SER_ZIP.html)
-- On Linux, add yourself to the `dialout` group: `sudo usermod -aG dialout $USER` (then log out/in)
-- On macOS, check System Settings → Privacy & Security for blocked drivers
+  - **FTDI**: [FTDI driver](https://ftdichip.com/drivers/)
+- Check the USB cable (some are charge-only with no data lines)
+- Close any other serial monitors (only one program can use a COM port)
+
+**Fix (Linux):**
+- Add yourself to the `dialout` group: `sudo usermod -aG dialout $USER` (then log out/in)
+- Check the cable
+
+**Fix (macOS):**
+- Check System Settings → Privacy & Security for blocked drivers
+
+### ESP32-CAM won't enter flash mode
+
+**Fix:**
+- Ensure GPIO 0 is connected to GND **before** pressing reset
+- Press the reset button on the ESP32-CAM while GPIO 0 is grounded
+- Try a shorter USB cable or a powered USB hub
+- If using the ESP32-CAM-MB (USB-C daughter board), no GPIO 0 jumper is needed
 
 ### Web pages show "File not found"
 
 **Fix:**
 - Verify the SD card has the `www/` folder at the root level
-- Re-run `./scripts/prepare_sd.sh /path/to/sd`
+- Re-run the prepare script: `scripts\prepare_sd.bat E:` (Windows) or `./scripts/prepare_sd.sh /path/to/sd` (Linux/macOS)
 - Check that files were not placed inside a subfolder (e.g., `sd/www/` instead of `www/`)
 
 ### "Invalid email or password" on login
@@ -315,6 +417,13 @@ Error: Library not found
 - Check your internet connection
 - Try `pio run --target clean` then `pio run`
 
+### `pio` command not found (Windows)
+
+**Fix:**
+- Try `python -m platformio` instead of `pio`
+- Close and reopen your terminal after installing PlatformIO
+- Make sure Python's `Scripts` directory is in your system PATH
+
 ---
 
 ## 10. Updating After Changes
@@ -324,19 +433,24 @@ After modifying code or web files:
 ### Code changes (C++ source)
 
 ```bash
-# Rebuild and flash
-./scripts/deploy.sh
+# Generic ESP32
+./scripts/deploy.sh                      # Linux/macOS
+
+# ESP32-CAM on Windows
+scripts\deploy.bat all esp32cam
 ```
 
 ### Web UI changes (HTML/CSS/JS)
 
 No firmware reflash needed — just update the SD card:
 
+```cmd
+REM Windows
+scripts\prepare_sd.bat E:
+```
 ```bash
-# Option 1: Use the script
+# Linux/macOS
 ./scripts/prepare_sd.sh /path/to/sd/mount
-
-# Option 2: Manually copy changed files to SD card www/ folder
 ```
 
 Then power-cycle the ESP32 (or press the reset button).
@@ -351,12 +465,14 @@ leave `db/` untouched to preserve your data.
 
 ## Quick Reference
 
-| Task | Command |
-|------|---------|
-| Build firmware | `pio run` or `./scripts/deploy.sh build` |
-| Flash ESP32 | `pio run --target upload` or `./scripts/deploy.sh flash` |
-| Serial monitor | `pio device monitor` or `./scripts/deploy.sh monitor` |
-| Build + flash + monitor | `./scripts/deploy.sh` |
-| Prepare SD card | `./scripts/prepare_sd.sh /path/to/sd` |
-| Clean build | `pio run --target clean` |
-| Install dependencies | `pio pkg install` |
+| Task | Linux/macOS | Windows |
+|------|-------------|---------|
+| Build (generic) | `pio run` | `pio run` |
+| Build (ESP32-CAM) | `pio run -e esp32cam` | `pio run -e esp32cam` |
+| Flash (generic) | `pio run --target upload` | `pio run --target upload` |
+| Flash (ESP32-CAM) | `pio run -e esp32cam --target upload` | `scripts\deploy.bat flash esp32cam` |
+| Serial monitor | `pio device monitor` | `pio device monitor` |
+| Full deploy | `./scripts/deploy.sh` | `scripts\deploy.bat all esp32cam` |
+| Prepare SD card | `./scripts/prepare_sd.sh /media/…` | `scripts\prepare_sd.bat E:` |
+| Clean build | `pio run --target clean` | `pio run --target clean` |
+| Install deps | `pio pkg install` | `pio pkg install` |
