@@ -131,16 +131,18 @@ pio --version
 
 ---
 
-## 4. Configure WiFi
+## 4. Configure WiFi AP (optional)
 
-Edit `include/config.h` and replace the placeholder WiFi credentials:
+The ESP32 creates its own WiFi access point by default. To change the
+network name or password, edit `include/config.h`:
 
 ```c
-#define WIFI_SSID     "YourNetworkName"
-#define WIFI_PASSWORD "YourPassword"
+#define AP_SSID     "HopFog-Network"
+#define AP_PASSWORD "changeme123"
 ```
 
-> **Note:** The ESP32 only supports 2.4 GHz WiFi, not 5 GHz.
+> **Note:** The default password is `changeme123`. Change it before deploying
+> in a real environment.
 
 ### Optional: Change the SD card CS pin
 
@@ -309,42 +311,28 @@ After flashing, the serial monitor should show:
 [SD] Mounted — Total: 3728 MB, Used: 1 MB
 [SD] Created directory: /db
 [Auth] Initialised
-[WiFi] Connecting to YourNetworkName...
-[WiFi] Connected — IP: 192.168.1.42
-[DNS] Resolving hopfog.com → 192.168.1.42
-[DNS] Point your device's DNS to 192.168.1.42 to use http://hopfog.com
-[NTP] Time: 2026-02-20 04:30:00 UTC
+[WiFi] Starting AP "HopFog-Network" …
+[WiFi] AP running — IP: 192.168.4.1
+[WiFi] Connect to WiFi "HopFog-Network" (password: changeme123)
+[DNS] Captive portal active — http://hopfog.com → 192.168.4.1
 [HTTP] Server listening on port 80
+[HTTP] Open http://hopfog.com in your browser
 ```
 
-### Access via http://hopfog.com
+### Access the dashboard
 
-The ESP32 runs a local DNS server that resolves `hopfog.com` to its own IP.
-To use this, **set your device's DNS server to the ESP32's IP address**:
+1. On your phone or laptop, connect to the **HopFog-Network** WiFi
+   (password: `changeme123`)
+2. Open **http://hopfog.com** in your browser
 
-**Windows:**
-1. Open **Settings → Network & Internet → Wi-Fi → your network → Edit**
-2. Under DNS server assignment, switch to **Manual**
-3. Set Preferred DNS to the ESP32's IP (e.g. `192.168.1.42`)
-4. Save, then open `http://hopfog.com` in your browser
+The ESP32 runs a captive-portal DNS server, so **any URL** you type will
+redirect to the dashboard. Some devices will also show a "Sign in to network"
+popup automatically.
 
-**macOS:**
-1. Open **System Settings → Wi-Fi → your network → Details → DNS**
-2. Add the ESP32's IP as the first DNS server
-3. Open `http://hopfog.com` in your browser
+> **Tip:** You can also use the IP address directly: `http://192.168.4.1`
 
-**Linux:**
-1. Configure your network manager's DNS settings to add the ESP32's IP
-   as the primary DNS server, or temporarily edit `/etc/resolv.conf`:
-   `nameserver 192.168.1.42` (use the ESP32's actual IP)
-   > Note: direct edits to `/etc/resolv.conf` may be overwritten by
-   > `systemd-resolved` or NetworkManager. Use `nmcli` or your desktop
-   > network settings for a persistent change.
-2. Open `http://hopfog.com` in your browser
-
-**Or** you can always use the IP address directly (e.g. `http://192.168.1.42`).
-
-> **Tip:** The domain can be changed in `include/config.h` (`CUSTOM_DOMAIN`).
+> **Tip:** The WiFi name, password, and domain can be changed in
+> `include/config.h` (`AP_SSID`, `AP_PASSWORD`, `CUSTOM_DOMAIN`).
 
 You should see the HopFog login page. Register an admin account to get started.
 
@@ -370,17 +358,15 @@ You should see the HopFog login page. Register an admin account to get started.
 - Try a different SD card
 - Verify `SD_CS_PIN` in `config.h` matches your wiring
 
-### WiFi connection timeout
+### WiFi network not visible
 
-```
-[WiFi] Connection timeout – restarting …
-```
+If the **HopFog-Network** WiFi doesn't appear on your phone or laptop:
 
 **Fix:**
-- Verify SSID and password in `include/config.h` (they are case-sensitive)
-- Ensure you're using a 2.4 GHz network (ESP32 does not support 5 GHz)
-- Move the ESP32 closer to the router
-- Check that the router allows new device connections
+- Make sure the ESP32 booted successfully (check serial monitor for `[WiFi] AP running`)
+- Move closer to the ESP32 — AP range is typically 10–30 m
+- Try restarting the ESP32 by pressing the reset button
+- Verify `AP_SSID` and `AP_PASSWORD` in `include/config.h`
 
 ### Upload fails / ESP32 not found
 
@@ -450,9 +436,11 @@ Error: Library not found
 ### `hopfog.com` doesn't work in the browser
 
 **Fix:**
-- Make sure your computer is on the **same WiFi network** as the ESP32
-- Set your device's DNS server to the ESP32's IP address (see step 8 above)
-- If changing DNS is not an option, use the IP address directly (e.g. `http://192.168.1.42`)
+- Make sure you're connected to the **HopFog-Network** WiFi (not your home WiFi)
+- Try `http://192.168.4.1` directly
+- Some browsers cache DNS — try an incognito/private window
+- On Android, the captive portal popup may open automatically
+- On iOS, wait a few seconds after connecting for the captive portal popup
 - To change the domain, edit `CUSTOM_DOMAIN` in `include/config.h`
 
 ---

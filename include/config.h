@@ -1,20 +1,22 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// ── WiFi Configuration ──────────────────────────────────────────────
-// Update these with your network credentials
-#define WIFI_SSID     "HopFog-Network"
-#define WIFI_PASSWORD "changeme123"
+// ── WiFi Access Point ───────────────────────────────────────────────
+// The ESP32 creates its own WiFi network. Connect to it from your
+// phone or laptop, then open http://hopfog.com in a browser.
+#define AP_SSID     "HopFog-Network"
+#define AP_PASSWORD "changeme123"
+#define AP_CHANNEL  1
+#define AP_MAX_CONN 4
+#define AP_HIDDEN   0       // set to 1 to hide the SSID
 
 // ── Web Server ──────────────────────────────────────────────────────
 #define HTTP_PORT 80
 
 // ── Custom Domain ───────────────────────────────────────────────────
-// The ESP32 runs a local DNS server so you can access it at
-// http://hopfog.com instead of using the IP address.
-// Devices must use the ESP32's IP as their DNS server (see DEPLOY.md).
-// Note: while this DNS is active, the real hopfog.com (if it exists)
-// will be unreachable from devices using this ESP32 as their DNS.
+// The ESP32 runs a captive-portal DNS server that resolves ALL domains
+// to its own IP, so http://hopfog.com (or any URL) opens the dashboard
+// automatically when connected to the ESP32's WiFi network.
 #define CUSTOM_DOMAIN "hopfog.com"
 #define DNS_PORT      53
 

@@ -13,8 +13,6 @@ built as an ESP32 firmware with SD card storage.
 ```cmd
 pip install platformio
 
-REM Edit include\config.h with your WiFi SSID and password
-
 REM Copy web files to a FAT32-formatted SD card (e.g. drive E:)
 scripts\prepare_sd.bat E:
 
@@ -27,8 +25,6 @@ scripts\deploy.bat all esp32cam
 ```bash
 pip install platformio
 
-# Edit include/config.h with your WiFi SSID and password
-
 # Copy web files to a FAT32-formatted SD card
 ./scripts/prepare_sd.sh /path/to/sd/card
 
@@ -36,8 +32,7 @@ pip install platformio
 ./scripts/deploy.sh
 ```
 
-After boot the serial monitor shows the IP address — open it in a browser.
-You can also access the dashboard at **http://hopfog.com** (see [DEPLOY.md](DEPLOY.md) for DNS setup).
+After boot, connect to the **HopFog-Network** WiFi and open **http://hopfog.com**.
 
 ## Hardware Requirements
 
@@ -80,13 +75,14 @@ pip install platformio
 # or install the PlatformIO IDE extension for VS Code
 ```
 
-### 2. Configure WiFi
+### 2. Configure WiFi AP (optional)
 
-Edit `include/config.h` and set your network credentials:
+The ESP32 creates its own WiFi network by default. To change the network
+name or password, edit `include/config.h`:
 
 ```c
-#define WIFI_SSID     "YourNetworkName"
-#define WIFI_PASSWORD "YourPassword"
+#define AP_SSID     "HopFog-Network"
+#define AP_PASSWORD "changeme123"
 ```
 
 ### 3. Prepare the SD Card
@@ -163,14 +159,15 @@ pio device monitor
 
 ### 5. Access the Dashboard
 
-After boot, the serial monitor will print the ESP32's IP address:
+After boot, the serial monitor will print:
 
 ```
-[WiFi] Connected — IP: 192.168.1.42
-[HTTP] Server listening on port 80
+[WiFi] AP running — IP: 192.168.4.1
+[WiFi] Connect to WiFi "HopFog-Network" (password: changeme123)
 ```
 
-Open `http://<ESP32-IP>` in a browser to access the admin dashboard.
+1. Connect your phone or laptop to the **HopFog-Network** WiFi
+2. Open **http://hopfog.com** in a browser (or any URL — the captive portal redirects)
 
 ## Project Structure
 
@@ -183,13 +180,13 @@ Open `http://<ESP32-IP>` in a browser to access the admin dashboard.
 │   ├── prepare_sd.sh       # Copy web files to SD card (Linux/macOS)
 │   └── prepare_sd.bat      # Copy web files to SD card (Windows)
 ├── include/
-│   ├── config.h            # WiFi, pin, and limit constants
+│   ├── config.h            # WiFi AP, domain, pin, and limit constants
 │   ├── sd_storage.h        # SD card JSON data operations
 │   ├── auth.h              # Token-based authentication
 │   ├── web_server.h        # Static file serving
 │   └── api_handlers.h      # REST API endpoint handlers
 ├── src/
-│   ├── main.cpp            # Entry point (WiFi + SD + server init)
+│   ├── main.cpp            # Entry point (WiFi AP + SD + server init)
 │   ├── sd_storage.cpp      # JSON read/write on SD card
 │   ├── auth.cpp            # Password hashing + session tokens
 │   ├── web_server.cpp      # Static file routes from SD card
