@@ -311,6 +311,7 @@ After flashing, the serial monitor should show:
 [Auth] Initialised
 [WiFi] Connecting to YourNetworkName...
 [WiFi] Connected — IP: 192.168.1.42
+[mDNS] Hostname: http://hopfog.local
 [NTP] Time: 2026-02-20 04:30:00 UTC
 [HTTP] Server listening on port 80
 ```
@@ -318,10 +319,15 @@ After flashing, the serial monitor should show:
 Open a browser on the same network and navigate to:
 
 ```
-http://192.168.1.42
+http://hopfog.local
 ```
 
-(Replace with the actual IP shown in the serial monitor.)
+Or use the IP address shown in the serial monitor (e.g. `http://192.168.1.42`).
+
+> **Note:** The `hopfog.local` hostname uses mDNS. It works out of the box on
+> macOS and most Linux desktops. On Windows, it works in Chrome, Edge, and
+> Firefox. If it doesn't resolve, use the IP address instead.
+> The hostname can be changed in `include/config.h` (`MDNS_HOSTNAME`).
 
 You should see the HopFog login page. Register an admin account to get started.
 
@@ -423,6 +429,18 @@ Error: Library not found
 - Try `python -m platformio` instead of `pio`
 - Close and reopen your terminal after installing PlatformIO
 - Make sure Python's `Scripts` directory is in your system PATH
+
+### `hopfog.local` doesn't work in the browser
+
+**Fix:**
+- Make sure your computer is on the **same WiFi network** as the ESP32
+- On Windows: use Chrome, Edge, or Firefox (they support mDNS). If it still
+  doesn't work, install [Bonjour Print Services](https://support.apple.com/kb/DL999)
+  or use the IP address instead
+- On Linux: install `avahi-daemon` (`sudo apt install avahi-daemon`)
+- On macOS: mDNS works out of the box — no action needed
+- You can always fall back to the IP address shown in the serial monitor
+- To change the hostname, edit `MDNS_HOSTNAME` in `include/config.h`
 
 ---
 

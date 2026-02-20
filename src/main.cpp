@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 
@@ -73,10 +74,18 @@ void setup() {
     // 3. WiFi
     connectWiFi();
 
-    // 4. NTP time sync
+    // 4. mDNS — access via http://hopfog.local
+    if (MDNS.begin(MDNS_HOSTNAME)) {
+        MDNS.addService("http", "tcp", HTTP_PORT);
+        Serial.printf("[mDNS] Hostname: http://%s.local\n", MDNS_HOSTNAME);
+    } else {
+        Serial.println("[mDNS] Failed to start — use IP address instead");
+    }
+
+    // 5. NTP time sync
     syncTime();
 
-    // 5. Web server (static files + API)
+    // 6. Web server (static files + API)
     setupWebServer(server);
     registerApiRoutes(server);
     server.begin();

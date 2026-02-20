@@ -9,6 +9,10 @@
 // ── Web Server ──────────────────────────────────────────────────────
 #define HTTP_PORT 80
 
+// ── mDNS Hostname ───────────────────────────────────────────────────
+// Allows access via http://hopfog.local instead of an IP address
+#define MDNS_HOSTNAME "hopfog"
+
 // ── SD Card Configuration ───────────────────────────────────────────
 //
 // Two modes are supported:
