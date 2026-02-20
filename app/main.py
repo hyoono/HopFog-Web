@@ -20,10 +20,10 @@ from routes.users import router as users_router
 from routes.messages import router as messages_router
 from routes.admin_messaging import router as admin_messaging_router
 from routes.fog_nodes import fog_router
-from routes.bluetooth_api import router as bluetooth_router
-from routes.bluetooth_debug import router as bt_debug_router
 from routes.xbee_api import router as xbee_router
 
+
+from services.broadcast_dispatcher import dispatcher
 
 
 from dotenv import load_dotenv
@@ -39,14 +39,16 @@ app.include_router(users_router)
 app.include_router(messages_router)
 app.include_router(admin_messaging_router)
 app.include_router(fog_router)
-app.include_router(bluetooth_router)
-app.include_router(bt_debug_router)
 app.include_router(xbee_router)
 
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+
+@app.on_event("startup")
+async def startup_event():
+    await dispatcher.start()
 
 @app.get("/", response_class=HTMLResponse)
 def login_page(request: Request):
