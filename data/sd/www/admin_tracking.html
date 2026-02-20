@@ -93,7 +93,7 @@
                 if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>';return;}
                 broadcasts.forEach(function(b){
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:220px;">'+(b.subject||'')+'</td><td><span class="badge bg-dark">'+(b.status||'')+'</span></td><td>'+(b.total||0)+'</td><td>'+(b.queued||0)+'</td><td>'+(b.sent||0)+'</td><td>'+(b.delivered||0)+'</td><td>'+(b.read||0)+'</td><td>'+(b.failed||0)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/'+b.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:220px;">'+(b.subject||'')+'</td><td><span class="badge bg-dark">'+(b.status||'')+'</span></td><td>'+(b.total||0)+'</td><td>'+(b.queued||0)+'</td><td>'+(b.sent||0)+'</td><td>'+(b.delivered||0)+'</td><td>'+(b.read||0)+'</td><td>'+(b.failed||0)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('trackingBody').innerHTML='<tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>';});

@@ -117,7 +117,7 @@
                 if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="7" class="text-muted">No broadcasts yet.</td></tr>';return;}
                 broadcasts.forEach(function(b){
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:260px;">'+escapeHtml(b.subject)+'</td><td><span class="badge bg-dark">'+escapeHtml(b.status)+'</span></td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/'+b.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:260px;">'+escapeHtml(b.subject)+'</td><td><span class="badge bg-dark">'+escapeHtml(b.status)+'</span></td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             });

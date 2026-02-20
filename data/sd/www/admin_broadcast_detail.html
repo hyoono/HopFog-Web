@@ -138,11 +138,11 @@
                 document.getElementById('dBody').textContent=b.body||'';
             });
             document.getElementById('markSentBtn').addEventListener('click', function(){
-                fetch('/admin/messaging/broadcasts/'+broadcastId+'/mark_sent',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error marking as sent.');});
+                fetch('/api/broadcasts/'+broadcastId+'/mark_sent',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error marking as sent.');});
             });
             document.getElementById('cancelBtn').addEventListener('click', function(){
                 if(confirm('Cancel this broadcast?')){
-                    fetch('/admin/messaging/broadcasts/'+broadcastId+'/cancel',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error cancelling broadcast.');});
+                    fetch('/api/broadcasts/'+broadcastId+'/cancel',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error cancelling broadcast.');});
                 }
             });
         });

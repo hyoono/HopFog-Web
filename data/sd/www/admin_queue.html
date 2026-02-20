@@ -103,10 +103,10 @@
                 var queued=broadcasts.filter(function(b){return b.status==='queued';}),drafts=broadcasts.filter(function(b){return b.status==='draft';});
                 var qb=document.getElementById('queuedBody');
                 if(queued.length===0){qb.innerHTML='<tr><td colspan="7" class="text-muted">No queued broadcasts.</td></tr>';}
-                else{queued.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.priority||'')+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.ttl_expires_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/'+b.id+'">Open</a></td>';qb.appendChild(tr);});}
+                else{queued.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.priority||'')+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.ttl_expires_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';qb.appendChild(tr);});}
                 var db=document.getElementById('draftsBody');
                 if(drafts.length===0){db.innerHTML='<tr><td colspan="6" class="text-muted">No drafts.</td></tr>';}
-                else{drafts.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/'+b.id+'">Open</a></td>';db.appendChild(tr);});}
+                else{drafts.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';db.appendChild(tr);});}
             }).catch(function(){
                 document.getElementById('queuedBody').innerHTML='<tr><td colspan="7" class="text-muted">No queued broadcasts.</td></tr>';
                 document.getElementById('draftsBody').innerHTML='<tr><td colspan="6" class="text-muted">No drafts.</td></tr>';
