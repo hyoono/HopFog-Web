@@ -43,12 +43,18 @@ python -m venv env
 # Activate virtual environment
 source env/bin/activate  # On Windows: env\Scripts\activate
 
-# Install FastAPI
-pip install fastapi uvicorn sqlalchemy python-dotenv bcrypt
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
 
 # Run the application
 uvicorn app.main:app --reload
 ```
+
+For complete deployment instructions including production setup, Docker, and cloud deployment, see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
 ### Directory Structure
 ```
@@ -242,8 +248,19 @@ This project is for the HopFog system administration.
 
 ---
 
+## 📖 Documentation
+
+- **[Deployment Guide](DEPLOYMENT.md)** - Complete deployment instructions for all platforms
+- **[ESP32-CAM Setup](ESP32_README.md)** - Detailed ESP32-CAM hardware setup
+- **[Quick Start](QUICKSTART.md)** - 15-minute quick start guide
+- **[Architecture](ARCHITECTURE.md)** - System architecture and design
+- **[Wiring Guide](WIRING_GUIDE.md)** - ESP32-CAM hardware connections
+
+---
+
 ## 🔗 Quick Links
 
+- [Deployment Guide](DEPLOYMENT.md) - **Start here for production deployment**
 - [ESP32-CAM Setup Guide](ESP32_README.md)
 - [Arduino IDE](https://www.arduino.cc/en/software)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
