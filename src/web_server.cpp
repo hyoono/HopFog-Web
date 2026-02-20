@@ -61,18 +61,28 @@ void setupWebServer(AsyncWebServer &server) {
         });
     }
 
-    // Admin messaging sub-pages
-    const char *adminPages[] = {
-        "messaging", "broadcasts", "broadcast_detail",
-        "sos", "queue", "tracking", "testing", NULL
-    };
-    for (int i = 0; adminPages[i] != NULL; i++) {
-        String pageName = String(adminPages[i]);
-        server.on(("/admin/" + pageName).c_str(), HTTP_GET,
-                  [pageName](AsyncWebServerRequest *request) {
-            serveStaticFile(request, "/www/admin_" + pageName + ".html");
-        });
-    }
+    // Admin messaging pages — /admin/messaging/*
+    server.on("/admin/messaging", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_messaging.html");
+    });
+    server.on("/admin/messaging/broadcasts", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_broadcasts.html");
+    });
+    server.on("/admin/messaging/broadcast_detail", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_broadcast_detail.html");
+    });
+    server.on("/admin/messaging/queue", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_queue.html");
+    });
+    server.on("/admin/messaging/tracking", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_tracking.html");
+    });
+    server.on("/admin/messaging/sos", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_sos.html");
+    });
+    server.on("/admin/messaging/testing", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_testing.html");
+    });
 
     // Static assets: /static/css/*, /static/js/*, /static/images/*
     server.on("/static/css/*", HTTP_GET, [](AsyncWebServerRequest *request) {
