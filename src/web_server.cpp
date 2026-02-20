@@ -103,6 +103,12 @@ void setupWebServer(AsyncWebServer &server) {
         serveStaticFile(request, "/www" + file);
     });
 
+    server.on("/static/vendor/*", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String uri = request->url();
+        String file = uri.substring(String("/static").length());
+        serveStaticFile(request, "/www" + file);
+    });
+
     // 404 handler
     server.onNotFound([](AsyncWebServerRequest *request) {
         request->send(404, "text/plain", "404 — Not Found");

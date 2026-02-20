@@ -352,3 +352,31 @@ int createBroadcast(int createdBy, const char *msgType, const char *severity,
     writeJsonArray(SD_BCASTS_FILE, doc);
     return id;
 }
+
+bool updateBroadcastStatus(int broadcastId, const char *newStatus) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_BCASTS_FILE, doc)) return false;
+    JsonArray arr = doc.as<JsonArray>();
+    for (JsonObject b : arr) {
+        if ((b["id"] | 0) == broadcastId) {
+            b["status"] = newStatus;
+            return writeJsonArray(SD_BCASTS_FILE, doc);
+        }
+    }
+    return false;
+}
+
+bool updateResidentAdminMsg(int msgId, const char *status, const char *adminAction, int handledBy) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_RES_MSG_FILE, doc)) return false;
+    JsonArray arr = doc.as<JsonArray>();
+    for (JsonObject m : arr) {
+        if ((m["id"] | 0) == msgId) {
+            m["status"] = status;
+            m["admin_action"] = adminAction;
+            m["handled_by"] = handledBy;
+            return writeJsonArray(SD_RES_MSG_FILE, doc);
+        }
+    }
+    return false;
+}

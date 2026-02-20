@@ -194,7 +194,13 @@ void registerApiRoutes(AsyncWebServer &server) {
         resp["storage_display"]    = (storageTotal > 0)
             ? String(storageUsed, 1) + "GB / " + String(storageTotal, 1) + "GB"
             : "N/A";
-        resp["current_user"]       = userDoc["username"] | "admin";
+        JsonObject cu = resp["current_user"].to<JsonObject>();
+        cu["id"]         = userDoc["id"];
+        cu["username"]   = userDoc["username"];
+        cu["email"]      = userDoc["email"];
+        cu["role"]       = userDoc["role"];
+        cu["is_active"]  = userDoc["is_active"];
+        cu["created_at"] = userDoc["created_at"];
 
         String out;
         serializeJson(resp, out);
@@ -627,6 +633,111 @@ void registerApiRoutes(AsyncWebServer &server) {
         resp["id"]      = id;
         String out; serializeJson(resp, out);
         request->send(201, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  BROADCASTS: POST /api/broadcasts/{id}/mark_sent             │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/broadcasts\\/(\\d+)\\/mark_sent$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int bId = request->pathArg(0).toInt();
+        if (updateBroadcastStatus(bId, "sent")) {
+            JsonDocument resp;
+            resp["message"] = "Marked as sent";
+            String out; serializeJson(resp, out);
+            request->send(200, "application/json", out);
+        } else {
+            sendJsonError(request, 404, "Broadcast not found");
+        }
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  BROADCASTS: POST /api/broadcasts/{id}/cancel                │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/broadcasts\\/(\\d+)\\/cancel$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int bId = request->pathArg(0).toInt();
+        if (updateBroadcastStatus(bId, "cancelled")) {
+            JsonDocument resp;
+            resp["message"] = "Broadcast cancelled";
+            String out; serializeJson(resp, out);
+            request->send(200, "application/json", out);
+        } else {
+            sendJsonError(request, 404, "Broadcast not found");
+        }
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  SOS: POST /api/sos-requests/{id}/escalate                   │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/sos-requests\\/(\\d+)\\/escalate$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int reqId = request->pathArg(0).toInt();
+        String escalateTo = request->hasParam("escalate_to", true)
+            ? request->getParam("escalate_to", true)->value() : "sos";
+
+        // Read the SOS request
+        JsonDocument resDoc;
+        readJsonArray(SD_RES_MSG_FILE, resDoc);
+        JsonObject found;
+        bool exists = false;
+        for (JsonObject m : resDoc.as<JsonArray>()) {
+            if ((m["id"] | 0) == reqId) { found = m; exists = true; break; }
+        }
+        if (!exists) { sendJsonError(request, 404, "SOS request not found"); return; }
+
+        // Create broadcast from the SOS request
+        String severity = "info";
+        if (escalateTo == "alert") severity = "warning";
+        else if (escalateTo == "sos") severity = "critical";
+
+        int priority = 10;
+        if (escalateTo == "sos") priority = 100;
+        else if (escalateTo == "alert") priority = 50;
+
+        String subject = found["subject"] | "Resident SOS Request";
+        String body    = found["body"] | "";
+
+        createBroadcast(uid, escalateTo.c_str(), severity.c_str(),
+                       "all_residents", subject.c_str(), body.c_str(),
+                       "queued", priority);
+
+        // Mark the SOS request as resolved
+        updateResidentAdminMsg(reqId, "resolved",
+            (String("escalated_to_") + escalateTo).c_str(), uid);
+
+        JsonDocument resp;
+        resp["message"] = "Escalated successfully";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  SOS: POST /api/sos-requests/{id}/dismiss                    │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/sos-requests\\/(\\d+)\\/dismiss$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int reqId = request->pathArg(0).toInt();
+        if (updateResidentAdminMsg(reqId, "dismissed", "handled_privately", uid)) {
+            JsonDocument resp;
+            resp["message"] = "Dismissed";
+            String out; serializeJson(resp, out);
+            request->send(200, "application/json", out);
+        } else {
+            sendJsonError(request, 404, "SOS request not found");
+        }
     });
 
     Serial.println("[HTTP] API routes registered");

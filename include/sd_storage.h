@@ -42,4 +42,8 @@ int  createBroadcast(int createdBy, const char *msgType, const char *severity,
                      const char *audience, const char *subject, const char *body,
                      const char *status, int priority);
 
+// ── Status update helpers ────────────────────────────────────────────
+bool updateBroadcastStatus(int broadcastId, const char *newStatus);
+bool updateResidentAdminMsg(int msgId, const char *status, const char *adminAction, int handledBy);
+
 #endif // SD_STORAGE_H
