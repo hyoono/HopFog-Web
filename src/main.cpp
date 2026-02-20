@@ -5,7 +5,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <ESPmDNS.h>
+#include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 
@@ -16,6 +16,7 @@
 #include "api_handlers.h"
 
 AsyncWebServer server(HTTP_PORT);
+DNSServer     dnsServer;
 
 // ── WiFi ────────────────────────────────────────────────────────────
 static void connectWiFi() {
@@ -74,13 +75,13 @@ void setup() {
     // 3. WiFi
     connectWiFi();
 
-    // 4. mDNS — access via http://hopfog.local
-    if (MDNS.begin(MDNS_HOSTNAME)) {
-        MDNS.addService("http", "tcp", HTTP_PORT);
-        Serial.printf("[mDNS] Hostname: http://%s.local\n", MDNS_HOSTNAME);
-    } else {
-        Serial.println("[mDNS] Failed to start — use IP address instead");
-    }
+    // 4. DNS server — resolve hopfog.com to this device's IP
+    dnsServer.setTTL(300);
+    dnsServer.start(DNS_PORT, CUSTOM_DOMAIN, WiFi.localIP());
+    Serial.printf("[DNS] Resolving %s → %s\n",
+                  CUSTOM_DOMAIN, WiFi.localIP().toString().c_str());
+    Serial.printf("[DNS] Point your device's DNS to %s to use http://%s\n",
+                  WiFi.localIP().toString().c_str(), CUSTOM_DOMAIN);
 
     // 5. NTP time sync
     syncTime();
@@ -94,10 +95,13 @@ void setup() {
 
 // ── Loop ────────────────────────────────────────────────────────────
 void loop() {
+    // Process DNS requests
+    dnsServer.processNextRequest();
+
     // Reconnect WiFi if dropped
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] Lost connection – reconnecting …");
         connectWiFi();
     }
-    delay(1000);
+    delay(10);
 }

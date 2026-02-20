@@ -37,7 +37,7 @@ pip install platformio
 ```
 
 After boot the serial monitor shows the IP address — open it in a browser.
-You can also access the dashboard at **http://hopfog.local** (no IP needed).
+You can also access the dashboard at **http://hopfog.com** (see [DEPLOY.md](DEPLOY.md) for DNS setup).
 
 ## Hardware Requirements
 

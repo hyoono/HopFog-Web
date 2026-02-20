@@ -9,9 +9,14 @@
 // ── Web Server ──────────────────────────────────────────────────────
 #define HTTP_PORT 80
 
-// ── mDNS Hostname ───────────────────────────────────────────────────
-// Allows access via http://hopfog.local instead of an IP address
-#define MDNS_HOSTNAME "hopfog"
+// ── Custom Domain ───────────────────────────────────────────────────
+// The ESP32 runs a local DNS server so you can access it at
+// http://hopfog.com instead of using the IP address.
+// Devices must use the ESP32's IP as their DNS server (see DEPLOY.md).
+// Note: while this DNS is active, the real hopfog.com (if it exists)
+// will be unreachable from devices using this ESP32 as their DNS.
+#define CUSTOM_DOMAIN "hopfog.com"
+#define DNS_PORT      53
 
 // ── SD Card Configuration ───────────────────────────────────────────
 //
