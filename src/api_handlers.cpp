@@ -9,6 +9,13 @@
 
 #include <ArduinoJson.h>
 #include <SD.h>
+#include <time.h>
+
+static unsigned long currentEpoch() {
+    time_t now;
+    time(&now);
+    return (unsigned long)now;
+}
 
 // ── Helper: authenticate request from cookie ────────────────────────
 
@@ -55,6 +62,10 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         if (role != "admin") {
             request->redirect("/?error=not_admin");
+            return;
+        }
+        if (!isActive) {
+            request->redirect("/?error=inactive");
             return;
         }
         if (!verifyPassword(password, storedHash)) {
@@ -603,7 +614,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         msg["priority"]     = priority;
         msg["status"]       = "queued";
         msg["admin_action"] = "none";
-        msg["created_at"]   = millis() / 1000;
+        msg["created_at"]   = currentEpoch();
 
         writeJsonArray(SD_RES_MSG_FILE, doc);
 

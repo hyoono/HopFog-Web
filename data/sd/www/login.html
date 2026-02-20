@@ -105,7 +105,7 @@
         const params = new URLSearchParams(window.location.search);
         if (params.get('error')) {
             const box = document.getElementById('errorBox');
-            const msgs = {invalid:'Invalid email or password', not_admin:'Not authorized for web access', missing_fields:'Please fill in all fields'};
+            const msgs = {invalid:'Invalid email or password', not_admin:'Not authorized for web access', inactive:'Account is inactive', missing_fields:'Please fill in all fields'};
             box.textContent = msgs[params.get('error')] || 'Login failed';
             box.style.display = 'block';
         }

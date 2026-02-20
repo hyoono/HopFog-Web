@@ -49,13 +49,33 @@ static String sha256Hex(const String &input) {
     return hex;
 }
 
+// Generate a random 16-char hex salt
+static String generateSalt() {
+    String salt;
+    salt.reserve(16);
+    for (int i = 0; i < 8; i++) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", (uint8_t)esp_random());
+        salt += buf;
+    }
+    return salt;
+}
+
 String hashPassword(const String &password) {
-    // Double-hash with a fixed salt prefix for basic protection
-    return sha256Hex("hopfog_salt:" + password);
+    // Per-user random salt stored as "salt:hash"
+    String salt = generateSalt();
+    String hash = sha256Hex(salt + ":" + password);
+    return salt + ":" + hash;
 }
 
 bool verifyPassword(const String &password, const String &storedHash) {
-    return hashPassword(password) == storedHash;
+    // Stored format: "salt:hash"
+    int sep = storedHash.indexOf(':');
+    if (sep < 0) return false;
+    String salt = storedHash.substring(0, sep);
+    String expectedHash = storedHash.substring(sep + 1);
+    String computedHash = sha256Hex(salt + ":" + password);
+    return computedHash == expectedHash;
 }
 
 // ── Token management ────────────────────────────────────────────────

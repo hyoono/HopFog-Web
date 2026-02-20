@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <time.h>
 
 #include "config.h"
 #include "sd_storage.h"
@@ -33,6 +34,25 @@ static void connectWiFi() {
     Serial.printf("\n[WiFi] Connected — IP: %s\n", WiFi.localIP().toString().c_str());
 }
 
+// ── NTP Time Sync ───────────────────────────────────────────────────
+static void syncTime() {
+    Serial.println("[NTP] Syncing time …");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    struct tm ti;
+    int attempts = 0;
+    while (!getLocalTime(&ti) && attempts < 10) {
+        delay(500);
+        attempts++;
+    }
+    if (attempts < 10) {
+        Serial.printf("[NTP] Time: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+                      ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                      ti.tm_hour, ti.tm_min, ti.tm_sec);
+    } else {
+        Serial.println("[NTP] Time sync failed — timestamps will use uptime");
+    }
+}
+
 // ── Setup ───────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
@@ -53,7 +73,10 @@ void setup() {
     // 3. WiFi
     connectWiFi();
 
-    // 4. Web server (static files + API)
+    // 4. NTP time sync
+    syncTime();
+
+    // 5. Web server (static files + API)
     setupWebServer(server);
     registerApiRoutes(server);
     server.begin();

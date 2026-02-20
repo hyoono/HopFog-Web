@@ -8,6 +8,14 @@
 #include <SD.h>
 #include <SPI.h>
 #include <ArduinoJson.h>
+#include <time.h>
+
+// Return current epoch timestamp (seconds since 1970-01-01)
+static unsigned long currentTimestamp() {
+    time_t now;
+    time(&now);
+    return (unsigned long)now;
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -159,7 +167,7 @@ int createUser(const char *username, const char *email,
     user["password_hash"] = passwordHash;
     user["role"]          = role;
     user["is_active"]     = active ? 1 : 0;
-    user["created_at"]    = millis() / 1000;  // seconds since boot
+    user["created_at"]    = currentTimestamp();
 
     writeJsonArray(SD_USERS_FILE, doc);
     Serial.printf("[SD] Created user id=%d username=%s\n", id, username);
@@ -207,7 +215,7 @@ int createMessage(int senderId, const char *subject, const char *body,
     msg["sender_id"]  = senderId;
     msg["subject"]    = subject;
     msg["body"]       = body;
-    msg["created_at"] = millis() / 1000;
+    msg["created_at"] = currentTimestamp();
 
     JsonArray recips = msg["recipients"].to<JsonArray>();
     for (JsonVariant v : recipientIds) {
@@ -317,7 +325,7 @@ int createBroadcast(int createdBy, const char *msgType, const char *severity,
     bc["body"]       = body;
     bc["status"]     = status;
     bc["priority"]   = priority;
-    bc["created_at"] = millis() / 1000;
+    bc["created_at"] = currentTimestamp();
 
     writeJsonArray(SD_BCASTS_FILE, doc);
     return id;
