@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <title>HopFog - Queue Monitor</title>
+    <title>Queue Monitor</title>
     <link rel="icon" type="image/png" href="/static/images/HopFog-Logo.png">
+    <link href="https://cdn.jsdelivr.net/npm/simple-datatables@7.1.2/dist/style.min.css" rel="stylesheet" />
     <link href="/static/css/styles.css" rel="stylesheet" />
     <script src="https://use.fontawesome.com/releases/v6.3.0/js/all.js" crossorigin="anonymous"></script>
 </head>
@@ -15,9 +17,10 @@
         <form class="d-none d-md-inline-block form-inline ms-auto me-md-3 my-2">
         <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
             <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="fas fa-user fa-fw"></i></a>
+                <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" data-bs-toggle="dropdown"><i class="fas fa-user fa-fw"></i></a>
                 <ul class="dropdown-menu dropdown-menu-end">
                     <li><a class="dropdown-item" href="/settings">Settings</a></li>
+                    <li><a class="dropdown-item" href="#">Activity Log</a></li>
                     <li><hr class="dropdown-divider" /></li>
                     <li><a class="dropdown-item" href="/">Logout</a></li>
                 </ul>
@@ -27,55 +30,86 @@
     </nav>
     <div id="layoutSidenav">
         <div id="layoutSidenav_nav">
-            <nav class="sb-sidenav accordion sb-sidenav-dark">
+            <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
                 <div class="sb-sidenav-menu">
                     <div class="nav">
                         <div class="sb-sidenav-menu-heading">Core</div>
                         <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
                         <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
                         <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
-                        <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes</a>
+                        <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
                         <div class="sb-sidenav-menu-heading">Admin</div>
                         <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
-                        <a class="nav-link" href="/admin/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
-                        <a class="nav-link active" href="/admin/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
-                        <a class="nav-link" href="/admin/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
+                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
+                        <a class="nav-link active" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
+                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
+                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                     </div>
                 </div>
-                <div class="sb-sidenav-footer"><div class="small">Logged in as:</div><span id="sidebarUsername">Admin</span></div>
+                <div class="sb-sidenav-footer">
+                    <div class="small">Logged in as:</div>
+                    <span id="sidebarUsername">HopFog User</span>
+                </div>
             </nav>
         </div>
         <div id="layoutSidenav_content">
             <main class="p-4">
-                <h1 class="mt-4">Queue Monitor</h1>
-                <ol class="breadcrumb mb-4"><li class="breadcrumb-item"><a href="/dashboard">Dashboard</a></li><li class="breadcrumb-item active">Queue Monitor</li></ol>
-                <div class="card mb-4">
-                    <div class="card-header"><i class="fas fa-layer-group me-1"></i>Queued &amp; Draft Messages</div>
-                    <div class="card-body">
-                        <table class="table table-striped">
-                            <thead><tr><th>ID</th><th>Type</th><th>Subject</th><th>Status</th><th>Priority</th></tr></thead>
-                            <tbody id="queueBody"></tbody>
-                        </table>
-                        <p class="text-muted" id="emptyMsg" style="display:none;">No queued or draft messages.</p>
+                <div class="container-fluid px-4">
+                    <h1 class="mt-4">Queue Monitor</h1>
+                    <ol class="breadcrumb mb-4">
+                        <li class="breadcrumb-item"><a href="/admin/messaging">Admin Messaging</a></li>
+                        <li class="breadcrumb-item active">Queue</li>
+                    </ol>
+                    <div class="card mb-4">
+                        <div class="card-header"><i class="fas fa-layer-group me-1"></i>Queued Broadcasts</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped align-middle">
+                                    <thead><tr><th>ID</th><th>Priority</th><th>Type</th><th>Severity</th><th>Subject</th><th>TTL</th><th></th></tr></thead>
+                                    <tbody id="queuedBody"></tbody>
+                                </table>
+                            </div>
+                            <div class="form-text">This list will be processed by the fog/IEEE 802.15.4 dispatcher later.</div>
+                        </div>
+                    </div>
+                    <div class="card mb-4">
+                        <div class="card-header"><i class="fas fa-file-lines me-1"></i>Drafts</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped align-middle">
+                                    <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Subject</th><th>Created</th><th></th></tr></thead>
+                                    <tbody id="draftsBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </main>
-            <footer class="py-4 bg-light mt-auto"><div class="container-fluid px-4"><div class="text-muted small">Copyright &copy; HopFog 2026</div></div></footer>
+            <footer class="py-4 bg-light mt-auto">
+                <div class="container-fluid px-4">
+                    <div class="d-flex align-items-center justify-content-between small">
+                        <div class="text-muted">Copyright &copy; HopFog 2026</div>
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
     <script>
-        fetch('/api/broadcasts').then(r=>{if(r.status===401){window.location.href='/';return null;}return r.json();}).then(data=>{
-            if(!data) return;
-            const queued = data.filter(b=>b.status==='queued'||b.status==='draft');
-            const tbody = document.getElementById('queueBody');
-            if (queued.length===0) { document.getElementById('emptyMsg').style.display='block'; return; }
-            queued.forEach(b=>{
-                const tr = document.createElement('tr');
-                tr.innerHTML = '<td>'+b.id+'</td><td><span class="badge bg-info">'+b.msg_type+'</span></td><td>'+b.subject+'</td><td><span class="badge bg-warning">'+b.status+'</span></td><td>'+b.priority+'</td>';
-                tbody.appendChild(tr);
+        document.addEventListener('DOMContentLoaded', function(){
+            fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
+                var queued=broadcasts.filter(function(b){return b.status==='queued';}),drafts=broadcasts.filter(function(b){return b.status==='draft';});
+                var qb=document.getElementById('queuedBody');
+                if(queued.length===0){qb.innerHTML='<tr><td colspan="7" class="text-muted">No queued broadcasts.</td></tr>';}
+                else{queued.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.priority||'')+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.ttl_expires_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/'+b.id+'">Open</a></td>';qb.appendChild(tr);});}
+                var db=document.getElementById('draftsBody');
+                if(drafts.length===0){db.innerHTML='<tr><td colspan="6" class="text-muted">No drafts.</td></tr>';}
+                else{drafts.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/'+b.id+'">Open</a></td>';db.appendChild(tr);});}
+            }).catch(function(){
+                document.getElementById('queuedBody').innerHTML='<tr><td colspan="7" class="text-muted">No queued broadcasts.</td></tr>';
+                document.getElementById('draftsBody').innerHTML='<tr><td colspan="6" class="text-muted">No drafts.</td></tr>';
             });
         });
     </script>

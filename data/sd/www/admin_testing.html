@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <title>HopFog - Testing</title>
+    <title>Messaging Testing</title>
     <link rel="icon" type="image/png" href="/static/images/HopFog-Logo.png">
+    <link href="https://cdn.jsdelivr.net/npm/simple-datatables@7.1.2/dist/style.min.css" rel="stylesheet" />
     <link href="/static/css/styles.css" rel="stylesheet" />
     <script src="https://use.fontawesome.com/releases/v6.3.0/js/all.js" crossorigin="anonymous"></script>
 </head>
@@ -15,9 +17,10 @@
         <form class="d-none d-md-inline-block form-inline ms-auto me-md-3 my-2">
         <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
             <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="fas fa-user fa-fw"></i></a>
+                <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" data-bs-toggle="dropdown"><i class="fas fa-user fa-fw"></i></a>
                 <ul class="dropdown-menu dropdown-menu-end">
                     <li><a class="dropdown-item" href="/settings">Settings</a></li>
+                    <li><a class="dropdown-item" href="#">Activity Log</a></li>
                     <li><hr class="dropdown-divider" /></li>
                     <li><a class="dropdown-item" href="/">Logout</a></li>
                 </ul>
@@ -27,70 +30,72 @@
     </nav>
     <div id="layoutSidenav">
         <div id="layoutSidenav_nav">
-            <nav class="sb-sidenav accordion sb-sidenav-dark">
+            <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
                 <div class="sb-sidenav-menu">
                     <div class="nav">
                         <div class="sb-sidenav-menu-heading">Core</div>
                         <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
+                        <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
+                        <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
                         <div class="sb-sidenav-menu-heading">Admin</div>
                         <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
-                        <a class="nav-link" href="/admin/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
+                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
+                        <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
+                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
+                        <a class="nav-link active" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                     </div>
                 </div>
-                <div class="sb-sidenav-footer"><div class="small">Logged in as:</div><span id="sidebarUsername">Admin</span></div>
+                <div class="sb-sidenav-footer">
+                    <div class="small">Logged in as:</div>
+                    <span id="sidebarUsername">HopFog User</span>
+                </div>
             </nav>
         </div>
         <div id="layoutSidenav_content">
             <main class="p-4">
-                <h1 class="mt-4"><i class="fas fa-vial me-2"></i>Testing</h1>
-                <ol class="breadcrumb mb-4"><li class="breadcrumb-item"><a href="/dashboard">Dashboard</a></li><li class="breadcrumb-item active">Testing</li></ol>
-
-                <!-- Test Broadcast -->
-                <div class="card mb-4">
-                    <div class="card-header"><i class="fas fa-paper-plane me-1"></i>Test Broadcast</div>
-                    <div class="card-body">
-                        <div id="testMsg" style="display:none;"></div>
-                        <form id="testForm" class="row g-3">
-                            <div class="col-md-3">
-                                <select class="form-select" name="msg_type">
-                                    <option value="announcement">Announcement</option>
-                                    <option value="alert">Alert</option>
-                                    <option value="sos">SOS</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3"><input type="text" class="form-control" name="subject" placeholder="Subject" required></div>
-                            <div class="col-md-4"><textarea class="form-control" name="body" placeholder="Message body" required></textarea></div>
-                            <div class="col-md-2"><button type="submit" class="btn btn-warning w-100"><i class="fas fa-vial me-1"></i>Test Send</button></div>
-                        </form>
+                <div class="container-fluid px-4">
+                    <h1 class="mt-4">Testing Checklist</h1>
+                    <ol class="breadcrumb mb-4">
+                        <li class="breadcrumb-item"><a href="/admin/messaging">Admin Messaging</a></li>
+                        <li class="breadcrumb-item active">Testing</li>
+                    </ol>
+                    <div class="card mb-4">
+                        <div class="card-header"><i class="fas fa-vial me-1"></i>Functional Tests</div>
+                        <div class="card-body">
+                            <ul class="mb-0">
+                                <li>Create Announcement as Draft</li>
+                                <li>Queue Announcement and verify it appears in Queue Monitor</li>
+                                <li>Create SOS and verify priority ordering</li>
+                                <li>Open Broadcast Detail and verify delivery counters</li>
+                                <li>Mark Sent (Simulation) and verify Tracking updates</li>
+                                <li>Cancel a Broadcast and verify status changes + event log entry</li>
+                            </ul>
+                        </div>
                     </div>
-                </div>
-
-                <!-- System Info -->
-                <div class="card mb-4">
-                    <div class="card-header"><i class="fas fa-info-circle me-1"></i>System Information</div>
-                    <div class="card-body">
-                        <p><strong>Platform:</strong> ESP32</p>
-                        <p><strong>Web Server:</strong> ESPAsyncWebServer</p>
-                        <p><strong>Storage:</strong> SD Card (JSON-based)</p>
-                        <p><strong>Auth:</strong> Token-based sessions</p>
+                    <div class="card">
+                        <div class="card-header"><i class="fas fa-screwdriver-wrench me-1"></i>Integration Tests (Later)</div>
+                        <div class="card-body">
+                            <ul class="mb-0">
+                                <li>Fog dispatcher pulls QUEUED broadcasts and pushes to IEEE 802.15.4</li>
+                                <li>Fog reports delivery ACKs back to update recipient statuses</li>
+                                <li>Retry logic + TTL expiry handling</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </main>
-            <footer class="py-4 bg-light mt-auto"><div class="container-fluid px-4"><div class="text-muted small">Copyright &copy; HopFog 2026</div></div></footer>
+            <footer class="py-4 bg-light mt-auto">
+                <div class="container-fluid px-4">
+                    <div class="d-flex align-items-center justify-content-between small">
+                        <div class="text-muted">Copyright &copy; HopFog 2026</div>
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
-    <script>
-        document.getElementById('testForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const fd = new FormData(this); fd.append('status', 'draft');
-            const msgDiv = document.getElementById('testMsg');
-            fetch('/api/broadcasts', {method:'POST', body:fd}).then(r=>r.json()).then(data=>{
-                msgDiv.className='alert alert-success'; msgDiv.textContent='Test broadcast created (ID: '+data.broadcast_id+')';
-                msgDiv.style.display='block'; this.reset();
-            }).catch(()=>{msgDiv.className='alert alert-danger';msgDiv.textContent='Test failed';msgDiv.style.display='block';});
-        });
-    </script>
 </body>
 </html>
