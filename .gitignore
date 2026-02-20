@@ -64,4 +64,4 @@ alembic/versions/*.py[cod]
 .pio/
 .pioenvs/
 .piolibdeps/
-.platformio/
+.platformio/_codeql_detected_source_root
