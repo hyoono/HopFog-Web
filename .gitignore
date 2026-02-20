@@ -59,3 +59,9 @@ Thumbs.db
 
 # Alembic
 alembic/versions/*.py[cod]
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.platformio/
