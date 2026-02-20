@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: hopfog-web
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://hopfog:hopfog_password@db:5432/hopfog_db
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - DEBUG=False
+    volumes:
+      - ./logs:/app/logs
+      - ./static:/app/static
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - hopfog-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:13-alpine
+    container_name: hopfog-db
+    environment:
+      - POSTGRES_USER=hopfog
+      - POSTGRES_PASSWORD=hopfog_password
+      - POSTGRES_DB=hopfog_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - hopfog-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hopfog"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: hopfog-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+    networks:
+      - hopfog-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  hopfog-network:
+    driver: bridge
