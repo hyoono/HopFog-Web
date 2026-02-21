@@ -53,11 +53,18 @@
 #define SD_RES_MSG_FILE "/db/resident_admin_msgs.json"
 
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
-// UART2 pins — choose GPIOs that are free on your board.
-// These defaults work on ESP32-CAM (GPIO 13/12 are available).
-#define XBEE_TX_PIN   13   // ESP32 TX → XBee DIN
-#define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT
 #define XBEE_BAUD     9600 // XBee factory default baud rate
+#ifdef USE_SD_MMC
+  // ESP32-CAM: XBee uses the U0T / U0R pins (UART0, shared with USB).
+  // Disconnect the XBee during programming; reconnect for normal use.
+  #define XBEE_TX_PIN      1   // U0TXD → XBee DIN
+  #define XBEE_RX_PIN      3   // U0RXD ← XBee DOUT
+  #define XBEE_USE_UART0   1
+#else
+  // Generic ESP32: XBee on UART2 (any free GPIOs).
+  #define XBEE_TX_PIN     13   // ESP32 TX → XBee DIN
+  #define XBEE_RX_PIN     12   // ESP32 RX ← XBee DOUT
+#endif
 
 // ── Auth ────────────────────────────────────────────────────────────
 #define TOKEN_LENGTH      32

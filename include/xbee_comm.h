@@ -1,12 +1,19 @@
 /*
  * xbee_comm.h — Digi XBee S2C (ZigBee) serial interface.
  *
- * Uses UART2 (HardwareSerial) in API mode 1 (AP=1) to exchange
- * framed messages with a remote XBee S2C coordinator/end-device.
+ * Uses API mode 1 (AP=1) to exchange framed messages with a remote
+ * XBee S2C coordinator/end-device.
  *
- * Typical wiring (ESP32-CAM compatible):
+ * ESP32-CAM wiring (UART0, shared with USB):
+ *   ESP32 GPIO 1  (U0TXD) → XBee DIN   (pin 3)
+ *   ESP32 GPIO 3  (U0RXD) ← XBee DOUT  (pin 2)
+ *   ESP32 3.3 V            → XBee VCC
+ *   ESP32 GND              → XBee GND
+ *   Disconnect XBee when programming via USB.
+ *
+ * Generic ESP32 wiring (UART2):
  *   ESP32 GPIO 13 (TX2) → XBee DIN
- *   ESP32 GPIO 12 (RX2) → XBee DOUT
+ *   ESP32 GPIO 12 (RX2) ← XBee DOUT
  *   ESP32 3.3 V          → XBee VCC
  *   ESP32 GND             → XBee GND
  */
@@ -29,7 +36,9 @@
 
 // ── Public API ──────────────────────────────────────────────────────
 
-/// Initialise UART2 for XBee communication.
+/// Initialise the XBee serial port.
+/// ESP32-CAM: reconfigures UART0 (Serial) to 9600 baud for XBee.
+/// Generic ESP32: starts UART2 (Serial2) on GPIO 13/12.
 void xbeeInit();
 
 /// Send a text payload to the ZigBee broadcast address.

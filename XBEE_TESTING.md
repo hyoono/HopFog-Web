@@ -65,7 +65,19 @@ Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 
 ## Step 4: Wire XBee #1 to ESP32
 
-Default pin configuration (from `include/config.h`):
+### ESP32-CAM (default – uses UART0)
+
+The ESP32-CAM uses GPIO 1 (U0TXD) and GPIO 3 (U0RXD) — the same pins as
+the USB programming port. **Disconnect the XBee when uploading firmware.**
+
+```
+ESP32-CAM GPIO 1  (U0TXD) ──→ XBee DIN  (pin 3)
+ESP32-CAM GPIO 3  (U0RXD) ←── XBee DOUT (pin 2)
+ESP32-CAM 3.3V             ──→ XBee VCC  (pin 1)
+ESP32-CAM GND              ──→ XBee GND  (pin 10)
+```
+
+### Generic ESP32 (uses UART2)
 
 ```
 ESP32 GPIO 13 (TX) ──→ XBee DIN  (pin 3)
@@ -234,8 +246,15 @@ Breaking it down:
 ### ESP32 serial shows nothing about XBee
 
 - Verify `xbeeInit()` is called in `setup()` (check `src/main.cpp`)
-- Check wiring: GPIO 13 → DIN, GPIO 12 → DOUT
+- **ESP32-CAM:** Check wiring: GPIO 1 (U0TXD) → DIN, GPIO 3 (U0RXD) → DOUT.
+  Note: Serial Monitor stops after XBee init because they share UART0.
+- **Generic ESP32:** Check wiring: GPIO 13 → DIN, GPIO 12 → DOUT
 - Verify XBee module is getting 3.3V power (LED on the XBee should blink)
+
+### ESP32-CAM: Can't upload firmware when XBee is connected
+
+GPIO 1/3 are shared between USB and XBee. **Disconnect the XBee** before
+flashing. Reconnect it after the upload completes.
 
 ---
 
