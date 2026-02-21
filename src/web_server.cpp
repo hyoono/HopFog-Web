@@ -3,6 +3,7 @@
  */
 
 #include "web_server.h"
+#include "auth.h"
 #include "config.h"
 
 #ifdef USE_SD_MMC
@@ -39,52 +40,93 @@ static void serveStaticFile(AsyncWebServerRequest *request, const String &sdPath
     request->send(SD_FS, sdPath, mimeType(sdPath));
 }
 
+// ── Auth guard helper ────────────────────────────────────────────────
+
+static bool isAuthenticated(AsyncWebServerRequest *request) {
+    if (!request->hasHeader("Cookie")) return false;
+    String cookie = request->header("Cookie");
+    String token  = extractTokenFromCookie(cookie);
+    return validateToken(token) >= 0;
+}
+
+static void serveProtectedPage(AsyncWebServerRequest *request, const String &sdPath) {
+    if (!isAuthenticated(request)) {
+        request->redirect("/login");
+        return;
+    }
+    serveStaticFile(request, sdPath);
+}
+
 // ── Setup ───────────────────────────────────────────────────────────
 
 void setupWebServer(AsyncWebServer &server) {
 
-    // Root → login page
+    // Root → login page (public)
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         serveStaticFile(request, "/www/login.html");
     });
 
-    // Named page routes (browser navigation)
-    const char *pages[] = {
-        "login", "register", "dashboard", "users",
-        "logs", "fog_nodes", "settings", NULL
-    };
-    for (int i = 0; pages[i] != NULL; i++) {
-        String pageName = String(pages[i]);
-        server.on(("/" + pageName).c_str(), HTTP_GET,
-                  [pageName](AsyncWebServerRequest *request) {
-            serveStaticFile(request, "/www/" + pageName + ".html");
-        });
-    }
+    // Public pages (no auth required)
+    server.on("/login", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/login.html");
+    });
+    server.on("/register", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/register.html");
+    });
+
+    // Download endpoint (public — accessible from login page)
+    server.on("/download/app", HTTP_GET, [](AsyncWebServerRequest *request) {
+        // Try APK first, fall back to placeholder text file
+        if (SD_FS.exists("/www/HopFog-App.apk")) {
+            request->send(SD_FS, "/www/HopFog-App.apk", "application/vnd.android.package-archive");
+        } else if (SD_FS.exists("/www/HopFog-App.txt")) {
+            request->send(SD_FS, "/www/HopFog-App.txt", "text/plain");
+        } else {
+            request->send(404, "text/plain", "App file not found on SD card");
+        }
+    });
+
+    // Protected pages (auth required — redirect to /login if not logged in)
+    server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveProtectedPage(request, "/www/dashboard.html");
+    });
+    server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveProtectedPage(request, "/www/users.html");
+    });
+    server.on("/logs", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveProtectedPage(request, "/www/logs.html");
+    });
+    server.on("/fog_nodes", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveProtectedPage(request, "/www/fog_nodes.html");
+    });
+    server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveProtectedPage(request, "/www/settings.html");
+    });
 
     // Admin messaging pages — /admin/messaging/*
     // NOTE: Sub-routes MUST be registered BEFORE the parent route because
     // ESPAsyncWebServer's canHandle() treats "/admin/messaging" as matching
     // any URL that starts with "/admin/messaging/".  First match wins.
     server.on("/admin/messaging/broadcasts", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_broadcasts.html");
+        serveProtectedPage(request, "/www/admin_broadcasts.html");
     });
     server.on("/admin/messaging/broadcast_detail", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_broadcast_detail.html");
+        serveProtectedPage(request, "/www/admin_broadcast_detail.html");
     });
     server.on("/admin/messaging/queue", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_queue.html");
+        serveProtectedPage(request, "/www/admin_queue.html");
     });
     server.on("/admin/messaging/tracking", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_tracking.html");
+        serveProtectedPage(request, "/www/admin_tracking.html");
     });
     server.on("/admin/messaging/sos", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_sos.html");
+        serveProtectedPage(request, "/www/admin_sos.html");
     });
     server.on("/admin/messaging/testing", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_testing.html");
+        serveProtectedPage(request, "/www/admin_testing.html");
     });
     server.on("/admin/messaging", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_messaging.html");
+        serveProtectedPage(request, "/www/admin_messaging.html");
     });
 
     // Static assets: /static/css/*, /static/js/*, /static/images/*
