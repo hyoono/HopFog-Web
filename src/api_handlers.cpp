@@ -6,6 +6,7 @@
 #include "sd_storage.h"
 #include "auth.h"
 #include "config.h"
+#include "xbee_comm.h"
 
 #include <ArduinoJson.h>
 #ifdef USE_SD_MMC
@@ -518,10 +519,12 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument bcastDoc;
         readJsonArray(SD_BCASTS_FILE, bcastDoc);
         bool found = false;
-        String curStatus;
+        String curStatus, subject, msgType;
         for (JsonObject b : bcastDoc.as<JsonArray>()) {
             if ((b["id"] | 0) == bId) {
                 curStatus = b["status"] | "";
+                subject   = b["subject"] | "";
+                msgType   = b["msg_type"] | "";
                 found = true;
                 break;
             }
@@ -538,6 +541,12 @@ void registerApiRoutes(AsyncWebServer &server) {
         updateRecipientsStatus(bId, "sent");
         // Create audit event
         addBroadcastEvent(bId, "marked_sent", "Manually marked as sent (simulation)");
+
+        // ── Send via XBee S2C (ZigBee broadcast) ────────────────────
+        // Payload format: "TYPE|SUBJECT|BODY" — pipe-delimited so the
+        // receiving XBee node can parse msg_type, subject, and body.
+        String xbeePayload = msgType + "|" + subject;
+        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
         JsonDocument resp;
         resp["message"] = "Marked as sent";
@@ -859,6 +868,11 @@ void registerApiRoutes(AsyncWebServer &server) {
         // Mark the SOS request as resolved
         updateResidentAdminMsg(reqId, "resolved",
             (String("escalated_to_") + escalateTo).c_str(), uid);
+
+        // ── Send SOS via XBee S2C (ZigBee broadcast) ────────────────
+        // Same pipe-delimited format as mark_sent: "TYPE|SUBJECT|BODY"
+        String xbeePayload = escalateTo + "|" + subject + "|" + body;
+        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
         JsonDocument resp;
         resp["message"] = "Escalated successfully";

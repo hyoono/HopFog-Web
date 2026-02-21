@@ -71,11 +71,13 @@
                             List of Users
                         </div>
                         <div class="card-body">
-                            <table id="datatablesSimple">
+                            <div class="table-responsive">
+                            <table id="datatablesSimple" class="table table-bordered table-hover">
                                 <thead><tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Created At</th><th>Actions</th></tr></thead>
                                 <tfoot><tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Created At</th><th>Actions</th></tr></tfoot>
                                 <tbody id="usersTableBody"></tbody>
                             </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -127,7 +129,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/users').then(function(r){return r.json();}).then(function(users) {
                 var tbody = document.getElementById('usersTableBody');
-                if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center">No users found</td></tr>'; return; }
+                if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center">No users found</td></tr>'; }
                 users.forEach(function(user) {
                     var tr = document.createElement('tr');
                     var roleHtml = user.role === 'admin' ? '<span class="badge bg-primary"><i class="fas fa-shield-alt"></i> Admin</span>' : '<span class="badge bg-info"><i class="fas fa-mobile-alt"></i> Mobile</span>';

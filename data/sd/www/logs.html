@@ -61,11 +61,13 @@
                         Latest Messages
                     </div>
                     <div class="card-body">
-                        <table id="datatablesSimple">
+                        <div class="table-responsive">
+                        <table id="datatablesSimple" class="table table-bordered table-hover">
                             <thead><tr><th>ID</th><th>From</th><th>To</th><th>Message</th><th>Date</th></tr></thead>
                             <tfoot><tr><th>ID</th><th>From</th><th>To</th><th>Message</th><th>Date</th></tr></tfoot>
                             <tbody id="logsTableBody"></tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             </main>
@@ -85,7 +87,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/messages').then(function(r){return r.json();}).then(function(messages) {
                 var tbody = document.getElementById('logsTableBody');
-                if (messages.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No messages found</td></tr>'; return; }
+                if (messages.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No messages found</td></tr>'; }
                 messages.forEach(function(m) {
                     var tr = document.createElement('tr');
                     var to = Array.isArray(m.to) ? m.to.join(', ') : (m.to || '');

@@ -52,6 +52,13 @@
 #define SD_EVENTS_FILE "/db/broadcast_events.json"
 #define SD_RES_MSG_FILE "/db/resident_admin_msgs.json"
 
+// ── XBee S2C (ZigBee) ──────────────────────────────────────────────
+// UART2 pins — choose GPIOs that are free on your board.
+// These defaults work on ESP32-CAM (GPIO 13/12 are available).
+#define XBEE_TX_PIN   13   // ESP32 TX → XBee DIN
+#define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT
+#define XBEE_BAUD     9600 // XBee factory default baud rate
+
 // ── Auth ────────────────────────────────────────────────────────────
 #define TOKEN_LENGTH      32
 #define MAX_ACTIVE_TOKENS 16
