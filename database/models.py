@@ -85,6 +85,29 @@ class MessageRecipient(Base):
 
 
 
+
+# ---------- RESIDENT -> ADMIN MESSAGING ----------
+class ResidentAdminMessage(Base):
+    __tablename__ = "resident_admin_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    kind = Column(String(30), default="message", nullable=False)   # message / sos_request
+    subject = Column(String(200), nullable=True)
+    body = Column(Text, nullable=False)
+
+    priority = Column(Integer, default=30, nullable=False)         # sos_request higher than normal message
+    status = Column(String(30), default="queued", nullable=False)  # queued/delivered/read/resolved/dismissed
+
+    admin_action = Column(String(40), default="none", nullable=False)  # none/escalated_to_alert/escalated_to_sos/escalated_to_announcement/handled_privately
+    handled_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handled_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
 # ---------- ADMIN BROADCAST MESSAGING ----------
 class BroadcastMessage(Base):
     __tablename__ = "broadcast_messages"

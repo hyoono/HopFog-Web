@@ -12,7 +12,58 @@
     <strong>Emergency Mode:</strong> This page is intended for rapid SOS broadcasting. Hardware dispatch will be connected later.
   </div>
 
+  
   <div class="card mb-4">
+    <div class="card-header"><i class="fas fa-inbox me-1"></i>Incoming Resident SOS Requests</div>
+    <div class="card-body">
+      {% if incoming_sos_requests and incoming_sos_requests|length > 0 %}
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>From (Sender ID)</th>
+              <th>Subject</th>
+              <th>Message</th>
+              <th>Created</th>
+              <th class="text-end">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in incoming_sos_requests %}
+            <tr>
+              <td>#{{ r.id }}</td>
+              <td>{{ r.sender_id }}</td>
+              <td>{{ r.subject or "SOS Request" }}</td>
+              <td style="max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                {{ r.body }}
+              </td>
+              <td>{{ r.created_at }}</td>
+              <td class="text-end">
+                <form method="post" action="/admin/messaging/sos-requests/{{ r.id }}/escalate" class="d-inline">
+                  <input type="hidden" name="escalate_to" value="alert">
+                  <button class="btn btn-sm btn-warning">Escalate to Alert</button>
+                </form>
+                <form method="post" action="/admin/messaging/sos-requests/{{ r.id }}/escalate" class="d-inline">
+                  <input type="hidden" name="escalate_to" value="sos">
+                  <button class="btn btn-sm btn-danger">Broadcast SOS</button>
+                </form>
+                <form method="post" action="/admin/messaging/sos-requests/{{ r.id }}/dismiss" class="d-inline">
+                  <button class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-muted">No incoming SOS requests right now.</div>
+      {% endif %}
+    </div>
+  </div>
+
+<div class="card mb-4">
     <div class="card-header"><i class="fas fa-bolt me-1"></i>Quick SOS Templates</div>
     <div class="card-body">
       <form method="post" action="/admin/messaging/broadcasts">
