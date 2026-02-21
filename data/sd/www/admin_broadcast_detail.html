@@ -127,23 +127,72 @@
             if(!broadcastId){document.getElementById('detailAlert').className='alert alert-danger';document.getElementById('detailAlert').textContent='No broadcast ID provided.';document.getElementById('detailAlert').style.display='block';return;}
             document.getElementById('detailTitle').textContent='Broadcast #'+broadcastId;
             document.getElementById('detailBreadcrumb').textContent='#'+broadcastId;
-            fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
-                var b=broadcasts.find(function(x){return String(x.id)===String(broadcastId);});
-                if(!b){document.getElementById('detailAlert').className='alert alert-danger';document.getElementById('detailAlert').textContent='Broadcast not found.';document.getElementById('detailAlert').style.display='block';return;}
+
+            fetch('/api/broadcasts/'+broadcastId).then(function(r){
+                if(!r.ok) throw new Error('Not found');
+                return r.json();
+            }).then(function(b){
                 document.getElementById('dType').textContent=b.msg_type||'';
                 document.getElementById('dSeverity').textContent=b.severity||'';
-                document.getElementById('dStatus').innerHTML='<span class="badge bg-dark">'+(b.status||'')+'</span>';
+                var statusBadge='bg-dark';
+                if(b.status==='sent') statusBadge='bg-success';
+                else if(b.status==='queued') statusBadge='bg-primary';
+                else if(b.status==='cancelled') statusBadge='bg-secondary';
+                else if(b.status==='failed') statusBadge='bg-danger';
+                else if(b.status==='draft') statusBadge='bg-warning text-dark';
+                document.getElementById('dStatus').innerHTML='<span class="badge '+statusBadge+'">'+(b.status||'')+'</span>';
                 document.getElementById('dAudience').textContent=b.audience||'all_residents';
-                document.getElementById('dTTL').textContent=b.ttl_expires_at||'';
+                var ttlText=b.ttl_hours ? b.ttl_hours+' hours' : 'N/A';
+                if(b.ttl_expires_at){var d=new Date(b.ttl_expires_at*1000);ttlText+=' (expires '+d.toLocaleString()+')';}
+                document.getElementById('dTTL').textContent=ttlText;
                 document.getElementById('dSubject').textContent=b.subject||'';
                 document.getElementById('dBody').textContent=b.body||'';
+
+                // Delivery summary
+                if(b.status_counts){
+                    var sc=b.status_counts;
+                    document.getElementById('dsTotal').textContent=sc.total||0;
+                    document.getElementById('dsQueued').textContent=sc.queued||0;
+                    document.getElementById('dsSent').textContent=sc.sent||0;
+                    document.getElementById('dsDelivered').textContent=sc.delivered||0;
+                    document.getElementById('dsRead').textContent=sc.read||0;
+                    document.getElementById('dsFailed').textContent=sc.failed||0;
+                }
+
+                // Event log
+                if(b.events && b.events.length>0){
+                    var html='<table class="table table-sm"><thead><tr><th>Timestamp</th><th>Event</th><th>Message</th></tr></thead><tbody>';
+                    b.events.forEach(function(ev){
+                        var ts=ev.created_at ? new Date(ev.created_at*1000).toLocaleString() : '';
+                        html+='<tr><td>'+ts+'</td><td><span class="badge bg-info text-dark">'+(ev.event_type||'')+'</span></td><td>'+(ev.message||'')+'</td></tr>';
+                    });
+                    html+='</tbody></table>';
+                    document.getElementById('eventLogBody').innerHTML=html;
+                }
+
+                // Hide action buttons if not actionable
+                if(b.status==='sent'||b.status==='cancelled'||b.status==='failed'){
+                    document.getElementById('markSentBtn').disabled=true;
+                    document.getElementById('cancelBtn').disabled=true;
+                }
+            }).catch(function(){
+                document.getElementById('detailAlert').className='alert alert-danger';
+                document.getElementById('detailAlert').textContent='Broadcast not found.';
+                document.getElementById('detailAlert').style.display='block';
             });
+
             document.getElementById('markSentBtn').addEventListener('click', function(){
-                fetch('/api/broadcasts/'+broadcastId+'/mark_sent',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error marking as sent.');});
+                fetch('/api/broadcasts/'+broadcastId+'/mark_sent',{method:'POST'}).then(function(r){
+                    if(!r.ok) return r.json().then(function(d){alert(d.error||'Error');});
+                    window.location.reload();
+                }).catch(function(){alert('Error marking as sent.');});
             });
             document.getElementById('cancelBtn').addEventListener('click', function(){
                 if(confirm('Cancel this broadcast?')){
-                    fetch('/api/broadcasts/'+broadcastId+'/cancel',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error cancelling broadcast.');});
+                    fetch('/api/broadcasts/'+broadcastId+'/cancel',{method:'POST'}).then(function(r){
+                        if(!r.ok) return r.json().then(function(d){alert(d.error||'Error');});
+                        window.location.reload();
+                    }).catch(function(){alert('Error cancelling broadcast.');});
                 }
             });
         });

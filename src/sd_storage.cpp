@@ -82,6 +82,8 @@ bool initSDCard() {
     seedFileIfMissing(SD_MSGS_FILE);
     seedFileIfMissing(SD_FOG_FILE);
     seedFileIfMissing(SD_BCASTS_FILE);
+    seedFileIfMissing(SD_RECIPS_FILE);
+    seedFileIfMissing(SD_EVENTS_FILE);
     seedFileIfMissing(SD_RES_MSG_FILE);
 
     return true;
@@ -329,7 +331,7 @@ bool disconnectFogDevice(int deviceId) {
 
 int createBroadcast(int createdBy, const char *msgType, const char *severity,
                     const char *audience, const char *subject, const char *body,
-                    const char *status, int priority) {
+                    const char *status, int priority, int ttlHours) {
     JsonDocument doc;
     if (!readJsonArray(SD_BCASTS_FILE, doc)) {
         doc.to<JsonArray>();
@@ -337,6 +339,7 @@ int createBroadcast(int createdBy, const char *msgType, const char *severity,
     JsonArray arr = doc.as<JsonArray>();
     int id = nextId(SD_BCASTS_FILE);
 
+    unsigned long now = currentTimestamp();
     JsonObject bc = arr.add<JsonObject>();
     bc["id"]         = id;
     bc["created_by"] = createdBy;
@@ -347,7 +350,12 @@ int createBroadcast(int createdBy, const char *msgType, const char *severity,
     bc["body"]       = body;
     bc["status"]     = status;
     bc["priority"]   = priority;
-    bc["created_at"] = currentTimestamp();
+    bc["created_at"] = now;
+    bc["updated_at"] = now;
+    if (ttlHours > 0) {
+        bc["ttl_hours"]      = ttlHours;
+        bc["ttl_expires_at"] = now + (unsigned long)ttlHours * 3600UL;
+    }
 
     writeJsonArray(SD_BCASTS_FILE, doc);
     return id;
@@ -359,7 +367,8 @@ bool updateBroadcastStatus(int broadcastId, const char *newStatus) {
     JsonArray arr = doc.as<JsonArray>();
     for (JsonObject b : arr) {
         if ((b["id"] | 0) == broadcastId) {
-            b["status"] = newStatus;
+            b["status"]     = newStatus;
+            b["updated_at"] = currentTimestamp();
             return writeJsonArray(SD_BCASTS_FILE, doc);
         }
     }
@@ -375,8 +384,117 @@ bool updateResidentAdminMsg(int msgId, const char *status, const char *adminActi
             m["status"] = status;
             m["admin_action"] = adminAction;
             m["handled_by"] = handledBy;
+            m["handled_at"] = currentTimestamp();
             return writeJsonArray(SD_RES_MSG_FILE, doc);
         }
     }
     return false;
+}
+
+// ── Broadcast recipient helpers ─────────────────────────────────────
+
+void createRecipientsForBroadcast(int broadcastId) {
+    // Read all users and create a recipient entry for each active resident
+    JsonDocument usersDoc;
+    if (!readJsonArray(SD_USERS_FILE, usersDoc)) return;
+
+    JsonDocument recipDoc;
+    if (!readJsonArray(SD_RECIPS_FILE, recipDoc)) {
+        recipDoc.to<JsonArray>();
+    }
+    JsonArray arr = recipDoc.as<JsonArray>();
+    int nextRId = nextId(SD_RECIPS_FILE);
+    unsigned long now = currentTimestamp();
+
+    for (JsonObject u : usersDoc.as<JsonArray>()) {
+        int isActive = u["is_active"] | 0;
+        if (!isActive) continue;
+        String role = u["role"] | "";
+        if (role == "admin") continue;  // only residents/mobile users
+
+        JsonObject r = arr.add<JsonObject>();
+        r["id"]           = nextRId++;
+        r["broadcast_id"] = broadcastId;
+        r["user_id"]      = u["id"] | 0;
+        r["status"]       = "queued";
+        r["attempts"]     = 0;
+        r["created_at"]   = now;
+    }
+
+    writeJsonArray(SD_RECIPS_FILE, recipDoc);
+}
+
+void updateRecipientsStatus(int broadcastId, const char *newStatus) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_RECIPS_FILE, doc)) return;
+    JsonArray arr = doc.as<JsonArray>();
+    unsigned long now = currentTimestamp();
+    bool changed = false;
+
+    for (JsonObject r : arr) {
+        if ((r["broadcast_id"] | 0) == broadcastId) {
+            r["status"]   = newStatus;
+            r["attempts"] = (r["attempts"] | 0) + 1;
+            r["last_attempt_at"] = now;
+            if (strcmp(newStatus, "sent") == 0)      r["sent_at"]      = now;
+            if (strcmp(newStatus, "delivered") == 0)  r["delivered_at"] = now;
+            if (strcmp(newStatus, "read") == 0)       r["read_at"]      = now;
+            if (strcmp(newStatus, "failed") == 0)     r["fail_reason"]  = "manual";
+            changed = true;
+        }
+    }
+
+    if (changed) writeJsonArray(SD_RECIPS_FILE, doc);
+}
+
+void getRecipientStatusCounts(int broadcastId, int &total, int &queued,
+                              int &sent, int &delivered, int &readCount, int &failed) {
+    total = queued = sent = delivered = readCount = failed = 0;
+    JsonDocument doc;
+    if (!readJsonArray(SD_RECIPS_FILE, doc)) return;
+
+    for (JsonObject r : doc.as<JsonArray>()) {
+        if ((r["broadcast_id"] | 0) != broadcastId) continue;
+        total++;
+        String s = r["status"] | "queued";
+        if (s == "queued")         queued++;
+        else if (s == "sent")      sent++;
+        else if (s == "delivered") delivered++;
+        else if (s == "read")      readCount++;
+        else if (s == "failed")    failed++;
+    }
+}
+
+// ── Broadcast event helpers ─────────────────────────────────────────
+
+void addBroadcastEvent(int broadcastId, const char *eventType, const char *message) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_EVENTS_FILE, doc)) {
+        doc.to<JsonArray>();
+    }
+    JsonArray arr = doc.as<JsonArray>();
+    int id = nextId(SD_EVENTS_FILE);
+
+    JsonObject ev = arr.add<JsonObject>();
+    ev["id"]           = id;
+    ev["broadcast_id"] = broadcastId;
+    ev["event_type"]   = eventType;
+    if (message) ev["message"] = message;
+    ev["created_at"]   = currentTimestamp();
+
+    writeJsonArray(SD_EVENTS_FILE, doc);
+}
+
+void getBroadcastEvents(int broadcastId, JsonDocument &outDoc) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_EVENTS_FILE, doc)) {
+        outDoc.to<JsonArray>();
+        return;
+    }
+    JsonArray out = outDoc.to<JsonArray>();
+    for (JsonObject ev : doc.as<JsonArray>()) {
+        if ((ev["broadcast_id"] | 0) == broadcastId) {
+            out.add(ev);
+        }
+    }
 }

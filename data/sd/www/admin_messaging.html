@@ -120,6 +120,17 @@
     <script src="/static/vendor/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
     <script>
+        function escapeHtml(t){var d=document.createElement('div');d.appendChild(document.createTextNode(t||''));return d.innerHTML;}
+        function statusBadge(s){
+            var cls='bg-dark';
+            if(s==='sent') cls='bg-success';
+            else if(s==='queued') cls='bg-primary';
+            else if(s==='cancelled') cls='bg-secondary';
+            else if(s==='failed') cls='bg-danger';
+            else if(s==='draft') cls='bg-warning text-dark';
+            return '<span class="badge '+cls+'">'+escapeHtml(s)+'</span>';
+        }
+        function fmtTime(epoch){if(!epoch) return '';try{return new Date(epoch*1000).toLocaleString();}catch(e){return '';}}
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts) {
                 var total = broadcasts.length, queued = 0, drafts = 0;
@@ -127,12 +138,15 @@
                 document.getElementById('totalBroadcasts').textContent = total;
                 document.getElementById('queuedCount').textContent = queued;
                 document.getElementById('draftsCount').textContent = drafts;
+                // Show only the 5 most recent SOS broadcasts
                 var sosList = broadcasts.filter(function(b){return b.msg_type==='sos';});
+                sosList.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
+                sosList = sosList.slice(0, 5);
                 var tbody = document.getElementById('recentSosBody');
                 if (sosList.length===0) { tbody.innerHTML='<tr><td colspan="6" class="text-muted">No SOS broadcasts yet.</td></tr>'; return; }
                 sosList.forEach(function(s) {
                     var tr = document.createElement('tr');
-                    tr.innerHTML = '<td>'+s.id+'</td><td>'+(s.severity||'').toUpperCase()+'</td><td>'+(s.subject||'')+'</td><td><span class="badge bg-dark">'+(s.status||'')+'</span></td><td>'+(s.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+s.id+'">Open</a></td>';
+                    tr.innerHTML = '<td>'+s.id+'</td><td>'+escapeHtml((s.severity||'').toUpperCase())+'</td><td>'+escapeHtml(s.subject)+'</td><td>'+statusBadge(s.status)+'</td><td>'+fmtTime(s.created_at)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+s.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('recentSosBody').innerHTML='<tr><td colspan="6" class="text-muted">No SOS broadcasts yet.</td></tr>';});

@@ -40,10 +40,20 @@ bool disconnectFogDevice(int deviceId);
 // ── Broadcast helpers ───────────────────────────────────────────────
 int  createBroadcast(int createdBy, const char *msgType, const char *severity,
                      const char *audience, const char *subject, const char *body,
-                     const char *status, int priority);
+                     const char *status, int priority, int ttlHours = 0);
 
 // ── Status update helpers ────────────────────────────────────────────
 bool updateBroadcastStatus(int broadcastId, const char *newStatus);
 bool updateResidentAdminMsg(int msgId, const char *status, const char *adminAction, int handledBy);
+
+// ── Broadcast recipient helpers ─────────────────────────────────────
+void createRecipientsForBroadcast(int broadcastId);
+void updateRecipientsStatus(int broadcastId, const char *newStatus);
+void getRecipientStatusCounts(int broadcastId, int &total, int &queued,
+                              int &sent, int &delivered, int &read, int &failed);
+
+// ── Broadcast event helpers ─────────────────────────────────────────
+void addBroadcastEvent(int broadcastId, const char *eventType, const char *message = nullptr);
+void getBroadcastEvents(int broadcastId, JsonDocument &outDoc);
 
 #endif // SD_STORAGE_H

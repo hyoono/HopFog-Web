@@ -462,9 +462,28 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument doc;
         readJsonArray(SD_BCASTS_FILE, doc);
 
-        String out;
-        serializeJson(doc, out);
-        request->send(200, "application/json", out);
+        // Enrich each broadcast with recipient status counts
+        JsonDocument resp;
+        JsonArray out = resp.to<JsonArray>();
+        for (JsonObject b : doc.as<JsonArray>()) {
+            JsonObject o = out.add<JsonObject>();
+            for (JsonPair kv : b) {
+                o[kv.key()] = kv.value();
+            }
+            int total=0, queued=0, sent=0, delivered=0, readCount=0, failed=0;
+            getRecipientStatusCounts(b["id"] | 0, total, queued, sent, delivered, readCount, failed);
+            JsonObject sc = o["status_counts"].to<JsonObject>();
+            sc["total"]     = total;
+            sc["queued"]    = queued;
+            sc["sent"]      = sent;
+            sc["delivered"] = delivered;
+            sc["read"]      = readCount;
+            sc["failed"]    = failed;
+        }
+
+        String outStr;
+        serializeJson(resp, outStr);
+        request->send(200, "application/json", outStr);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
@@ -480,6 +499,19 @@ void registerApiRoutes(AsyncWebServer &server) {
         String subject  = request->hasParam("subject", true)    ? request->getParam("subject", true)->value()   : "";
         String body     = request->hasParam("body", true)       ? request->getParam("body", true)->value()      : "";
         String status   = request->hasParam("status", true)     ? request->getParam("status", true)->value()    : "draft";
+        int ttlHours    = request->hasParam("ttl_hours", true)  ? request->getParam("ttl_hours", true)->value().toInt() : 24;
+
+        // Validate enums (match original Python)
+        msgType.toLowerCase();
+        severity.toLowerCase();
+        status.toLowerCase();
+        if (msgType != "announcement" && msgType != "alert" && msgType != "sos") msgType = "announcement";
+        if (severity != "info" && severity != "warning" && severity != "critical") severity = "info";
+        if (status != "draft" && status != "queued") status = "draft";
+
+        // Clamp TTL: 1 hour minimum, 720 hours (30 days) maximum
+        if (ttlHours < 1) ttlHours = 1;
+        if (ttlHours > 720) ttlHours = 720;
 
         int priority = 10;
         if (msgType == "sos")   priority = 100;
@@ -487,13 +519,72 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         int id = createBroadcast(uid, msgType.c_str(), severity.c_str(),
                                  audience.c_str(), subject.c_str(), body.c_str(),
-                                 status.c_str(), priority);
+                                 status.c_str(), priority, ttlHours);
+
+        // Create recipient records for all active residents
+        createRecipientsForBroadcast(id);
+
+        // Create audit events
+        addBroadcastEvent(id, "created", "Broadcast created");
+        if (status == "queued") {
+            addBroadcastEvent(id, "queued", "Broadcast queued for delivery");
+        }
 
         JsonDocument resp;
         resp["message"]      = "Broadcast created";
         resp["broadcast_id"] = id;
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  BROADCASTS: GET /api/broadcasts/{id}  (detail + events)     │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/broadcasts\\/(\\d+)$", HTTP_GET,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int bId = request->pathArg(0).toInt();
+
+        // Find the broadcast
+        JsonDocument bcastDoc;
+        readJsonArray(SD_BCASTS_FILE, bcastDoc);
+        bool found = false;
+        JsonDocument resp;
+
+        for (JsonObject b : bcastDoc.as<JsonArray>()) {
+            if ((b["id"] | 0) == bId) {
+                // Copy broadcast fields
+                for (JsonPair kv : b) {
+                    resp[kv.key()] = kv.value();
+                }
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
+
+        // Add recipient status counts
+        int total=0, queued=0, sent=0, delivered=0, readCount=0, failed=0;
+        getRecipientStatusCounts(bId, total, queued, sent, delivered, readCount, failed);
+        JsonObject sc = resp["status_counts"].to<JsonObject>();
+        sc["total"]     = total;
+        sc["queued"]    = queued;
+        sc["sent"]      = sent;
+        sc["delivered"] = delivered;
+        sc["read"]      = readCount;
+        sc["failed"]    = failed;
+
+        // Add events
+        JsonDocument evDoc;
+        getBroadcastEvents(bId, evDoc);
+        resp["events"] = evDoc.as<JsonArray>();
+
+        String outStr;
+        serializeJson(resp, outStr);
+        request->send(200, "application/json", outStr);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
@@ -644,14 +735,36 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
         int bId = request->pathArg(0).toInt();
-        if (updateBroadcastStatus(bId, "sent")) {
-            JsonDocument resp;
-            resp["message"] = "Marked as sent";
-            String out; serializeJson(resp, out);
-            request->send(200, "application/json", out);
-        } else {
-            sendJsonError(request, 404, "Broadcast not found");
+
+        // Validate broadcast exists and is in a sendable state
+        JsonDocument bcastDoc;
+        readJsonArray(SD_BCASTS_FILE, bcastDoc);
+        bool found = false;
+        String curStatus;
+        for (JsonObject b : bcastDoc.as<JsonArray>()) {
+            if ((b["id"] | 0) == bId) {
+                curStatus = b["status"] | "";
+                found = true;
+                break;
+            }
         }
+        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
+        if (curStatus == "sent" || curStatus == "cancelled" || curStatus == "failed") {
+            sendJsonError(request, 400, ("Cannot mark_sent: broadcast is already " + curStatus).c_str());
+            return;
+        }
+
+        // Update broadcast status
+        updateBroadcastStatus(bId, "sent");
+        // Update all recipients to "sent" with sent_at timestamp
+        updateRecipientsStatus(bId, "sent");
+        // Create audit event
+        addBroadcastEvent(bId, "marked_sent", "Manually marked as sent (simulation)");
+
+        JsonDocument resp;
+        resp["message"] = "Marked as sent";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
@@ -663,14 +776,32 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
         int bId = request->pathArg(0).toInt();
-        if (updateBroadcastStatus(bId, "cancelled")) {
-            JsonDocument resp;
-            resp["message"] = "Broadcast cancelled";
-            String out; serializeJson(resp, out);
-            request->send(200, "application/json", out);
-        } else {
-            sendJsonError(request, 404, "Broadcast not found");
+
+        // Validate broadcast exists and is cancellable
+        JsonDocument bcastDoc;
+        readJsonArray(SD_BCASTS_FILE, bcastDoc);
+        bool found = false;
+        String curStatus;
+        for (JsonObject b : bcastDoc.as<JsonArray>()) {
+            if ((b["id"] | 0) == bId) {
+                curStatus = b["status"] | "";
+                found = true;
+                break;
+            }
         }
+        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
+        if (curStatus == "sent" || curStatus == "cancelled") {
+            sendJsonError(request, 400, ("Cannot cancel: broadcast is already " + curStatus).c_str());
+            return;
+        }
+
+        updateBroadcastStatus(bId, "cancelled");
+        addBroadcastEvent(bId, "cancelled", "Broadcast cancelled by admin");
+
+        JsonDocument resp;
+        resp["message"] = "Broadcast cancelled";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
@@ -684,6 +815,11 @@ void registerApiRoutes(AsyncWebServer &server) {
         int reqId = request->pathArg(0).toInt();
         String escalateTo = request->hasParam("escalate_to", true)
             ? request->getParam("escalate_to", true)->value() : "sos";
+        // Validate escalate_to
+        escalateTo.toLowerCase();
+        if (escalateTo != "sos" && escalateTo != "alert" && escalateTo != "announcement") {
+            escalateTo = "sos";
+        }
 
         // Read the SOS request
         JsonDocument resDoc;
@@ -707,9 +843,15 @@ void registerApiRoutes(AsyncWebServer &server) {
         String subject = found["subject"] | "Resident SOS Request";
         String body    = found["body"] | "";
 
-        createBroadcast(uid, escalateTo.c_str(), severity.c_str(),
+        int bId = createBroadcast(uid, escalateTo.c_str(), severity.c_str(),
                        "all_residents", subject.c_str(), body.c_str(),
-                       "queued", priority);
+                       "queued", priority, 2);  // 2-hour TTL for SOS
+
+        // Create recipients and audit events
+        createRecipientsForBroadcast(bId);
+        String eventMsg = "Created from SOS request #" + String(reqId);
+        addBroadcastEvent(bId, "created", eventMsg.c_str());
+        addBroadcastEvent(bId, "queued", "Queued for delivery");
 
         // Mark the SOS request as resolved
         updateResidentAdminMsg(reqId, "resolved",

@@ -98,15 +98,21 @@
     <script src="/static/vendor/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
     <script>
+        function escapeHtml(t){var d=document.createElement('div');d.appendChild(document.createTextNode(t||''));return d.innerHTML;}
+        function fmtTime(epoch){if(!epoch) return '';try{return new Date(epoch*1000).toLocaleString();}catch(e){return '';}}
         document.addEventListener('DOMContentLoaded', function(){
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
-                var queued=broadcasts.filter(function(b){return b.status==='queued';}),drafts=broadcasts.filter(function(b){return b.status==='draft';});
+                var queued=broadcasts.filter(function(b){return b.status==='queued';});
+                var drafts=broadcasts.filter(function(b){return b.status==='draft';});
+                // Sort queued by priority DESC then created_at ASC (matching original Python)
+                queued.sort(function(a,b){return (b.priority||0)-(a.priority||0)||(a.created_at||0)-(b.created_at||0);});
+                drafts.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 var qb=document.getElementById('queuedBody');
                 if(queued.length===0){qb.innerHTML='<tr><td colspan="7" class="text-muted">No queued broadcasts.</td></tr>';}
-                else{queued.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.priority||'')+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.ttl_expires_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';qb.appendChild(tr);});}
+                else{queued.forEach(function(b){var tr=document.createElement('tr');var ttlText=b.ttl_hours?b.ttl_hours+'h':'';tr.innerHTML='<td>'+b.id+'</td><td>'+(b.priority||'')+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:360px;">'+escapeHtml(b.subject)+'</td><td>'+ttlText+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';qb.appendChild(tr);});}
                 var db=document.getElementById('draftsBody');
                 if(drafts.length===0){db.innerHTML='<tr><td colspan="6" class="text-muted">No drafts.</td></tr>';}
-                else{drafts.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(b.subject||'')+'</td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';db.appendChild(tr);});}
+                else{drafts.forEach(function(b){var tr=document.createElement('tr');tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:360px;">'+escapeHtml(b.subject)+'</td><td>'+fmtTime(b.created_at)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';db.appendChild(tr);});}
             }).catch(function(){
                 document.getElementById('queuedBody').innerHTML='<tr><td colspan="7" class="text-muted">No queued broadcasts.</td></tr>';
                 document.getElementById('draftsBody').innerHTML='<tr><td colspan="6" class="text-muted">No drafts.</td></tr>';

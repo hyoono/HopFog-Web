@@ -111,13 +111,25 @@
     <script src="/static/js/scripts.js"></script>
     <script>
         function escapeHtml(t){var d=document.createElement('div');d.appendChild(document.createTextNode(t||''));return d.innerHTML;}
+        function statusBadge(s){
+            var cls='bg-dark';
+            if(s==='sent') cls='bg-success';
+            else if(s==='queued') cls='bg-primary';
+            else if(s==='cancelled') cls='bg-secondary';
+            else if(s==='failed') cls='bg-danger';
+            else if(s==='draft') cls='bg-warning text-dark';
+            return '<span class="badge '+cls+'">'+escapeHtml(s)+'</span>';
+        }
+        function fmtTime(epoch){if(!epoch) return '';try{return new Date(epoch*1000).toLocaleString();}catch(e){return '';}}
         function loadBroadcasts(){
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
                 var tbody=document.getElementById('broadcastsBody');tbody.innerHTML='';
                 if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="7" class="text-muted">No broadcasts yet.</td></tr>';return;}
+                // Sort by created_at descending (newest first)
+                broadcasts.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 broadcasts.forEach(function(b){
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:260px;">'+escapeHtml(b.subject)+'</td><td><span class="badge bg-dark">'+escapeHtml(b.status)+'</span></td><td>'+(b.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:260px;">'+escapeHtml(b.subject)+'</td><td>'+statusBadge(b.status)+'</td><td>'+fmtTime(b.created_at)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             });

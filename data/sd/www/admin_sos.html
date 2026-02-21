@@ -120,35 +120,66 @@
     <script src="/static/vendor/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
     <script>
+        function escapeHtml(t){var d=document.createElement('div');d.appendChild(document.createTextNode(t||''));return d.innerHTML;}
+        function statusBadge(s){
+            var cls='bg-dark';
+            if(s==='sent') cls='bg-success';
+            else if(s==='queued') cls='bg-primary';
+            else if(s==='cancelled') cls='bg-secondary';
+            else if(s==='failed') cls='bg-danger';
+            else if(s==='draft') cls='bg-warning text-dark';
+            return '<span class="badge '+cls+'">'+escapeHtml(s)+'</span>';
+        }
+        function fmtTime(epoch){if(!epoch) return '';try{return new Date(epoch*1000).toLocaleString();}catch(e){return '';}}
         function sendQuickSos(subject,body){
             document.getElementById('sosbody').value=body;
             var fd=new FormData();fd.append('msg_type','sos');fd.append('severity','critical');fd.append('ttl_hours','2');fd.append('subject',subject);fd.append('body',body);fd.append('status','queued');
-            fetch('/api/broadcasts',{method:'POST',body:fd}).then(function(){window.location.reload();}).catch(function(){alert('Error sending SOS.');});
+            fetch('/api/broadcasts',{method:'POST',body:fd}).then(function(r){
+                if(!r.ok) return r.json().then(function(d){alert(d.error||'Error');});
+                window.location.reload();
+            }).catch(function(){alert('Error sending SOS.');});
         }
         function escalateSos(id,type){
             var fd=new FormData();fd.append('escalate_to',type);
-            fetch('/api/sos-requests/'+id+'/escalate',{method:'POST',body:fd}).then(function(){window.location.reload();}).catch(function(){alert('Error escalating SOS request.');});
+            fetch('/api/sos-requests/'+id+'/escalate',{method:'POST',body:fd}).then(function(r){
+                if(!r.ok) return r.json().then(function(d){alert(d.error||'Error');});
+                window.location.reload();
+            }).catch(function(){alert('Error escalating SOS request.');});
         }
         function dismissSos(id){
-            fetch('/api/sos-requests/'+id+'/dismiss',{method:'POST'}).then(function(){window.location.reload();}).catch(function(){alert('Error dismissing SOS request.');});
+            if(!confirm('Dismiss this SOS request?')) return;
+            fetch('/api/sos-requests/'+id+'/dismiss',{method:'POST'}).then(function(r){
+                if(!r.ok) return r.json().then(function(d){alert(d.error||'Error');});
+                window.location.reload();
+            }).catch(function(){alert('Error dismissing SOS request.');});
         }
         document.addEventListener('DOMContentLoaded', function(){
+            // Load incoming SOS requests — filter to only show actionable ones (queued|delivered|read)
             fetch('/api/resident-admin/messages').then(function(r){return r.json();}).then(function(requests){
+                // Filter: only sos_request kind, only actionable statuses
+                var filtered=requests.filter(function(r){
+                    return r.kind==='sos_request' && (r.status==='queued'||r.status==='delivered'||r.status==='read');
+                });
+                // Sort by priority DESC then created_at DESC (matching original Python)
+                filtered.sort(function(a,b){return (b.priority||0)-(a.priority||0)||(b.created_at||0)-(a.created_at||0);});
                 var tbody=document.getElementById('incomingSosBody');
-                if(!requests||requests.length===0){tbody.innerHTML='<tr><td colspan="6" class="text-muted">No incoming SOS requests right now.</td></tr>';return;}
-                requests.forEach(function(r){
+                if(filtered.length===0){tbody.innerHTML='<tr><td colspan="6" class="text-muted">No incoming SOS requests right now.</td></tr>';return;}
+                filtered.forEach(function(r){
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>#'+r.id+'</td><td>'+(r.sender_id||r.from||'')+'</td><td>'+(r.subject||'SOS Request')+'</td><td style="max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(r.body||'')+'</td><td>'+(r.created_at||'')+'</td><td class="text-end"><button class="btn btn-sm btn-warning" onclick="escalateSos('+r.id+',\'alert\')">Escalate to Alert</button> <button class="btn btn-sm btn-danger" onclick="escalateSos('+r.id+',\'sos\')">Broadcast SOS</button> <button class="btn btn-sm btn-outline-secondary" onclick="dismissSos('+r.id+')">Dismiss</button></td>';
+                    tr.innerHTML='<td>#'+r.id+'</td><td>'+(r.sender_id||'')+'</td><td>'+escapeHtml(r.subject||'SOS Request')+'</td><td style="max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(r.body||'')+'</td><td>'+fmtTime(r.created_at)+'</td><td class="text-end"><button class="btn btn-sm btn-warning" onclick="escalateSos('+r.id+',\'alert\')">Escalate to Alert</button> <button class="btn btn-sm btn-danger" onclick="escalateSos('+r.id+',\'sos\')">Broadcast SOS</button> <button class="btn btn-sm btn-outline-secondary" onclick="dismissSos('+r.id+')">Dismiss</button></td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('incomingSosBody').innerHTML='<tr><td colspan="6" class="text-muted">No incoming SOS requests right now.</td></tr>';});
+
+            // Load recent SOS broadcasts — filter to only sos msg_type
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
                 var sosList=broadcasts.filter(function(b){return b.msg_type==='sos';});
+                sosList.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 var tbody=document.getElementById('recentSosBody');
                 if(sosList.length===0){tbody.innerHTML='<tr><td colspan="6" class="text-muted">No SOS broadcasts yet.</td></tr>';return;}
                 sosList.forEach(function(s){
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+s.id+'</td><td>'+(s.severity||'')+'</td><td class="text-truncate" style="max-width:360px;">'+(s.subject||'')+'</td><td><span class="badge bg-dark">'+(s.status||'')+'</span></td><td>'+(s.created_at||'')+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+s.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+s.id+'</td><td>'+escapeHtml(s.severity)+'</td><td class="text-truncate" style="max-width:360px;">'+escapeHtml(s.subject)+'</td><td>'+statusBadge(s.status)+'</td><td>'+fmtTime(s.created_at)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+s.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('recentSosBody').innerHTML='<tr><td colspan="6" class="text-muted">No SOS broadcasts yet.</td></tr>';});

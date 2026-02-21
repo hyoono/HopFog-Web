@@ -48,6 +48,8 @@
 #define SD_MSGS_FILE   "/db/messages.json"
 #define SD_FOG_FILE    "/db/fog_devices.json"
 #define SD_BCASTS_FILE "/db/broadcasts.json"
+#define SD_RECIPS_FILE "/db/broadcast_recipients.json"
+#define SD_EVENTS_FILE "/db/broadcast_events.json"
 #define SD_RES_MSG_FILE "/db/resident_admin_msgs.json"
 
 // ── Auth ────────────────────────────────────────────────────────────

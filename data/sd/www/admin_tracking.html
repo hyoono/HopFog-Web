@@ -87,13 +87,25 @@
     <script src="/static/vendor/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
     <script>
+        function escapeHtml(t){var d=document.createElement('div');d.appendChild(document.createTextNode(t||''));return d.innerHTML;}
+        function statusBadge(s){
+            var cls='bg-dark';
+            if(s==='sent') cls='bg-success';
+            else if(s==='queued') cls='bg-primary';
+            else if(s==='cancelled') cls='bg-secondary';
+            else if(s==='failed') cls='bg-danger';
+            else if(s==='draft') cls='bg-warning text-dark';
+            return '<span class="badge '+cls+'">'+escapeHtml(s)+'</span>';
+        }
         document.addEventListener('DOMContentLoaded', function(){
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
                 var tbody=document.getElementById('trackingBody');
                 if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>';return;}
+                broadcasts.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 broadcasts.forEach(function(b){
+                    var sc=b.status_counts||{};
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+b.id+'</td><td>'+(b.msg_type||'')+'</td><td>'+(b.severity||'')+'</td><td class="text-truncate" style="max-width:220px;">'+(b.subject||'')+'</td><td><span class="badge bg-dark">'+(b.status||'')+'</span></td><td>'+(b.total||0)+'</td><td>'+(b.queued||0)+'</td><td>'+(b.sent||0)+'</td><td>'+(b.delivered||0)+'</td><td>'+(b.read||0)+'</td><td>'+(b.failed||0)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:220px;">'+escapeHtml(b.subject)+'</td><td>'+statusBadge(b.status)+'</td><td>'+(sc.total||0)+'</td><td>'+(sc.queued||0)+'</td><td>'+(sc.sent||0)+'</td><td>'+(sc.delivered||0)+'</td><td>'+(sc.read||0)+'</td><td>'+(sc.failed||0)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('trackingBody').innerHTML='<tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>';});
