@@ -8,11 +8,53 @@ from services.xbee_service import send_broadcast
 class BroadcastDispatcher:
     def __init__(self):
         self.running = False
+        self._task = None
+
+    def wake(self):
+        # Called from sync routes to trigger immediate processing
+        print("🔔 Dispatcher wake() called")
+        self.process_queue()
+
+    def dispatch_now(self, broadcast_id: int):
+        db: Session = SessionLocal()
+        try:
+            b = (
+                db.query(BroadcastMessage)
+                .filter(BroadcastMessage.id == broadcast_id)
+                .first()
+            )
+            if not b:
+                print(f"dispatch_now: broadcast {broadcast_id} not found")
+                return
+
+            if b.status != "queued":
+                print(f"dispatch_now: broadcast {broadcast_id} status is {b.status}, skipping")
+                return
+
+            print(f"⚡ dispatch_now: Dispatching broadcast ID {b.id}")
+
+            try:
+                send_broadcast(b.body or b.subject)
+                b.status = "sent"
+                db.commit()
+                print("✅ dispatch_now: sent")
+            except Exception as e:
+                print("❌ dispatch_now: XBee send failed:", e)
+                b.status = "failed"
+                db.commit()
+        finally:
+            db.close()
 
     async def start(self):
         self.running = True
         print("🚀 Broadcast Dispatcher started")
-        asyncio.create_task(self.loop())
+        self._task = asyncio.create_task(self.loop())
+
+    async def stop(self):
+        print("🛑 Stopping Broadcast Dispatcher...")
+        self.running = False
+        if self._task:
+            await self._task
 
     async def loop(self):
         while self.running:
@@ -38,16 +80,14 @@ class BroadcastDispatcher:
                 print(f"📡 Dispatching broadcast ID {broadcast.id}")
 
                 try:
-                    # 🔥 ACTUAL SEND
                     send_broadcast(broadcast.body or broadcast.subject)
-
                     broadcast.status = "sent"
                     db.commit()
                     print("✅ Broadcast sent successfully")
 
                 except Exception as e:
                     print("❌ XBee send failed:", e)
-                    broadcast.status = "FAILED"
+                    broadcast.status = "failed"
                     db.commit()
 
         finally:

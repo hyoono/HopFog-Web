@@ -12,9 +12,7 @@ from database.connection import engine
 from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage, BroadcastMessage
 from database.deps import get_db
 
-
 from routes.auth import verify_password, get_password_hash, create_access_token, verify_token
-
 
 from routes.users import router as users_router
 from routes.messages import router as messages_router
@@ -25,12 +23,10 @@ from routes.xbee_api import router as xbee_router
 
 from services.broadcast_dispatcher import dispatcher
 
-
 from services.broadcast_dispatcher import dispatcher
 
-
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 
 app = FastAPI()
@@ -49,17 +45,15 @@ app.include_router(xbee_router)
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
-    # Start priority-based admin broadcast dispatcher (SOS > Alert > Announcement)
-    dispatcher.start()
 
-
-@app.on_event("shutdown")
-def on_shutdown():
-    dispatcher.stop()
 
 @app.on_event("startup")
-async def startup_event():
+async def on_startup():
     await dispatcher.start()
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await dispatcher.stop()
 
 @app.get("/", response_class=HTMLResponse)
 def login_page(request: Request):
