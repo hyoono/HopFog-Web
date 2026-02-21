@@ -453,6 +453,137 @@ void registerApiRoutes(AsyncWebServer &server) {
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
+    // │  BROADCASTS: GET /api/broadcasts/{id}  (detail + events)     │
+    // │  ⚠ Must be registered BEFORE non-regex /api/broadcasts       │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/broadcasts\\/(\\d+)$", HTTP_GET,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int bId = request->pathArg(0).toInt();
+
+        // Find the broadcast
+        JsonDocument bcastDoc;
+        readJsonArray(SD_BCASTS_FILE, bcastDoc);
+        bool found = false;
+        JsonDocument resp;
+
+        for (JsonObject b : bcastDoc.as<JsonArray>()) {
+            if ((b["id"] | 0) == bId) {
+                // Copy broadcast fields
+                for (JsonPair kv : b) {
+                    resp[kv.key()] = kv.value();
+                }
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
+
+        // Add recipient status counts
+        int total=0, queued=0, sent=0, delivered=0, readCount=0, failed=0;
+        getRecipientStatusCounts(bId, total, queued, sent, delivered, readCount, failed);
+        JsonObject sc = resp["status_counts"].to<JsonObject>();
+        sc["total"]     = total;
+        sc["queued"]    = queued;
+        sc["sent"]      = sent;
+        sc["delivered"] = delivered;
+        sc["read"]      = readCount;
+        sc["failed"]    = failed;
+
+        // Add events
+        JsonDocument evDoc;
+        getBroadcastEvents(bId, evDoc);
+        resp["events"] = evDoc.as<JsonArray>();
+
+        String outStr;
+        serializeJson(resp, outStr);
+        request->send(200, "application/json", outStr);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  BROADCASTS: POST /api/broadcasts/{id}/mark_sent             │
+    // │  ⚠ Must be registered BEFORE non-regex /api/broadcasts       │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/broadcasts\\/(\\d+)\\/mark_sent$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int bId = request->pathArg(0).toInt();
+
+        // Validate broadcast exists and is in a sendable state
+        JsonDocument bcastDoc;
+        readJsonArray(SD_BCASTS_FILE, bcastDoc);
+        bool found = false;
+        String curStatus;
+        for (JsonObject b : bcastDoc.as<JsonArray>()) {
+            if ((b["id"] | 0) == bId) {
+                curStatus = b["status"] | "";
+                found = true;
+                break;
+            }
+        }
+        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
+        if (curStatus == "sent" || curStatus == "cancelled" || curStatus == "failed") {
+            sendJsonError(request, 400, ("Cannot mark_sent: broadcast is already " + curStatus).c_str());
+            return;
+        }
+
+        // Update broadcast status
+        updateBroadcastStatus(bId, "sent");
+        // Update all recipients to "sent" with sent_at timestamp
+        updateRecipientsStatus(bId, "sent");
+        // Create audit event
+        addBroadcastEvent(bId, "marked_sent", "Manually marked as sent (simulation)");
+
+        JsonDocument resp;
+        resp["message"] = "Marked as sent";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  BROADCASTS: POST /api/broadcasts/{id}/cancel                │
+    // │  ⚠ Must be registered BEFORE non-regex /api/broadcasts       │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/broadcasts\\/(\\d+)\\/cancel$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int bId = request->pathArg(0).toInt();
+
+        // Validate broadcast exists and is cancellable
+        JsonDocument bcastDoc;
+        readJsonArray(SD_BCASTS_FILE, bcastDoc);
+        bool found = false;
+        String curStatus;
+        for (JsonObject b : bcastDoc.as<JsonArray>()) {
+            if ((b["id"] | 0) == bId) {
+                curStatus = b["status"] | "";
+                found = true;
+                break;
+            }
+        }
+        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
+        if (curStatus == "sent" || curStatus == "cancelled") {
+            sendJsonError(request, 400, ("Cannot cancel: broadcast is already " + curStatus).c_str());
+            return;
+        }
+
+        updateBroadcastStatus(bId, "cancelled");
+        addBroadcastEvent(bId, "cancelled", "Broadcast cancelled by admin");
+
+        JsonDocument resp;
+        resp["message"] = "Broadcast cancelled";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
     // │  BROADCASTS: GET /api/broadcasts                             │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/api/broadcasts", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -535,56 +666,6 @@ void registerApiRoutes(AsyncWebServer &server) {
         resp["broadcast_id"] = id;
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
-    });
-
-    // ╭───────────────────────────────────────────────────────────────╮
-    // │  BROADCASTS: GET /api/broadcasts/{id}  (detail + events)     │
-    // ╰───────────────────────────────────────────────────────────────╯
-    server.on("^\\/api\\/broadcasts\\/(\\d+)$", HTTP_GET,
-              [](AsyncWebServerRequest *request) {
-        int uid = authenticateRequest(request);
-        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
-
-        int bId = request->pathArg(0).toInt();
-
-        // Find the broadcast
-        JsonDocument bcastDoc;
-        readJsonArray(SD_BCASTS_FILE, bcastDoc);
-        bool found = false;
-        JsonDocument resp;
-
-        for (JsonObject b : bcastDoc.as<JsonArray>()) {
-            if ((b["id"] | 0) == bId) {
-                // Copy broadcast fields
-                for (JsonPair kv : b) {
-                    resp[kv.key()] = kv.value();
-                }
-                found = true;
-                break;
-            }
-        }
-
-        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
-
-        // Add recipient status counts
-        int total=0, queued=0, sent=0, delivered=0, readCount=0, failed=0;
-        getRecipientStatusCounts(bId, total, queued, sent, delivered, readCount, failed);
-        JsonObject sc = resp["status_counts"].to<JsonObject>();
-        sc["total"]     = total;
-        sc["queued"]    = queued;
-        sc["sent"]      = sent;
-        sc["delivered"] = delivered;
-        sc["read"]      = readCount;
-        sc["failed"]    = failed;
-
-        // Add events
-        JsonDocument evDoc;
-        getBroadcastEvents(bId, evDoc);
-        resp["events"] = evDoc.as<JsonArray>();
-
-        String outStr;
-        serializeJson(resp, outStr);
-        request->send(200, "application/json", outStr);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
@@ -724,84 +805,6 @@ void registerApiRoutes(AsyncWebServer &server) {
         resp["id"]      = id;
         String out; serializeJson(resp, out);
         request->send(201, "application/json", out);
-    });
-
-    // ╭───────────────────────────────────────────────────────────────╮
-    // │  BROADCASTS: POST /api/broadcasts/{id}/mark_sent             │
-    // ╰───────────────────────────────────────────────────────────────╯
-    server.on("^\\/api\\/broadcasts\\/(\\d+)\\/mark_sent$", HTTP_POST,
-              [](AsyncWebServerRequest *request) {
-        int uid = authenticateRequest(request);
-        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
-
-        int bId = request->pathArg(0).toInt();
-
-        // Validate broadcast exists and is in a sendable state
-        JsonDocument bcastDoc;
-        readJsonArray(SD_BCASTS_FILE, bcastDoc);
-        bool found = false;
-        String curStatus;
-        for (JsonObject b : bcastDoc.as<JsonArray>()) {
-            if ((b["id"] | 0) == bId) {
-                curStatus = b["status"] | "";
-                found = true;
-                break;
-            }
-        }
-        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
-        if (curStatus == "sent" || curStatus == "cancelled" || curStatus == "failed") {
-            sendJsonError(request, 400, ("Cannot mark_sent: broadcast is already " + curStatus).c_str());
-            return;
-        }
-
-        // Update broadcast status
-        updateBroadcastStatus(bId, "sent");
-        // Update all recipients to "sent" with sent_at timestamp
-        updateRecipientsStatus(bId, "sent");
-        // Create audit event
-        addBroadcastEvent(bId, "marked_sent", "Manually marked as sent (simulation)");
-
-        JsonDocument resp;
-        resp["message"] = "Marked as sent";
-        String out; serializeJson(resp, out);
-        request->send(200, "application/json", out);
-    });
-
-    // ╭───────────────────────────────────────────────────────────────╮
-    // │  BROADCASTS: POST /api/broadcasts/{id}/cancel                │
-    // ╰───────────────────────────────────────────────────────────────╯
-    server.on("^\\/api\\/broadcasts\\/(\\d+)\\/cancel$", HTTP_POST,
-              [](AsyncWebServerRequest *request) {
-        int uid = authenticateRequest(request);
-        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
-
-        int bId = request->pathArg(0).toInt();
-
-        // Validate broadcast exists and is cancellable
-        JsonDocument bcastDoc;
-        readJsonArray(SD_BCASTS_FILE, bcastDoc);
-        bool found = false;
-        String curStatus;
-        for (JsonObject b : bcastDoc.as<JsonArray>()) {
-            if ((b["id"] | 0) == bId) {
-                curStatus = b["status"] | "";
-                found = true;
-                break;
-            }
-        }
-        if (!found) { sendJsonError(request, 404, "Broadcast not found"); return; }
-        if (curStatus == "sent" || curStatus == "cancelled") {
-            sendJsonError(request, 400, ("Cannot cancel: broadcast is already " + curStatus).c_str());
-            return;
-        }
-
-        updateBroadcastStatus(bId, "cancelled");
-        addBroadcastEvent(bId, "cancelled", "Broadcast cancelled by admin");
-
-        JsonDocument resp;
-        resp["message"] = "Broadcast cancelled";
-        String out; serializeJson(resp, out);
-        request->send(200, "application/json", out);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
