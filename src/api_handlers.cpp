@@ -899,5 +899,56 @@ void registerApiRoutes(AsyncWebServer &server) {
         }
     });
 
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  XBEE: GET /api/xbee/status                                  │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/xbee/status", HTTP_GET,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        JsonDocument resp;
+        resp["tx_pin"]  = XBEE_TX_PIN;
+        resp["rx_pin"]  = XBEE_RX_PIN;
+        resp["baud"]    = XBEE_BAUD;
+        resp["mode"]    = "API 1";
+        resp["address"] = "broadcast (0x000000000000FFFF)";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  XBEE: POST /api/xbee/test                                   │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/xbee/test", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        String message = "HOPFOG_TEST|Hello from HopFog!";
+        if (request->hasParam("message", true)) {
+            String custom = request->getParam("message", true)->value();
+            if (custom.length() > 0 && custom.length() <= 200) {
+                message = "HOPFOG_TEST|" + custom;
+            }
+        }
+
+        uint8_t frameId = xbeeSendBroadcast(message.c_str(), message.length());
+
+        JsonDocument resp;
+        if (frameId > 0) {
+            resp["success"]  = true;
+            resp["frame_id"] = frameId;
+            resp["payload"]  = message;
+            resp["length"]   = message.length();
+            resp["message"]  = "Test message sent via XBee broadcast";
+        } else {
+            resp["success"] = false;
+            resp["message"] = "Failed to send — payload too large or empty";
+        }
+        String out; serializeJson(resp, out);
+        request->send(frameId > 0 ? 200 : 400, "application/json", out);
+    });
+
     Serial.println("[HTTP] API routes registered");
 }

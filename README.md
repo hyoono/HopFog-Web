@@ -5,6 +5,9 @@ built as an ESP32 firmware with SD card storage.
 
 > **📖 Full deployment guide:** See **[DEPLOY.md](DEPLOY.md)** for detailed
 > step-by-step instructions, wiring diagrams, and troubleshooting.
+>
+> **📡 XBee testing guide:** See **[XBEE_TESTING.md](XBEE_TESTING.md)** for
+> how to test XBee S2C communication with XCTU.
 
 ## How to Deploy (TL;DR)
 
@@ -184,13 +187,15 @@ After boot, the serial monitor will print:
 │   ├── sd_storage.h        # SD card JSON data operations
 │   ├── auth.h              # Token-based authentication
 │   ├── web_server.h        # Static file serving
-│   └── api_handlers.h      # REST API endpoint handlers
+│   ├── api_handlers.h      # REST API endpoint handlers
+│   └── xbee_comm.h         # XBee S2C ZigBee serial interface
 ├── src/
 │   ├── main.cpp            # Entry point (WiFi AP + SD + server init)
 │   ├── sd_storage.cpp      # JSON read/write on SD card
 │   ├── auth.cpp            # Password hashing + session tokens
 │   ├── web_server.cpp      # Static file routes from SD card
-│   └── api_handlers.cpp    # REST API routes (login, users, etc.)
+│   ├── api_handlers.cpp    # REST API routes (login, users, etc.)
+│   └── xbee_comm.cpp       # XBee S2C UART2 driver (API mode 1)
 ├── data/sd/                # Files to copy to the SD card
 │   └── www/                # Web UI (HTML, CSS, JS, images)
 ├── app/                    # Original Python source (reference)
@@ -230,6 +235,8 @@ After boot, the serial monitor will print:
 | POST | `/api/mobile/login` | Mobile app login |
 | GET | `/api/resident-admin/messages` | List resident→admin messages |
 | POST | `/api/resident-admin/messages` | Create resident→admin message |
+| GET | `/api/xbee/status` | XBee config info (pins, baud) |
+| POST | `/api/xbee/test` | Send test message via XBee broadcast |
 
 ## Original Python Version
 

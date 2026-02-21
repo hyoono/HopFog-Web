@@ -61,6 +61,83 @@
                         <li class="breadcrumb-item"><a href="/admin/messaging">Admin Messaging</a></li>
                         <li class="breadcrumb-item active">Testing</li>
                     </ol>
+                    <!-- XBee Communication Test -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <i class="fas fa-satellite-dish me-1"></i>XBee S2C Communication Test
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted mb-3">
+                                Send a test message via the XBee S2C ZigBee radio.
+                                Open <strong>XCTU</strong> on a second XBee to see incoming frames.
+                                <a href="https://github.com/hyoono/HopFog-Web/blob/main/XBEE_TESTING.md" target="_blank">View full testing guide →</a>
+                            </p>
+
+                            <!-- XBee Status -->
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body py-2 px-3">
+                                            <small class="text-muted">TX Pin (ESP32 → XBee DIN)</small>
+                                            <div class="fw-bold" id="xbeeTxPin">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body py-2 px-3">
+                                            <small class="text-muted">RX Pin (XBee DOUT → ESP32)</small>
+                                            <div class="fw-bold" id="xbeeRxPin">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body py-2 px-3">
+                                            <small class="text-muted">Baud Rate / Mode</small>
+                                            <div class="fw-bold" id="xbeeBaud">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Test Message Form -->
+                            <div class="mb-3">
+                                <label for="xbeeTestMsg" class="form-label fw-bold">Test Message</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">HOPFOG_TEST|</span>
+                                    <input type="text" class="form-control" id="xbeeTestMsg" value="Hello from HopFog!" maxlength="187" placeholder="Enter test message...">
+                                </div>
+                                <div class="form-text">Max 200 chars total (including "HOPFOG_TEST|" prefix). The message is sent as a ZigBee broadcast to all nodes in the PAN.</div>
+                            </div>
+
+                            <button class="btn btn-primary" id="btnSendXBee" onclick="sendXBeeTest()">
+                                <i class="fas fa-paper-plane me-1"></i>Send Test Message
+                            </button>
+
+                            <!-- Result -->
+                            <div id="xbeeResult" class="mt-3" style="display:none;">
+                                <div class="alert" id="xbeeResultAlert">
+                                    <div id="xbeeResultText"></div>
+                                </div>
+                            </div>
+
+                            <!-- Frame Log -->
+                            <div id="xbeeLog" class="mt-3" style="display:none;">
+                                <h6>Sent Frames Log</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr><th>#</th><th>Time</th><th>Frame ID</th><th>Payload</th><th>Status</th></tr>
+                                        </thead>
+                                        <tbody id="xbeeLogBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Functional Tests Checklist -->
                     <div class="card mb-4">
                         <div class="card-header"><i class="fas fa-vial me-1"></i>Functional Tests</div>
                         <div class="card-body">
@@ -75,11 +152,12 @@
                         </div>
                     </div>
                     <div class="card">
-                        <div class="card-header"><i class="fas fa-screwdriver-wrench me-1"></i>Integration Tests (Later)</div>
+                        <div class="card-header"><i class="fas fa-screwdriver-wrench me-1"></i>Integration Tests</div>
                         <div class="card-body">
                             <ul class="mb-0">
-                                <li>Fog dispatcher pulls QUEUED broadcasts and pushes to IEEE 802.15.4</li>
-                                <li>Fog reports delivery ACKs back to update recipient statuses</li>
+                                <li>XBee S2C sends ZigBee broadcast when Mark Sent is clicked</li>
+                                <li>XCTU on receiving XBee shows the API frame with pipe-delimited payload</li>
+                                <li>SOS escalation triggers XBee broadcast to remote node</li>
                                 <li>Retry logic + TTL expiry handling</li>
                             </ul>
                         </div>
@@ -97,5 +175,85 @@
     </div>
     <script src="/static/vendor/bootstrap.bundle.min.js"></script>
     <script src="/static/js/scripts.js"></script>
+    <script>
+    let xbeeLogCount = 0;
+
+    // Load XBee status on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/xbee/status', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('xbeeTxPin').textContent = 'GPIO ' + data.tx_pin;
+                document.getElementById('xbeeRxPin').textContent = 'GPIO ' + data.rx_pin;
+                document.getElementById('xbeeBaud').textContent = data.baud + ' / ' + data.mode;
+            })
+            .catch(() => {
+                document.getElementById('xbeeTxPin').textContent = 'Error';
+                document.getElementById('xbeeRxPin').textContent = 'Error';
+                document.getElementById('xbeeBaud').textContent = 'Error';
+            });
+    });
+
+    function sendXBeeTest() {
+        const btn = document.getElementById('btnSendXBee');
+        const msg = document.getElementById('xbeeTestMsg').value.trim();
+        const resultDiv = document.getElementById('xbeeResult');
+        const alertDiv = document.getElementById('xbeeResultAlert');
+        const textDiv = document.getElementById('xbeeResultText');
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Sending...';
+
+        const formData = new FormData();
+        if (msg) formData.append('message', msg);
+
+        fetch('/api/xbee/test', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            resultDiv.style.display = 'block';
+            if (data.success) {
+                alertDiv.className = 'alert alert-success';
+                textDiv.innerHTML = '<strong>Sent!</strong> Frame ID: ' + data.frame_id +
+                    ' | Payload (' + data.length + ' bytes): <code>' +
+                    data.payload.replace(/</g, '&lt;') + '</code>';
+                addLogEntry(data.frame_id, data.payload, 'Sent');
+            } else {
+                alertDiv.className = 'alert alert-danger';
+                textDiv.innerHTML = '<strong>Failed:</strong> ' + (data.message || 'Unknown error');
+                addLogEntry('—', msg || '(empty)', 'Failed');
+            }
+        })
+        .catch(err => {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-danger';
+            textDiv.innerHTML = '<strong>Network error:</strong> ' + err.message;
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane me-1"></i>Send Test Message';
+        });
+    }
+
+    function addLogEntry(frameId, payload, status) {
+        xbeeLogCount++;
+        const logDiv = document.getElementById('xbeeLog');
+        const tbody = document.getElementById('xbeeLogBody');
+        logDiv.style.display = 'block';
+
+        const tr = document.createElement('tr');
+        const badgeClass = status === 'Sent' ? 'bg-success' : 'bg-danger';
+        const safePayload = payload.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        tr.innerHTML = '<td>' + xbeeLogCount + '</td>' +
+            '<td>' + new Date().toLocaleTimeString() + '</td>' +
+            '<td>' + frameId + '</td>' +
+            '<td><code>' + safePayload + '</code></td>' +
+            '<td><span class="badge ' + badgeClass + '">' + status + '</span></td>';
+        tbody.insertBefore(tr, tbody.firstChild);
+    }
+    </script>
 </body>
 </html>
