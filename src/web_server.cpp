@@ -62,9 +62,9 @@ void setupWebServer(AsyncWebServer &server) {
     }
 
     // Admin messaging pages — /admin/messaging/*
-    server.on("/admin/messaging", HTTP_GET, [](AsyncWebServerRequest *request) {
-        serveStaticFile(request, "/www/admin_messaging.html");
-    });
+    // NOTE: Sub-routes MUST be registered BEFORE the parent route because
+    // ESPAsyncWebServer's canHandle() treats "/admin/messaging" as matching
+    // any URL that starts with "/admin/messaging/".  First match wins.
     server.on("/admin/messaging/broadcasts", HTTP_GET, [](AsyncWebServerRequest *request) {
         serveStaticFile(request, "/www/admin_broadcasts.html");
     });
@@ -82,6 +82,9 @@ void setupWebServer(AsyncWebServer &server) {
     });
     server.on("/admin/messaging/testing", HTTP_GET, [](AsyncWebServerRequest *request) {
         serveStaticFile(request, "/www/admin_testing.html");
+    });
+    server.on("/admin/messaging", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveStaticFile(request, "/www/admin_messaging.html");
     });
 
     // Static assets: /static/css/*, /static/js/*, /static/images/*

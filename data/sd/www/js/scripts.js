@@ -14,4 +14,17 @@ window.addEventListener('DOMContentLoaded', event => {
         });
     }
 
+    // Load current user's name into the sidebar (runs on every page)
+    const sidebarUser = document.getElementById('sidebarUsername');
+    if (sidebarUser) {
+        fetch('/api/dashboard')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.current_user && data.current_user.username) {
+                    sidebarUser.textContent = data.current_user.username;
+                }
+            })
+            .catch(function() { /* keep default text */ });
+    }
+
 });
