@@ -9,7 +9,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import func as sql_func
 
 from database.connection import engine
-from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage
+from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage, BroadcastMessage
 from database.deps import get_db
 
 
@@ -203,8 +203,9 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
     
     storage_display = f"{storage_used:.1f}GB / {storage_total:.1f}GB" if storage_total > 0 else "N/A"
     
-    # Total messages
-    total_messages = db.query(FogMessage).count()
+    total_sos_alerts = db.query(BroadcastMessage).filter(
+        BroadcastMessage.severity.in_(["warning", "critical"])
+    ).count()
 
     # Query messages with sender and recipients
     messages_query = db.query(
@@ -237,7 +238,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         "inactive_fog_nodes": inactive_fog_nodes,
         "people_connected": people_connected,
         "storage_display": storage_display,
-        "total_messages": total_messages,
+        "total_sos_alerts": total_sos_alerts,
     })
 
 
