@@ -191,7 +191,7 @@
                     document.getElementById('fogNodesCount').textContent = data.fog_nodes_count || 0;
                     document.getElementById('peopleConnected').textContent = data.people_connected || 0;
                     document.getElementById('storage').textContent = data.storage_display || '0 MB';
-                    document.getElementById('sosAlerts').textContent = data.sos_alerts || 0;
+                    document.getElementById('sosAlerts').textContent = data.total_sos_alerts || 0;
                     if (data.current_user) {
                         document.getElementById('sidebarUsername').textContent = data.current_user.username || 'HopFog User';
                     }

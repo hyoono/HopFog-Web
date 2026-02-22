@@ -9,28 +9,24 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import func as sql_func
 
 from database.connection import engine
-from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage
+from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage, BroadcastMessage
 from database.deps import get_db
 
-
 from routes.auth import verify_password, get_password_hash, create_access_token, verify_token
-
 
 from routes.users import router as users_router
 from routes.messages import router as messages_router
 from routes.resident_admin import router as resident_admin_router
 from routes.admin_messaging import router as admin_messaging_router
 from routes.fog_nodes import fog_router
-from routes.bluetooth_api import router as bluetooth_router
-from routes.bluetooth_debug import router as bt_debug_router
 from routes.xbee_api import router as xbee_router
 
 from services.broadcast_dispatcher import dispatcher
 
-
+from services.broadcast_dispatcher import dispatcher
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 
 app = FastAPI()
@@ -43,21 +39,21 @@ app.include_router(messages_router)
 app.include_router(resident_admin_router)
 app.include_router(admin_messaging_router)
 app.include_router(fog_router)
-app.include_router(bluetooth_router)
-app.include_router(bt_debug_router)
 app.include_router(xbee_router)
 
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
-    # Start priority-based admin broadcast dispatcher (SOS > Alert > Announcement)
-    dispatcher.start()
 
+
+@app.on_event("startup")
+async def on_startup():
+    await dispatcher.start()
 
 @app.on_event("shutdown")
-def on_shutdown():
-    dispatcher.stop()
+async def on_shutdown():
+    await dispatcher.stop()
 
 @app.get("/", response_class=HTMLResponse)
 def login_page(request: Request):
@@ -201,8 +197,9 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
     
     storage_display = f"{storage_used:.1f}GB / {storage_total:.1f}GB" if storage_total > 0 else "N/A"
     
-    # Total messages
-    total_messages = db.query(FogMessage).count()
+    total_sos_alerts = db.query(BroadcastMessage).filter(
+        BroadcastMessage.severity.in_(["warning", "critical"])
+    ).count()
 
     # Query messages with sender and recipients
     messages_query = db.query(
@@ -235,7 +232,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         "inactive_fog_nodes": inactive_fog_nodes,
         "people_connected": people_connected,
         "storage_display": storage_display,
-        "total_messages": total_messages,
+        "total_sos_alerts": total_sos_alerts,
     })
 
 

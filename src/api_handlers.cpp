@@ -180,9 +180,14 @@ void registerApiRoutes(AsyncWebServer &server) {
             storageTotal += st.toFloat();
         }
 
-        JsonDocument msgDoc;
-        readJsonArray(SD_MSGS_FILE, msgDoc);
-        int totalMessages = msgDoc.as<JsonArray>().size();
+        JsonDocument bcDoc;
+        readJsonArray(SD_BCASTS_FILE, bcDoc);
+        int totalSosAlerts = 0;
+        for (JsonObject b : bcDoc.as<JsonArray>()) {
+            const char* sev = b["severity"] | "";
+            if (strcmp(sev, "warning") == 0 || strcmp(sev, "critical") == 0)
+                totalSosAlerts++;
+        }
 
         JsonDocument userDoc = getUserById(uid);
 
@@ -191,7 +196,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         resp["active_fog_nodes"] = activeCount;
         resp["inactive_fog_nodes"] = fogCount - activeCount;
         resp["people_connected"]   = totalConnected;
-        resp["total_messages"]     = totalMessages;
+        resp["total_sos_alerts"]   = totalSosAlerts;
         resp["storage_display"]    = (storageTotal > 0)
             ? String(storageUsed, 1) + "GB / " + String(storageTotal, 1) + "GB"
             : "N/A";

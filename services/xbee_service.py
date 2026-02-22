@@ -72,3 +72,9 @@ class XBeeService:
     def clear_received(self):
         self._rx.clear()
         return {"cleared": True}
+    
+
+xbee_service = XBeeService()
+
+def send_broadcast(text: str):
+    return xbee_service.send_broadcast(text)
