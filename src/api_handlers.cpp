@@ -524,12 +524,13 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument bcastDoc;
         readJsonArray(SD_BCASTS_FILE, bcastDoc);
         bool found = false;
-        String curStatus, subject, msgType;
+        String curStatus, subject, msgType, body;
         for (JsonObject b : bcastDoc.as<JsonArray>()) {
             if ((b["id"] | 0) == bId) {
                 curStatus = b["status"] | "";
                 subject   = b["subject"] | "";
                 msgType   = b["msg_type"] | "";
+                body      = b["body"] | "";
                 found = true;
                 break;
             }
@@ -550,7 +551,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         // ── Send via XBee S2C (ZigBee broadcast) ────────────────────
         // Payload format: "TYPE|SUBJECT|BODY" — pipe-delimited so the
         // receiving XBee node can parse msg_type, subject, and body.
-        String xbeePayload = msgType + "|" + subject;
+        String xbeePayload = msgType + "|" + subject + "|" + body;
         xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
         JsonDocument resp;
