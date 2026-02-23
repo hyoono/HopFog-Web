@@ -4,20 +4,15 @@
  * Communicates using XBee API mode 1 (no escaping).
  * Supports transmit-request (0x10) and receive-packet (0x90) frames.
  *
- * ESP32-CAM: Uses UART0 (Serial) on GPIO 1/3 — shared with USB.
- *            Disconnect XBee when programming; reconnect for normal use.
- * Generic ESP32: Uses UART2 (Serial2) on configurable GPIOs.
+ * Always uses UART2 (Serial2) on GPIO 13/12 so that UART0 (Serial)
+ * remains available for Serial Monitor debug output.
  */
 
 #include "xbee_comm.h"
 #include "config.h"
 
 // ── Internal state ──────────────────────────────────────────────────
-#ifdef XBEE_USE_UART0
-static HardwareSerial& xbeeSerial = Serial;
-#else
 static HardwareSerial& xbeeSerial = Serial2;
-#endif
 static uint8_t         frameIdCounter = 0;
 static XBeeReceiveCB   rxCallback     = nullptr;
 
@@ -57,22 +52,9 @@ static void sendFrame(const uint8_t* payload, size_t len) {
 // ── Public API ──────────────────────────────────────────────────────
 
 void xbeeInit() {
-#ifdef XBEE_USE_UART0
-    // UART0 was already started at 115200 for boot messages.
-    // End it first, then restart at XBee baud rate.
-    Serial.printf("[XBee] Switching UART0 to XBee (9600 baud) …\n");
-    Serial.flush();
-    delay(50);
-    Serial.end();
-    delay(50);
-    Serial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
-    // NOTE: Serial Monitor will no longer show output after this point.
-    //       All Serial data now goes to/from the XBee module.
-#else
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
-    Serial.printf("[XBee] UART2 started — TX=%d  RX=%d  baud=%d\n",
+    Serial.printf("[XBee] UART2 started — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
                   XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
-#endif
 }
 
 uint8_t xbeeSendBroadcast(const char* payload, size_t len) {

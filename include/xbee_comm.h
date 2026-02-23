@@ -4,18 +4,14 @@
  * Uses API mode 1 (AP=1) to exchange framed messages with a remote
  * XBee S2C coordinator/end-device.
  *
- * ESP32-CAM wiring (UART0, shared with USB):
- *   ESP32 GPIO 1  (U0TXD) → XBee DIN   (pin 3)
- *   ESP32 GPIO 3  (U0RXD) ← XBee DOUT  (pin 2)
- *   ESP32 3.3 V            → XBee VCC
- *   ESP32 GND              → XBee GND
- *   Disconnect XBee when programming via USB.
+ * Both ESP32-CAM and generic ESP32 use UART2 (Serial2) on GPIO 13/12
+ * so that UART0 (Serial) stays free for Serial Monitor debug output.
  *
- * Generic ESP32 wiring (UART2):
- *   ESP32 GPIO 13 (TX2) → XBee DIN
- *   ESP32 GPIO 12 (RX2) ← XBee DOUT
- *   ESP32 3.3 V          → XBee VCC
- *   ESP32 GND             → XBee GND
+ * Wiring (same for all ESP32 boards):
+ *   ESP32 GPIO 13 (TX) → XBee DIN   (pin 3)
+ *   ESP32 GPIO 12 (RX) ← XBee DOUT  (pin 2)
+ *   ESP32 3.3 V         → XBee VCC   (pin 1)
+ *   ESP32 GND            → XBee GND   (pin 10)
  */
 
 #ifndef XBEE_COMM_H

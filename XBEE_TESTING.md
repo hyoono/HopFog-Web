@@ -65,19 +65,8 @@ Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 
 ## Step 4: Wire XBee #1 to ESP32
 
-### ESP32-CAM (default – uses UART0)
-
-The ESP32-CAM uses GPIO 1 (U0TXD) and GPIO 3 (U0RXD) — the same pins as
-the USB programming port. **Disconnect the XBee when uploading firmware.**
-
-```
-ESP32-CAM GPIO 1  (U0TXD) ──→ XBee DIN  (pin 3)
-ESP32-CAM GPIO 3  (U0RXD) ←── XBee DOUT (pin 2)
-ESP32-CAM 3.3V             ──→ XBee VCC  (pin 1)
-ESP32-CAM GND              ──→ XBee GND  (pin 10)
-```
-
-### Generic ESP32 (uses UART2)
+Both ESP32-CAM and generic ESP32 use **UART2 on GPIO 13/12**.
+This keeps UART0 (Serial Monitor) free for debug output.
 
 ```
 ESP32 GPIO 13 (TX) ──→ XBee DIN  (pin 3)
@@ -87,6 +76,24 @@ ESP32 GND          ──→ XBee GND  (pin 10)
 ```
 
 > **Important:** XBee S2C runs on 3.3V. Do NOT connect to 5V.
+
+> **If using an FTDI-based XBee adapter board:** The "DIN" and "DOUT"
+> labels may already be broken out. Connect ESP32 GPIO 13 to the
+> adapter's DIN/RX pin, and ESP32 GPIO 12 to the adapter's DOUT/TX pin.
+> Do NOT connect the FTDI's USB side to the ESP32 — that is only for
+> XCTU configuration on a PC.
+
+### ESP32-CAM Note: GPIO 12 Boot Strapping
+
+GPIO 12 is a boot-strapping pin that selects VDD_SDIO voltage. If the
+XBee holds GPIO 12 HIGH during power-on, the ESP32 may fail to boot.
+If you experience boot problems:
+
+1. **Disconnect** XBee DOUT (GPIO 12) during power-on, reconnect after boot
+2. **Or** burn the VDD_SDIO efuse to permanently force 3.3V (one-time fix):
+   ```cmd
+   python -m espefuse --port COM3 set_flash_voltage 3.3V
+   ```
 
 ### XBee S2C Pinout (top view, antenna up)
 
@@ -117,8 +124,10 @@ pio device monitor -b 115200
 You should see in the serial output:
 
 ```
-[XBee] UART2 started — TX=13  RX=12  baud=9600
+[XBee] UART2 started — TX=GPIO13  RX=GPIO12  baud=9600
 ```
+
+> Serial Monitor keeps working after XBee init (both use separate UARTs).
 
 ---
 
@@ -246,15 +255,14 @@ Breaking it down:
 ### ESP32 serial shows nothing about XBee
 
 - Verify `xbeeInit()` is called in `setup()` (check `src/main.cpp`)
-- **ESP32-CAM:** Check wiring: GPIO 1 (U0TXD) → DIN, GPIO 3 (U0RXD) → DOUT.
-  Note: Serial Monitor stops after XBee init because they share UART0.
-- **Generic ESP32:** Check wiring: GPIO 13 → DIN, GPIO 12 → DOUT
+- Check wiring: GPIO 13 → XBee DIN, GPIO 12 → XBee DOUT
 - Verify XBee module is getting 3.3V power (LED on the XBee should blink)
 
-### ESP32-CAM: Can't upload firmware when XBee is connected
+### ESP32-CAM: Boot failure with XBee connected
 
-GPIO 1/3 are shared between USB and XBee. **Disconnect the XBee** before
-flashing. Reconnect it after the upload completes.
+GPIO 12 is a boot-strapping pin. If XBee DOUT holds it HIGH during
+power-on, the ESP32 may fail to boot.  Disconnect XBee from GPIO 12
+during power-on, or burn the VDD_SDIO efuse (see Step 4).
 
 ---
 

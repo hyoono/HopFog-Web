@@ -53,18 +53,14 @@
 #define SD_RES_MSG_FILE "/db/resident_admin_msgs.json"
 
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
+// XBee always uses UART2 (Serial2) so UART0 stays free for Serial Monitor.
+// ESP32-CAM: GPIO 12 and 13 are free in 1-bit SD_MMC mode.
+// Note: GPIO 12 is a boot-strapping pin.  If the ESP32 fails to boot
+//       with the XBee connected, disconnect XBee DOUT during power-on
+//       or burn the VDD_SDIO efuse to force 3.3 V (one-time, permanent).
 #define XBEE_BAUD     9600 // XBee factory default baud rate
-#ifdef USE_SD_MMC
-  // ESP32-CAM: XBee uses the U0T / U0R pins (UART0, shared with USB).
-  // Disconnect the XBee during programming; reconnect for normal use.
-  #define XBEE_TX_PIN      1   // U0TXD → XBee DIN
-  #define XBEE_RX_PIN      3   // U0RXD ← XBee DOUT
-  #define XBEE_USE_UART0   1
-#else
-  // Generic ESP32: XBee on UART2 (any free GPIOs).
-  #define XBEE_TX_PIN     13   // ESP32 TX → XBee DIN
-  #define XBEE_RX_PIN     12   // ESP32 RX ← XBee DOUT
-#endif
+#define XBEE_TX_PIN     13   // ESP32 TX → XBee DIN  (pin 3)
+#define XBEE_RX_PIN     12   // ESP32 RX ← XBee DOUT (pin 2)
 
 // ── Auth ────────────────────────────────────────────────────────────
 #define TOKEN_LENGTH      32
