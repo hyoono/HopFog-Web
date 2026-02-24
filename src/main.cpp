@@ -1,6 +1,17 @@
 /*
  * HopFog-Web — ESP32 Firmware
  * Main entry point: WiFi AP, SD card, and web-server initialisation.
+ *
+ * ── Task Architecture ───────────────────────────────────────────────
+ * This firmware does NOT create explicit FreeRTOS tasks.  Instead:
+ *
+ *   Core 0 — WiFi + TCP stack (managed by ESP-IDF)
+ *            AsyncTCP task (created internally by ESPAsyncWebServer)
+ *
+ *   Core 1 — Arduino loop() (DNS processing, XBee serial polling)
+ *
+ * API request handlers run in the AsyncTCP task context (Core 0).
+ * SD card I/O in those handlers is synchronous but brief (~5-30 ms).
  */
 
 #include <Arduino.h>
@@ -18,13 +29,31 @@
 AsyncWebServer server(HTTP_PORT);
 DNSServer     dnsServer;
 
+// ── WiFi event handler ──────────────────────────────────────────────
+static void onWiFiEvent(WiFiEvent_t event) {
+    switch (event) {
+        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+            Serial.printf("[WiFi] Station connected — total: %d\n",
+                          WiFi.softAPgetStationNum());
+            break;
+        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+            Serial.printf("[WiFi] Station disconnected — total: %d\n",
+                          WiFi.softAPgetStationNum());
+            break;
+        default:
+            break;
+    }
+}
+
 // ── WiFi Access Point ───────────────────────────────────────────────
 static void startAP() {
     Serial.printf("[WiFi] Starting AP \"%s\" …\n", AP_SSID);
+    WiFi.onEvent(onWiFiEvent);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONN);
     delay(100); // let the AP interface stabilise
-    Serial.printf("[WiFi] AP running — IP: %s\n", WiFi.softAPIP().toString().c_str());
+    Serial.printf("[WiFi] AP running — IP: %s  max_conn: %d\n",
+                  WiFi.softAPIP().toString().c_str(), AP_MAX_CONN);
     Serial.printf("[WiFi] Connect to WiFi \"%s\" (password: %s)\n", AP_SSID, AP_PASSWORD);
 }
 
@@ -75,5 +104,5 @@ void setup() {
 void loop() {
     dnsServer.processNextRequest();
     xbeeProcessIncoming();
-    delay(10);
+    yield(); // allow background tasks (WiFi, TCP) to run without blocking
 }

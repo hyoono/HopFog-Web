@@ -178,6 +178,44 @@ void setupWebServer(AsyncWebServer &server) {
         serveStaticFile(request, "/www" + file);
     });
 
+    // ── Captive portal detection ────────────────────────────────────
+    // Android, iOS, and Windows probe specific URLs to check if the
+    // network has internet connectivity.  If these return unexpected
+    // responses, the OS may disconnect or deprioritise the WiFi.
+    // Returning a proper 204 / redirect keeps the connection stable.
+
+    // Android connectivity checks
+    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(204);
+    });
+    server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(204);
+    });
+
+    // Apple / iOS captive portal detection
+    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    });
+    server.on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    });
+
+    // Windows NCSI (Network Connectivity Status Indicator)
+    server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "Microsoft NCSI");
+    });
+    server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "Microsoft Connect Test");
+    });
+
+    // Firefox captive portal detection
+    server.on("/canonical.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    });
+    server.on("/success.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "success\n");
+    });
+
     // 404 handler
     server.onNotFound([](AsyncWebServerRequest *request) {
         request->send(404, "text/plain", "404 — Not Found");

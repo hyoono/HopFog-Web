@@ -7,7 +7,7 @@
 #define AP_SSID     "HopFog-Network"
 #define AP_PASSWORD "changeme123"
 #define AP_CHANNEL  1
-#define AP_MAX_CONN 4
+#define AP_MAX_CONN 8
 #define AP_HIDDEN   0       // set to 1 to hide the SSID
 
 // ── Web Server ──────────────────────────────────────────────────────
