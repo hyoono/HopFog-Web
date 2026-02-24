@@ -20,8 +20,12 @@
         <button class="btn btn-link btn-sm order-1 order-lg-0 me-4" id="sidebarToggle">
             <i class="fas fa-bars"></i>
         </button>
-
-        <a class="navbar-brand ps-3" href="{{ url_for('dashboard') }}">HopFog</a>
+        <a class="navbar-brand ps-3" href="{{ url_for('dashboard') }}">
+    <img src="{{ url_for('static', path='images/HopFog-Logo.png') }}" 
+         alt="HopFog Logo" 
+         style="height: 42px; width: auto; margin-right: 2px;">
+    HopFog
+        </a>
 
         <form class="d-none d-md-inline-block form-inline ms-auto me-md-3 my-2">
         <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
@@ -70,7 +74,7 @@
                             Fog Nodes & Network
                         </a>       
 
-                        <div class="sb-sidenav-menu-heading">Admin</div>
+                        <div class="sb-sidenav-menu-heading" padding=0.75 rem>Messaging</div>
                         <a class="nav-link" href="/admin/messaging">
                             <div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>
                             Admin Messaging

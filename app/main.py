@@ -198,7 +198,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
     storage_display = f"{storage_used:.1f}GB / {storage_total:.1f}GB" if storage_total > 0 else "N/A"
     
     total_sos_alerts = db.query(BroadcastMessage).filter(
-        BroadcastMessage.severity.in_(["warning", "critical"])
+        BroadcastMessage.msg_type.in_(["alert", "sos"])
     ).count()
 
     # Query messages with sender and recipients
@@ -234,9 +234,6 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         "storage_display": storage_display,
         "total_sos_alerts": total_sos_alerts,
     })
-
-
-
     
 
 
