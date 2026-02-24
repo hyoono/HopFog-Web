@@ -28,7 +28,24 @@ The ESP32 firmware now implements **all 11 API endpoints** that the mobile app c
 
 ## Required Android Changes
 
-### 1. WiFi Auto-Connection (High Priority)
+### 1. Change BASE_URL to `http://hopfog.com` (High Priority)
+
+**File:** `NetworkManager.kt`
+
+**Task:** Change the `BASE_URL` from `http://192.168.4.1` to `http://hopfog.com`.
+
+The ESP32 runs a captive-portal DNS server that resolves **all** domains (including `hopfog.com`) to its own IP address. Using a domain name instead of a hardcoded IP makes the app more reliable and adaptive — if the ESP32 AP IP ever changes, the domain will still resolve correctly.
+
+**What to do:**
+- Change `private const val BASE_URL = "http://192.168.4.1"` to `private const val BASE_URL = "http://hopfog.com"`
+- No other changes needed — all API calls already use `BASE_URL` as the prefix
+
+**Copilot prompt:**
+> In NetworkManager.kt, change the BASE_URL constant from "http://192.168.4.1" to "http://hopfog.com". The ESP32 runs a captive-portal DNS that resolves hopfog.com to its own IP automatically when connected to the HopFog-Network WiFi.
+
+---
+
+### 2. WiFi Auto-Connection (High Priority)
 
 **File:** `NetworkManager.kt` or create a new `WifiManager.kt`
 
@@ -37,21 +54,21 @@ The ESP32 firmware now implements **all 11 API endpoints** that the mobile app c
 ```
 WiFi SSID:     "HopFog-Network"
 WiFi Password: "changeme123"
-ESP32 IP:      192.168.4.1 (already set as BASE_URL)
+Domain:        hopfog.com (resolved by ESP32's captive-portal DNS to 192.168.4.1)
 ```
 
 **What to do:**
 - Before any API call, check if the device is connected to "HopFog-Network"
 - If not connected, prompt the user to connect (or auto-connect using `WifiNetworkSpecifier` on Android 10+)
 - Show a clear error message if not on the correct WiFi network
-- The `GET /status` endpoint can be used to verify connectivity
+- The `GET /status` endpoint (`http://hopfog.com/status`) can be used to verify connectivity
 
 **Copilot prompt:**
 > In NetworkManager.kt, add a function `ensureWifiConnection()` that checks if the device is connected to the WiFi SSID "HopFog-Network". If not, show a dialog prompting the user to connect. Use Android's WifiManager to check the current SSID. Call this function before `checkStatus()`.
 
 ---
 
-### 2. Handle Offline/Connection Errors Gracefully (Medium Priority)
+### 3. Handle Offline/Connection Errors Gracefully (Medium Priority)
 
 **File:** `NetworkManager.kt`
 
@@ -67,7 +84,7 @@ ESP32 IP:      192.168.4.1 (already set as BASE_URL)
 
 ---
 
-### 3. User Registration Flow (Medium Priority)
+### 4. User Registration Flow (Medium Priority)
 
 **File:** Create a new `RegisterPage.kt` or add to existing auth flow
 
@@ -82,7 +99,7 @@ ESP32 IP:      192.168.4.1 (already set as BASE_URL)
 
 ---
 
-### 4. Timestamp Display Format (Low Priority)
+### 5. Timestamp Display Format (Low Priority)
 
 **File:** `ChatModels.kt` or wherever timestamps are displayed
 
@@ -98,7 +115,7 @@ ESP32 IP:      192.168.4.1 (already set as BASE_URL)
 
 ---
 
-### 5. SOS Message Alert via XBee (Low Priority — Future Enhancement)
+### 6. SOS Message Alert via XBee (Low Priority — Future Enhancement)
 
 **File:** Would need new functionality
 
@@ -133,7 +150,7 @@ Before the mobile app can be used, the admin must:
 1. Flash the ESP32 firmware from this repository
 2. Copy the `data/sd/www/` files to the SD card
 3. Power on the ESP32 — it creates the "HopFog-Network" WiFi
-4. Connect to the WiFi from a laptop and open any URL (the ESP32 captive portal DNS resolves all domains to `192.168.4.1`)
+4. Connect to the WiFi from a laptop and open `http://hopfog.com` (the ESP32 captive portal DNS resolves all domains to its own IP)
 5. Register an admin account
 6. Create mobile user accounts via the Users page → "Create Mobile User"
 7. Give the mobile users their credentials
