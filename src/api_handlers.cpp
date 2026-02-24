@@ -674,11 +674,27 @@ void registerApiRoutes(AsyncWebServer &server) {
         addBroadcastEvent(id, "created", "Broadcast created");
         if (status == "queued") {
             addBroadcastEvent(id, "queued", "Broadcast queued for delivery");
+
+            // ── ESP32 auto-dispatch: no background dispatcher exists, so
+            //    immediately send via XBee and mark as "sent". ──────────
+            String xbeePayload = msgType + "|" + subject + "|" + body;
+            uint8_t frameId = xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+            if (frameId > 0) {
+                updateBroadcastStatus(id, "sent");
+                updateRecipientsStatus(id, "sent");
+                addBroadcastEvent(id, "marked_sent", "Auto-sent via XBee (no dispatcher)");
+                status = "sent";
+            } else {
+                updateBroadcastStatus(id, "failed");
+                addBroadcastEvent(id, "failed", "XBee transmission failed");
+                status = "failed";
+            }
         }
 
         JsonDocument resp;
         resp["message"]      = "Broadcast created";
         resp["broadcast_id"] = id;
+        resp["status"]       = status;
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
     });
