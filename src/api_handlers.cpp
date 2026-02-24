@@ -83,7 +83,7 @@ static String getParam(AsyncWebServerRequest *request, JsonDocument &json,
 // Get an int param from JSON body (first) or form data (fallback).
 static int getParamInt(AsyncWebServerRequest *request, JsonDocument &json,
                        const char *name, int defVal = 0) {
-    if (!json.isNull() && json.containsKey(name)) {
+    if (!json.isNull() && json[name].is<JsonVariant>()) {
         return json[name].as<int>();
     }
     if (request->hasParam(name, true)) {
@@ -1280,6 +1280,23 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         createDirectMessage(convoId, senderId, text.c_str());
 
+        // ── Relay message via XBee S2C ──────────────────────────────
+        // Check if this conversation is SOS-flagged to set the type.
+        JsonDocument convosDoc;
+        readJsonArray(SD_CONVOS_FILE, convosDoc);
+        bool isSos = false;
+        for (JsonObject c : convosDoc.as<JsonArray>()) {
+            if ((c["id"] | 0) == convoId) {
+                isSos = (c["is_sos"] | 0) == 1;
+                break;
+            }
+        }
+        JsonDocument senderDoc = getUserById(senderId);
+        String senderName = senderDoc["username"] | "Unknown";
+        String xbeeType = isSos ? "SOS" : "DM";
+        String xbeePayload = xbeeType + "|" + senderName + "|" + text;
+        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+
         JsonDocument resp;
         resp["success"] = true;
         resp["message"] = "Message sent";
@@ -1350,6 +1367,13 @@ void registerApiRoutes(AsyncWebServer &server) {
         }
 
         int convoId = findOrCreateConversation(userId, adminId, true);
+
+        // ── Send SOS alert via XBee S2C ─────────────────────────────
+        // Look up the triggering user's name for the alert payload.
+        JsonDocument userDoc = getUserById(userId);
+        String userName = userDoc["username"] | "Unknown";
+        String xbeePayload = "SOS_ALERT|" + userName + "|SOS activated";
+        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
         JsonDocument resp;
         resp["conversation_id"] = convoId;
