@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>API Explorer - HopFog</title>
+    <link href="/static/css/styles.css" rel="stylesheet" />
+    <link href="/static/vendor/fontawesome/css/all.min.css" rel="stylesheet" />
+    <style>
+        .api-group { margin-bottom: 1.5rem; }
+        .api-group-header {
+            background: #4e73df; color: #fff; padding: 0.6rem 1rem;
+            border-radius: 0.35rem 0.35rem 0 0; font-weight: 600; cursor: pointer;
+        }
+        .api-group-header:hover { background: #2e59d9; }
+        .api-group-body { border: 1px solid #e3e6f0; border-top: none; border-radius: 0 0 0.35rem 0.35rem; }
+        .endpoint-row {
+            display: flex; align-items: center; padding: 0.5rem 1rem;
+            border-bottom: 1px solid #e3e6f0; cursor: pointer; gap: 0.75rem;
+        }
+        .endpoint-row:last-child { border-bottom: none; }
+        .endpoint-row:hover { background: #f8f9fc; }
+        .method-badge {
+            display: inline-block; min-width: 60px; text-align: center;
+            padding: 0.15rem 0.5rem; border-radius: 3px; font-weight: 700;
+            font-size: 0.75rem; color: #fff; flex-shrink: 0;
+        }
+        .method-GET { background: #1cc88a; }
+        .method-POST { background: #4e73df; }
+        .method-PUT { background: #f6c23e; color: #333; }
+        .method-DELETE { background: #e74a3b; }
+        .endpoint-path { font-family: monospace; font-size: 0.9rem; flex-grow: 1; }
+        .endpoint-desc { color: #858796; font-size: 0.8rem; }
+        .endpoint-detail { display: none; padding: 1rem; background: #f8f9fc; border-top: 1px solid #e3e6f0; }
+        .endpoint-detail.open { display: block; }
+        .param-table { width: 100%; margin-bottom: 0.75rem; }
+        .param-table th { background: #eaecf4; padding: 0.4rem 0.6rem; font-size: 0.8rem; text-align: left; }
+        .param-table td { padding: 0.4rem 0.6rem; font-size: 0.85rem; border-bottom: 1px solid #e3e6f0; }
+        .param-table input, .param-table select {
+            width: 100%; padding: 0.3rem 0.5rem; border: 1px solid #d1d3e2;
+            border-radius: 0.25rem; font-size: 0.85rem;
+        }
+        .response-box {
+            background: #1a1a2e; color: #0f0; font-family: monospace; font-size: 0.8rem;
+            padding: 0.75rem; border-radius: 0.25rem; max-height: 400px; overflow: auto;
+            white-space: pre-wrap; word-break: break-all; min-height: 60px;
+        }
+        .response-meta { font-size: 0.8rem; margin-bottom: 0.3rem; color: #858796; }
+        .btn-try { margin-top: 0.5rem; }
+        .tag-required { color: #e74a3b; font-size: 0.7rem; font-weight: 600; }
+        .tag-optional { color: #858796; font-size: 0.7rem; }
+        .auth-badge { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
+        .auth-badge.locked { background: #f6c23e; color: #333; }
+        .auth-badge.open { background: #1cc88a; color: #fff; }
+    </style>
+</head>
+<body class="sb-nav-fixed">
+    <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
+        <a class="navbar-brand ps-3" href="/dashboard">HopFog Admin</a>
+        <button class="btn btn-link btn-sm order-1 order-lg-0 me-4 me-lg-0" id="sidebarToggle"><i class="fas fa-bars"></i></button>
+        <ul class="navbar-nav ms-auto me-3 me-lg-4">
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown"><i class="fas fa-user fa-fw"></i></a>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="/settings">Settings</a></li>
+                    <li><hr class="dropdown-divider" /></li>
+                    <li><a class="dropdown-item" href="/login">Logout</a></li>
+                </ul>
+            </li>
+        </ul>
+    </nav>
+    <div id="layoutSidenav">
+        <div id="layoutSidenav_nav">
+            <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
+                <div class="sb-sidenav-menu">
+                    <div class="nav">
+                        <div class="sb-sidenav-menu-heading">Core</div>
+                        <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
+                        <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
+                        <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
+                        <div class="sb-sidenav-menu-heading">Admin</div>
+                        <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
+                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
+                        <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
+                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
+                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
+                        <div class="sb-sidenav-menu-heading">Developer</div>
+                        <a class="nav-link active" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
+                    </div>
+                </div>
+                <div class="sb-sidenav-footer">
+                    <div class="small">Logged in as:</div>
+                    <span id="sidebarUsername">HopFog User</span>
+                </div>
+            </nav>
+        </div>
+        <div id="layoutSidenav_content">
+            <main>
+                <div class="container-fluid px-4">
+                    <h1 class="mt-4"><i class="fas fa-code me-2"></i>API Explorer</h1>
+                    <ol class="breadcrumb mb-4">
+                        <li class="breadcrumb-item"><a href="/dashboard">Dashboard</a></li>
+                        <li class="breadcrumb-item active">API Explorer</li>
+                    </ol>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Interactive API testing — click any endpoint to expand, fill parameters, and click <strong>Try it</strong> to send a live request. Responses appear inline.
+                    </div>
+                    <div id="apiGroups"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+    <script src="/static/vendor/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/scripts.js"></script>
+    <script>
+    const API_SPEC = [
+        {
+            group: "Authentication (Public)",
+            endpoints: [
+                {
+                    method: "POST", path: "/api/mobile/login", desc: "Mobile app login — returns access token",
+                    auth: false,
+                    params: [
+                        { name: "email", type: "text", required: true, desc: "User email address" },
+                        { name: "password", type: "password", required: true, desc: "User password" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/register", desc: "Register new admin user",
+                    auth: false,
+                    params: [
+                        { name: "username", type: "text", required: true, desc: "Display name" },
+                        { name: "email", type: "text", required: true, desc: "Email address" },
+                        { name: "password", type: "password", required: true, desc: "Password" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/forgot-password", desc: "Reset password (admin)",
+                    auth: false,
+                    params: [
+                        { name: "email", type: "text", required: true, desc: "Account email" },
+                        { name: "new_password", type: "password", required: true, desc: "New password" }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "Dashboard & Users",
+            endpoints: [
+                {
+                    method: "GET", path: "/api/dashboard", desc: "Get dashboard metrics (fog nodes, SOS count, storage, current user)",
+                    auth: true, params: []
+                },
+                {
+                    method: "GET", path: "/api/users", desc: "List all users",
+                    auth: true, params: []
+                },
+                {
+                    method: "POST", path: "/api/admin/create-mobile-user", desc: "Create a mobile user account",
+                    auth: true,
+                    params: [
+                        { name: "username", type: "text", required: true, desc: "Display name" },
+                        { name: "email", type: "text", required: true, desc: "Email address" },
+                        { name: "password", type: "password", required: true, desc: "Password" }
+                    ]
+                },
+                {
+                    method: "PUT", path: "/api/users/{id}/toggle-status", desc: "Toggle user active/inactive",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "User ID", isPath: true }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "Messages",
+            endpoints: [
+                {
+                    method: "GET", path: "/api/messages", desc: "List all messages",
+                    auth: true, params: []
+                },
+                {
+                    method: "DELETE", path: "/api/messages/{id}", desc: "Delete a message by ID",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "Message ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "GET", path: "/api/resident-admin/messages", desc: "List resident→admin messages (SOS, feedback)",
+                    auth: true, params: []
+                },
+                {
+                    method: "POST", path: "/api/resident-admin/messages", desc: "Create a resident→admin message",
+                    auth: true,
+                    params: [
+                        { name: "kind", type: "select", required: true, desc: "Message type", options: ["sos_request", "feedback", "inquiry"] },
+                        { name: "subject", type: "text", required: true, desc: "Subject line" },
+                        { name: "body", type: "textarea", required: true, desc: "Message body" },
+                        { name: "sender_id", type: "number", required: true, desc: "Sender user ID" }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "Fog Devices",
+            endpoints: [
+                {
+                    method: "GET", path: "/api/fog-devices", desc: "List all fog nodes",
+                    auth: true, params: []
+                },
+                {
+                    method: "POST", path: "/api/fog-devices/register", desc: "Register a new fog device",
+                    auth: true,
+                    params: [
+                        { name: "device_name", type: "text", required: true, desc: "Device name (e.g. 'FogNode-Alpha')" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/fog-devices/{id}/disconnect", desc: "Disconnect a fog device",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "Device ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/fog-devices/{id}/status", desc: "Update fog device status",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "Device ID", isPath: true },
+                        { name: "status", type: "select", required: true, desc: "Device status", options: ["active", "inactive", "maintenance"] },
+                        { name: "storage_used", type: "number", required: false, desc: "Storage used (bytes)" },
+                        { name: "storage_total", type: "number", required: false, desc: "Storage total (bytes)" },
+                        { name: "connected_users", type: "number", required: false, desc: "Number of connected users" }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "Broadcasts",
+            endpoints: [
+                {
+                    method: "GET", path: "/api/broadcasts", desc: "List all broadcasts with delivery status counts",
+                    auth: true, params: []
+                },
+                {
+                    method: "POST", path: "/api/broadcasts", desc: "Create a broadcast (auto-sends via XBee if queued)",
+                    auth: true,
+                    params: [
+                        { name: "msg_type", type: "select", required: true, desc: "Broadcast type", options: ["announcement", "alert", "sos"] },
+                        { name: "severity", type: "select", required: true, desc: "Severity level", options: ["info", "warning", "critical"] },
+                        { name: "audience", type: "select", required: true, desc: "Target audience", options: ["all", "residents", "responders"] },
+                        { name: "subject", type: "text", required: true, desc: "Subject line" },
+                        { name: "body", type: "textarea", required: true, desc: "Message body" },
+                        { name: "status", type: "select", required: true, desc: "Initial status", options: ["draft", "queued"] },
+                        { name: "ttl_hours", type: "number", required: false, desc: "Time-to-live in hours (1-720, default 24)" }
+                    ]
+                },
+                {
+                    method: "GET", path: "/api/broadcasts/{id}", desc: "Get single broadcast with delivery stats and event log",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "Broadcast ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/broadcasts/{id}/mark_sent", desc: "Mark broadcast as sent — sends via XBee",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "Broadcast ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/broadcasts/{id}/cancel", desc: "Cancel a broadcast (only if not already sent)",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "Broadcast ID", isPath: true }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "SOS & Escalation",
+            endpoints: [
+                {
+                    method: "POST", path: "/api/sos-requests/{id}/escalate", desc: "Escalate resident SOS to broadcast — sends via XBee",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "SOS request message ID", isPath: true },
+                        { name: "escalate_to", type: "select", required: true, desc: "Escalation type", options: ["sos", "alert", "announcement"] }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/sos-requests/{id}/dismiss", desc: "Dismiss/resolve a SOS request",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "number", required: true, desc: "SOS request message ID", isPath: true }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "Settings",
+            endpoints: [
+                {
+                    method: "POST", path: "/api/change-password", desc: "Change current user's password",
+                    auth: true,
+                    params: [
+                        { name: "current_password", type: "password", required: true, desc: "Current password" },
+                        { name: "new_password", type: "password", required: true, desc: "New password" },
+                        { name: "confirm_password", type: "password", required: true, desc: "Confirm new password" }
+                    ]
+                }
+            ]
+        },
+        {
+            group: "XBee Communication",
+            endpoints: [
+                {
+                    method: "GET", path: "/api/xbee/status", desc: "Get XBee module configuration (pins, baud, mode)",
+                    auth: true, params: []
+                },
+                {
+                    method: "POST", path: "/api/xbee/test", desc: "Send a test message via XBee broadcast",
+                    auth: true,
+                    params: [
+                        { name: "message", type: "text", required: false, desc: "Custom message (max 200 chars, default: 'Hello from HopFog!')" }
+                    ]
+                }
+            ]
+        }
+    ];
+
+    function escapeHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    function buildUrl(path, params) {
+        let url = path;
+        params.forEach(p => {
+            if (p.isPath) {
+                const input = document.getElementById('param-' + path + '-' + p.name);
+                const val = input ? input.value : '';
+                url = url.replace('{' + p.name + '}', encodeURIComponent(val));
+            }
+        });
+        return url;
+    }
+
+    function renderGroups() {
+        const container = document.getElementById('apiGroups');
+        let html = '';
+        API_SPEC.forEach((group, gi) => {
+            html += '<div class="api-group">';
+            html += '<div class="api-group-header" onclick="toggleGroup(' + gi + ')">';
+            html += '<i class="fas fa-chevron-right me-2" id="gicon-' + gi + '"></i>' + escapeHtml(group.group);
+            html += ' <span class="badge bg-light text-dark ms-2">' + group.endpoints.length + '</span>';
+            html += '</div>';
+            html += '<div class="api-group-body" id="gbody-' + gi + '">';
+            group.endpoints.forEach((ep, ei) => {
+                const eid = 'ep-' + gi + '-' + ei;
+                html += '<div>';
+                html += '<div class="endpoint-row" onclick="toggleEndpoint(\'' + eid + '\')">';
+                html += '<span class="method-badge method-' + ep.method + '">' + ep.method + '</span>';
+                html += '<span class="endpoint-path">' + escapeHtml(ep.path) + '</span>';
+                html += '<span class="auth-badge ' + (ep.auth ? 'locked' : 'open') + '">';
+                html += ep.auth ? '<i class="fas fa-lock"></i> Auth' : '<i class="fas fa-lock-open"></i> Public';
+                html += '</span>';
+                html += '<span class="endpoint-desc d-none d-md-inline">' + escapeHtml(ep.desc) + '</span>';
+                html += '</div>';
+                html += '<div class="endpoint-detail" id="' + eid + '">';
+                html += '<p class="mb-2 text-muted"><small>' + escapeHtml(ep.desc) + '</small></p>';
+                if (ep.params.length > 0) {
+                    html += '<table class="param-table"><thead><tr>';
+                    html += '<th>Parameter</th><th>Type</th><th>Required</th><th>Value</th>';
+                    html += '</tr></thead><tbody>';
+                    ep.params.forEach(p => {
+                        html += '<tr>';
+                        html += '<td><code>' + escapeHtml(p.name) + '</code>';
+                        if (p.isPath) html += ' <span class="badge bg-secondary" style="font-size:0.65rem">path</span>';
+                        html += '<br><small class="text-muted">' + escapeHtml(p.desc) + '</small></td>';
+                        html += '<td>' + (p.type === 'select' ? 'enum' : p.type) + '</td>';
+                        html += '<td>' + (p.required ? '<span class="tag-required">required</span>' : '<span class="tag-optional">optional</span>') + '</td>';
+                        html += '<td>';
+                        const inputId = 'param-' + ep.path + '-' + p.name;
+                        if (p.type === 'select') {
+                            html += '<select id="' + inputId + '" class="form-select form-select-sm">';
+                            p.options.forEach(o => { html += '<option value="' + o + '">' + o + '</option>'; });
+                            html += '</select>';
+                        } else if (p.type === 'textarea') {
+                            html += '<textarea id="' + inputId + '" rows="2" class="form-control form-control-sm" placeholder="' + escapeHtml(p.desc) + '"></textarea>';
+                        } else {
+                            html += '<input type="' + p.type + '" id="' + inputId + '" class="form-control form-control-sm" placeholder="' + escapeHtml(p.desc) + '">';
+                        }
+                        html += '</td></tr>';
+                    });
+                    html += '</tbody></table>';
+                } else {
+                    html += '<p class="text-muted mb-2"><small>No parameters required.</small></p>';
+                }
+                html += '<button class="btn btn-primary btn-sm btn-try" onclick="tryEndpoint(' + gi + ',' + ei + ')"><i class="fas fa-play me-1"></i>Try it</button>';
+                html += '<button class="btn btn-outline-secondary btn-sm btn-try ms-2" onclick="clearResponse(\'' + eid + '\')"><i class="fas fa-eraser me-1"></i>Clear</button>';
+                html += '<div class="mt-3">';
+                html += '<div class="response-meta" id="' + eid + '-meta"></div>';
+                html += '<div class="response-box" id="' + eid + '-response">Response will appear here...</div>';
+                html += '</div>';
+                html += '</div></div>';
+            });
+            html += '</div></div>';
+        });
+        container.innerHTML = html;
+    }
+
+    function toggleGroup(gi) {
+        const body = document.getElementById('gbody-' + gi);
+        const icon = document.getElementById('gicon-' + gi);
+        if (body.style.display === 'none') {
+            body.style.display = 'block';
+            icon.className = 'fas fa-chevron-down me-2';
+        } else {
+            body.style.display = 'none';
+            icon.className = 'fas fa-chevron-right me-2';
+        }
+    }
+
+    function toggleEndpoint(eid) {
+        const detail = document.getElementById(eid);
+        detail.classList.toggle('open');
+    }
+
+    function clearResponse(eid) {
+        document.getElementById(eid + '-response').textContent = 'Response will appear here...';
+        document.getElementById(eid + '-meta').textContent = '';
+    }
+
+    async function tryEndpoint(gi, ei) {
+        const ep = API_SPEC[gi].endpoints[ei];
+        const eid = 'ep-' + gi + '-' + ei;
+        const resBox = document.getElementById(eid + '-response');
+        const metaBox = document.getElementById(eid + '-meta');
+        const url = buildUrl(ep.path, ep.params);
+
+        resBox.textContent = 'Sending...';
+        metaBox.textContent = '';
+
+        const opts = { method: ep.method, credentials: 'same-origin' };
+        if (ep.method !== 'GET') {
+            const formData = new FormData();
+            ep.params.forEach(p => {
+                if (p.isPath) return;
+                const input = document.getElementById('param-' + ep.path + '-' + p.name);
+                const val = input ? input.value : '';
+                if (val !== '') formData.append(p.name, val);
+            });
+            opts.body = formData;
+        }
+
+        const startTime = performance.now();
+        try {
+            const resp = await fetch(url, opts);
+            const elapsed = Math.round(performance.now() - startTime);
+            const contentType = resp.headers.get('content-type') || '';
+            let body;
+            if (contentType.includes('application/json')) {
+                body = JSON.stringify(await resp.json(), null, 2);
+            } else {
+                body = await resp.text();
+                if (body.length > 5000) body = body.substring(0, 5000) + '\n\n... (truncated)';
+            }
+            metaBox.innerHTML = '<span class="badge ' + (resp.ok ? 'bg-success' : 'bg-danger') + '">' + resp.status + ' ' + resp.statusText + '</span>' +
+                ' <span class="ms-2">' + elapsed + 'ms</span>' +
+                ' <span class="ms-2 text-muted">' + ep.method + ' ' + escapeHtml(url) + '</span>';
+            resBox.textContent = body;
+        } catch (err) {
+            const elapsed = Math.round(performance.now() - startTime);
+            metaBox.innerHTML = '<span class="badge bg-danger">Network Error</span> <span class="ms-2">' + elapsed + 'ms</span>';
+            resBox.textContent = 'Error: ' + err.message;
+        }
+    }
+
+    renderGroups();
+    </script>
+</body>
+</html>

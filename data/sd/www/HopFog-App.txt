@@ -1,0 +1,11 @@
+HopFog App Placeholder
+======================
+
+This is a placeholder file for the HopFog mobile app APK.
+
+To replace this with the real APK:
+1. Rename your APK file to "HopFog-App.apk"
+2. Copy it to the SD card at: /www/HopFog-App.apk
+3. Update the file extension in web_server.cpp if needed
+
+The download button on the login page will serve this file.

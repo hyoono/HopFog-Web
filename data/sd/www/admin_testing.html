@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>Messaging Testing</title>
+    <link rel="icon" type="image/png" href="/static/images/HopFog-Logo.png">
+    <link href="/static/vendor/simple-datatables/simple-datatables.min.css" rel="stylesheet" />
+    <link href="/static/css/styles.css" rel="stylesheet" />
+    <link href="/static/vendor/fontawesome/css/all.min.css" rel="stylesheet" />
+</head>
+<body class="sb-nav-fixed">
+    <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
+        <button class="btn btn-link btn-sm order-1 order-lg-0 me-4" id="sidebarToggle"><i class="fas fa-bars"></i></button>
+        <a class="navbar-brand ps-3" href="/dashboard">HopFog</a>
+        <form class="d-none d-md-inline-block form-inline ms-auto me-md-3 my-2">
+        <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" data-bs-toggle="dropdown"><i class="fas fa-user fa-fw"></i></a>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="/settings">Settings</a></li>
+                    <li><a class="dropdown-item" href="#">Activity Log</a></li>
+                    <li><hr class="dropdown-divider" /></li>
+                    <li><a class="dropdown-item" href="/">Logout</a></li>
+                </ul>
+            </li>
+        </ul>
+        </form>
+    </nav>
+    <div id="layoutSidenav">
+        <div id="layoutSidenav_nav">
+            <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
+                <div class="sb-sidenav-menu">
+                    <div class="nav">
+                        <div class="sb-sidenav-menu-heading">Core</div>
+                        <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
+                        <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
+                        <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
+                        <div class="sb-sidenav-menu-heading">Admin</div>
+                        <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
+                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
+                        <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
+                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
+                        <a class="nav-link active" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
+                        <div class="sb-sidenav-menu-heading">Developer</div>
+                        <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
+                    </div>
+                </div>
+                <div class="sb-sidenav-footer">
+                    <div class="small">Logged in as:</div>
+                    <span id="sidebarUsername">HopFog User</span>
+                </div>
+            </nav>
+        </div>
+        <div id="layoutSidenav_content">
+            <main class="p-4">
+                <div class="container-fluid px-4">
+                    <h1 class="mt-4">Testing Checklist</h1>
+                    <ol class="breadcrumb mb-4">
+                        <li class="breadcrumb-item"><a href="/admin/messaging">Admin Messaging</a></li>
+                        <li class="breadcrumb-item active">Testing</li>
+                    </ol>
+                    <!-- XBee Communication Test -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <i class="fas fa-satellite-dish me-1"></i>XBee S2C Communication Test
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted mb-3">
+                                Send a test message via the XBee S2C ZigBee radio.
+                                Open <strong>XCTU</strong> on a second XBee to see incoming frames.
+                                <a href="https://github.com/hyoono/HopFog-Web/blob/main/XBEE_TESTING.md" target="_blank">View full testing guide →</a>
+                            </p>
+
+                            <!-- XBee Status -->
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body py-2 px-3">
+                                            <small class="text-muted">TX Pin (ESP32 → XBee DIN)</small>
+                                            <div class="fw-bold" id="xbeeTxPin">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body py-2 px-3">
+                                            <small class="text-muted">RX Pin (XBee DOUT → ESP32)</small>
+                                            <div class="fw-bold" id="xbeeRxPin">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card bg-light">
+                                        <div class="card-body py-2 px-3">
+                                            <small class="text-muted">Baud Rate / Mode</small>
+                                            <div class="fw-bold" id="xbeeBaud">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Test Message Form -->
+                            <div class="mb-3">
+                                <label for="xbeeTestMsg" class="form-label fw-bold">Test Message</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">HOPFOG_TEST|</span>
+                                    <input type="text" class="form-control" id="xbeeTestMsg" value="Hello from HopFog!" maxlength="187" placeholder="Enter test message...">
+                                </div>
+                                <div class="form-text">Max 200 chars total (including "HOPFOG_TEST|" prefix). The message is sent as a ZigBee broadcast to all nodes in the PAN.</div>
+                            </div>
+
+                            <button class="btn btn-primary" id="btnSendXBee" onclick="sendXBeeTest()">
+                                <i class="fas fa-paper-plane me-1"></i>Send Test Message
+                            </button>
+
+                            <!-- Result -->
+                            <div id="xbeeResult" class="mt-3" style="display:none;">
+                                <div class="alert" id="xbeeResultAlert">
+                                    <div id="xbeeResultText"></div>
+                                </div>
+                            </div>
+
+                            <!-- Frame Log -->
+                            <div id="xbeeLog" class="mt-3" style="display:none;">
+                                <h6>Sent Frames Log</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr><th>#</th><th>Time</th><th>Frame ID</th><th>Payload</th><th>Status</th></tr>
+                                        </thead>
+                                        <tbody id="xbeeLogBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Functional Tests Checklist -->
+                    <div class="card mb-4">
+                        <div class="card-header"><i class="fas fa-vial me-1"></i>Functional Tests</div>
+                        <div class="card-body">
+                            <ul class="mb-0">
+                                <li>Create Announcement as Draft</li>
+                                <li>Queue Announcement and verify it appears in Queue Monitor</li>
+                                <li>Create SOS and verify priority ordering</li>
+                                <li>Open Broadcast Detail and verify delivery counters</li>
+                                <li>Mark Sent (Simulation) and verify Tracking updates</li>
+                                <li>Cancel a Broadcast and verify status changes + event log entry</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><i class="fas fa-screwdriver-wrench me-1"></i>Integration Tests</div>
+                        <div class="card-body">
+                            <ul class="mb-0">
+                                <li>XBee S2C sends ZigBee broadcast when Mark Sent is clicked</li>
+                                <li>XCTU on receiving XBee shows the API frame with pipe-delimited payload</li>
+                                <li>SOS escalation triggers XBee broadcast to remote node</li>
+                                <li>Retry logic + TTL expiry handling</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </main>
+            <footer class="py-4 bg-light mt-auto">
+                <div class="container-fluid px-4">
+                    <div class="d-flex align-items-center justify-content-between small">
+                        <div class="text-muted">Copyright &copy; HopFog 2026</div>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+    <script src="/static/vendor/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/scripts.js"></script>
+    <script>
+    let xbeeLogCount = 0;
+
+    // Load XBee status on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/xbee/status', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('xbeeTxPin').textContent = 'GPIO ' + data.tx_pin;
+                document.getElementById('xbeeRxPin').textContent = 'GPIO ' + data.rx_pin;
+                document.getElementById('xbeeBaud').textContent = data.baud + ' / ' + data.mode;
+            })
+            .catch(() => {
+                document.getElementById('xbeeTxPin').textContent = 'Error';
+                document.getElementById('xbeeRxPin').textContent = 'Error';
+                document.getElementById('xbeeBaud').textContent = 'Error';
+            });
+    });
+
+    function sendXBeeTest() {
+        const btn = document.getElementById('btnSendXBee');
+        const msg = document.getElementById('xbeeTestMsg').value.trim();
+        const resultDiv = document.getElementById('xbeeResult');
+        const alertDiv = document.getElementById('xbeeResultAlert');
+        const textDiv = document.getElementById('xbeeResultText');
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Sending...';
+
+        const formData = new FormData();
+        if (msg) formData.append('message', msg);
+
+        fetch('/api/xbee/test', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            resultDiv.style.display = 'block';
+            if (data.success) {
+                alertDiv.className = 'alert alert-success';
+                textDiv.innerHTML = '<strong>Sent!</strong> Frame ID: ' + data.frame_id +
+                    ' | Payload (' + data.length + ' bytes): <code>' +
+                    data.payload.replace(/</g, '&lt;') + '</code>';
+                addLogEntry(data.frame_id, data.payload, 'Sent');
+            } else {
+                alertDiv.className = 'alert alert-danger';
+                textDiv.innerHTML = '<strong>Failed:</strong> ' + (data.message || 'Unknown error');
+                addLogEntry('—', msg || '(empty)', 'Failed');
+            }
+        })
+        .catch(err => {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-danger';
+            textDiv.innerHTML = '<strong>Network error:</strong> ' + err.message;
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane me-1"></i>Send Test Message';
+        });
+    }
+
+    function addLogEntry(frameId, payload, status) {
+        xbeeLogCount++;
+        const logDiv = document.getElementById('xbeeLog');
+        const tbody = document.getElementById('xbeeLogBody');
+        logDiv.style.display = 'block';
+
+        const tr = document.createElement('tr');
+        const badgeClass = status === 'Sent' ? 'bg-success' : 'bg-danger';
+        const safePayload = payload.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        tr.innerHTML = '<td>' + xbeeLogCount + '</td>' +
+            '<td>' + new Date().toLocaleTimeString() + '</td>' +
+            '<td>' + frameId + '</td>' +
+            '<td><code>' + safePayload + '</code></td>' +
+            '<td><span class="badge ' + badgeClass + '">' + status + '</span></td>';
+        tbody.insertBefore(tr, tbody.firstChild);
+    }
+    </script>
+</body>
+</html>
