@@ -515,3 +515,10 @@ def testing(
         "request": request,
         "current_user": current_user,
     })
+
+@router.get("", response_class=HTMLResponse, name="admin_messaging_overview")
+async def overview(request: Request, db: Session = Depends(get_db), current_user: User = Depends(verify_token)):
+    return templates.TemplateResponse("admin_messaging.html", {
+        "request": request,
+        "current_user": current_user,
+    })

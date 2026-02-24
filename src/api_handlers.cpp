@@ -184,8 +184,8 @@ void registerApiRoutes(AsyncWebServer &server) {
         readJsonArray(SD_BCASTS_FILE, bcDoc);
         int totalSosAlerts = 0;
         for (JsonObject b : bcDoc.as<JsonArray>()) {
-            const char* sev = b["severity"] | "";
-            if (strcmp(sev, "warning") == 0 || strcmp(sev, "critical") == 0)
+            const char* mt = b["msg_type"] | "";
+            if (strcmp(mt, "alert") == 0 || strcmp(mt, "sos") == 0)
                 totalSosAlerts++;
         }
 
