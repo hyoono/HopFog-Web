@@ -102,6 +102,9 @@ void setupWebServer(AsyncWebServer &server) {
     server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
         serveProtectedPage(request, "/www/settings.html");
     });
+    server.on("/api-docs", HTTP_GET, [](AsyncWebServerRequest *request) {
+        serveProtectedPage(request, "/www/api_docs.html");
+    });
 
     // Admin messaging pages — /admin/messaging/*
     // NOTE: Sub-routes MUST be registered BEFORE the parent route because
