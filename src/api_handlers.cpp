@@ -39,14 +39,124 @@ static void sendJsonError(AsyncWebServerRequest *request, int code, const char *
     request->send(code, "application/json", out);
 }
 
+// ── Helper: JSON body handler for POST requests ─────────────────────
+// Stores raw body in request->_tempObject so the main handler can
+// parse it as JSON.  The main handler MUST call getJsonBody() to free
+// the allocated memory, even if it discards the result.
+
+static void jsonBodyHandler(AsyncWebServerRequest *request, uint8_t *data,
+                            size_t len, size_t index, size_t total) {
+    if (total > MAX_JSON_BODY) return;
+    if (index == 0) {
+        request->_tempObject = malloc(total + 1);
+        if (!request->_tempObject) return;
+    }
+    if (request->_tempObject) {
+        memcpy((uint8_t*)(request->_tempObject) + index, data, len);
+        if (index + len == total) {
+            ((char*)(request->_tempObject))[total] = '\0';
+        }
+    }
+}
+
+// Parse JSON body from _tempObject into doc. Returns true if valid JSON.
+static bool getJsonBody(AsyncWebServerRequest *request, JsonDocument &doc) {
+    if (!request->_tempObject) return false;
+    DeserializationError err = deserializeJson(doc, (char*)(request->_tempObject));
+    free(request->_tempObject);
+    request->_tempObject = nullptr;
+    return !err;
+}
+
+// Get a string param from JSON body (first) or form data (fallback).
+static String getParam(AsyncWebServerRequest *request, JsonDocument &json,
+                       const char *name, const char *defVal = "") {
+    if (!json.isNull() && json[name].is<const char*>()) {
+        return json[name].as<String>();
+    }
+    if (request->hasParam(name, true)) {
+        return request->getParam(name, true)->value();
+    }
+    return String(defVal);
+}
+
+// Get an int param from JSON body (first) or form data (fallback).
+static int getParamInt(AsyncWebServerRequest *request, JsonDocument &json,
+                       const char *name, int defVal = 0) {
+    if (!json.isNull() && json.containsKey(name)) {
+        return json[name].as<int>();
+    }
+    if (request->hasParam(name, true)) {
+        return request->getParam(name, true)->value().toInt();
+    }
+    return defVal;
+}
+
 // ── Register routes ────────────────────────────────────────────────
 
 void registerApiRoutes(AsyncWebServer &server) {
 
     // ╭───────────────────────────────────────────────────────────────╮
     // │  AUTH: POST /login                                           │
+    // │  Web admin: form data (email+password) → redirect            │
+    // │  Mobile app: JSON (username+password) → JSON response        │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/login", HTTP_POST, [](AsyncWebServerRequest *request) {
+        // Try to parse JSON body (mobile app sends application/json)
+        JsonDocument jsonBody;
+        bool isJson = getJsonBody(request, jsonBody);
+
+        if (isJson) {
+            // ── Mobile login flow ────────────────────────────────────
+            String username = jsonBody["username"] | "";
+            String password = jsonBody["password"] | "";
+
+            if (username.isEmpty() || password.isEmpty()) {
+                JsonDocument r; r["success"] = false; r["message"] = "Missing username or password";
+                String out; serializeJson(r, out);
+                request->send(400, "application/json", out);
+                return;
+            }
+
+            JsonDocument userDoc = getUserByUsername(username.c_str());
+            if (userDoc.isNull() || userDoc.size() == 0) {
+                JsonDocument r; r["success"] = false; r["message"] = "Invalid credentials";
+                String out; serializeJson(r, out);
+                request->send(401, "application/json", out);
+                return;
+            }
+
+            int    userId   = userDoc["id"] | 0;
+            int    isActive = userDoc["is_active"] | 0;
+            String storedHash = userDoc["password_hash"] | "";
+
+            if (!isActive) {
+                JsonDocument r; r["success"] = false; r["message"] = "Account is inactive";
+                String out; serializeJson(r, out);
+                request->send(403, "application/json", out);
+                return;
+            }
+            if (!verifyPassword(password, storedHash)) {
+                JsonDocument r; r["success"] = false; r["message"] = "Invalid credentials";
+                String out; serializeJson(r, out);
+                request->send(401, "application/json", out);
+                return;
+            }
+
+            // Success — return JSON with user info (matching mobile app expectations)
+            JsonDocument resp;
+            resp["success"] = true;
+            JsonObject u = resp["user"].to<JsonObject>();
+            u["user_id"]        = userId;
+            u["username"]       = userDoc["username"] | "";
+            u["email"]          = userDoc["email"] | "";
+            u["has_agreed_sos"] = (userDoc["has_agreed_sos"] | 0) ? true : false;
+            String out; serializeJson(resp, out);
+            request->send(200, "application/json", out);
+            return;
+        }
+
+        // ── Web admin login flow (form data) ─────────────────────────
         if (!request->hasParam("email", true) || !request->hasParam("password", true)) {
             request->redirect("/?error=missing_fields");
             return;
@@ -83,7 +193,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         resp->addHeader("Location", "/dashboard");
         resp->addHeader("Set-Cookie", "access_token=Bearer " + token + "; HttpOnly; Path=/");
         request->send(resp);
-    });
+    }, NULL, jsonBodyHandler);
 
     // ╭───────────────────────────────────────────────────────────────╮
     // │  AUTH: POST /register                                        │
@@ -971,6 +1081,356 @@ void registerApiRoutes(AsyncWebServer &server) {
         String out; serializeJson(resp, out);
         request->send(frameId > 0 ? 200 : 400, "application/json", out);
     });
+
+    // ════════════════════════════════════════════════════════════════
+    //  MOBILE APP ENDPOINTS (match HopFogMobile expected API)
+    // ════════════════════════════════════════════════════════════════
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /status — health check (no auth)                │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "application/json", "{\"online\":true}");
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /conversations?user_id=X                        │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/conversations", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("user_id")) {
+            sendJsonError(request, 400, "user_id required");
+            return;
+        }
+        int userId = request->getParam("user_id")->value().toInt();
+
+        JsonDocument convoDoc;
+        readJsonArray(SD_CONVOS_FILE, convoDoc);
+
+        JsonDocument dmDoc;
+        readJsonArray(SD_DMS_FILE, dmDoc);
+
+        JsonDocument usersDoc;
+        readJsonArray(SD_USERS_FILE, usersDoc);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        for (JsonObject c : convoDoc.as<JsonArray>()) {
+            int u1 = c["user1_id"] | 0;
+            int u2 = c["user2_id"] | 0;
+            if (u1 != userId && u2 != userId) continue;
+
+            int otherId = (u1 == userId) ? u2 : u1;
+            String contactName = "Unknown";
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == otherId) {
+                    contactName = u["username"] | "Unknown";
+                    break;
+                }
+            }
+
+            // Find last message in this conversation
+            int convoId = c["id"] | 0;
+            String lastMsg = "";
+            String lastTs  = "";
+            unsigned long latestTime = 0;
+            for (JsonObject m : dmDoc.as<JsonArray>()) {
+                if ((m["conversation_id"] | 0) != convoId) continue;
+                unsigned long ts = m["sent_at"] | 0UL;
+                if (ts >= latestTime) {
+                    latestTime = ts;
+                    lastMsg = m["message_text"] | "";
+                    lastTs  = String(ts);
+                }
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["conversation_id"] = convoId;
+            o["contact_name"]    = contactName;
+            o["last_message"]    = lastMsg.length() > 0 ? lastMsg : JsonVariant();
+            o["timestamp"]       = lastTs.length() > 0  ? lastTs  : JsonVariant();
+        }
+
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /messages?conversation_id=X&user_id=Y           │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/messages", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("conversation_id") || !request->hasParam("user_id")) {
+            sendJsonError(request, 400, "conversation_id and user_id required");
+            return;
+        }
+        int convoId = request->getParam("conversation_id")->value().toInt();
+        int userId  = request->getParam("user_id")->value().toInt();
+
+        JsonDocument dmDoc;
+        readJsonArray(SD_DMS_FILE, dmDoc);
+
+        JsonDocument usersDoc;
+        readJsonArray(SD_USERS_FILE, usersDoc);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        for (JsonObject m : dmDoc.as<JsonArray>()) {
+            if ((m["conversation_id"] | 0) != convoId) continue;
+
+            int senderId = m["sender_id"] | 0;
+            String senderName = "Unknown";
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == senderId) {
+                    senderName = u["username"] | "Unknown";
+                    break;
+                }
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["message_id"]          = m["id"];
+            o["message_text"]        = m["message_text"];
+            o["sent_at"]             = String(m["sent_at"] | 0UL);
+            o["sender_id"]           = senderId;
+            o["is_from_current_user"] = (senderId == userId);
+            o["sender_username"]     = senderName;
+        }
+
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /new-messages?last_id=X&user_id=Y               │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/new-messages", HTTP_GET, [](AsyncWebServerRequest *request) {
+        int lastId = request->hasParam("last_id") ? request->getParam("last_id")->value().toInt() : 0;
+        int userId = request->hasParam("user_id") ? request->getParam("user_id")->value().toInt() : 0;
+
+        // Find all conversations this user is part of
+        JsonDocument convoDoc;
+        readJsonArray(SD_CONVOS_FILE, convoDoc);
+
+        JsonDocument dmDoc;
+        readJsonArray(SD_DMS_FILE, dmDoc);
+
+        JsonDocument usersDoc;
+        readJsonArray(SD_USERS_FILE, usersDoc);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        for (JsonObject m : dmDoc.as<JsonArray>()) {
+            if ((m["id"] | 0) <= lastId) continue;
+
+            // Check if user is part of this conversation
+            int cid = m["conversation_id"] | 0;
+            bool userInConvo = false;
+            for (JsonObject c : convoDoc.as<JsonArray>()) {
+                if ((c["id"] | 0) != cid) continue;
+                int u1 = c["user1_id"] | 0;
+                int u2 = c["user2_id"] | 0;
+                if (u1 == userId || u2 == userId) userInConvo = true;
+                break;
+            }
+            if (!userInConvo) continue;
+
+            int senderId = m["sender_id"] | 0;
+            String senderName = "Unknown";
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == senderId) {
+                    senderName = u["username"] | "Unknown";
+                    break;
+                }
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["message_id"]          = m["id"];
+            o["message_text"]        = m["message_text"];
+            o["sent_at"]             = String(m["sent_at"] | 0UL);
+            o["sender_id"]           = senderId;
+            o["is_from_current_user"] = (senderId == userId);
+            o["sender_username"]     = senderName;
+        }
+
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: POST /send — send a direct message (JSON body)      │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/send", HTTP_POST, [](AsyncWebServerRequest *request) {
+        JsonDocument jsonBody;
+        getJsonBody(request, jsonBody);
+
+        int convoId  = getParamInt(request, jsonBody, "conversation_id");
+        int senderId = getParamInt(request, jsonBody, "sender_id");
+        String text  = getParam(request, jsonBody, "message_text");
+
+        if (convoId <= 0 || senderId <= 0 || text.isEmpty()) {
+            JsonDocument r; r["success"] = false; r["message"] = "Missing fields";
+            String out; serializeJson(r, out);
+            request->send(400, "application/json", out);
+            return;
+        }
+
+        createDirectMessage(convoId, senderId, text.c_str());
+
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "Message sent";
+        resp["secondsRemaining"] = 0;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    }, NULL, jsonBodyHandler);
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: POST /create-chat — find or create conversation     │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/create-chat", HTTP_POST, [](AsyncWebServerRequest *request) {
+        JsonDocument jsonBody;
+        getJsonBody(request, jsonBody);
+
+        int user1Id = getParamInt(request, jsonBody, "user1_id");
+        int user2Id = getParamInt(request, jsonBody, "user2_id");
+
+        if (user1Id <= 0 || user2Id <= 0) {
+            sendJsonError(request, 400, "user1_id and user2_id required");
+            return;
+        }
+
+        int convoId = findOrCreateConversation(user1Id, user2Id, false);
+
+        // Get contact name
+        int otherId = user2Id;
+        JsonDocument userDoc = getUserById(otherId);
+        String contactName = userDoc["username"] | "Unknown";
+
+        JsonDocument resp;
+        resp["conversation_id"] = convoId;
+        resp["contact_name"]    = contactName;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    }, NULL, jsonBodyHandler);
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: POST /sos — find or create SOS chat with admin      │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/sos", HTTP_POST, [](AsyncWebServerRequest *request) {
+        JsonDocument jsonBody;
+        getJsonBody(request, jsonBody);
+
+        int userId = getParamInt(request, jsonBody, "user_id");
+        if (userId <= 0) {
+            sendJsonError(request, 400, "user_id required");
+            return;
+        }
+
+        // Find the first admin user
+        JsonDocument usersDoc;
+        readJsonArray(SD_USERS_FILE, usersDoc);
+        int adminId = 0;
+        String adminName = "Admin";
+        for (JsonObject u : usersDoc.as<JsonArray>()) {
+            String role = u["role"] | "";
+            if (role == "admin" && (u["is_active"] | 0)) {
+                adminId = u["id"] | 0;
+                adminName = u["username"] | "Admin";
+                break;
+            }
+        }
+
+        if (adminId == 0) {
+            sendJsonError(request, 500, "No admin user found");
+            return;
+        }
+
+        int convoId = findOrCreateConversation(userId, adminId, true);
+
+        JsonDocument resp;
+        resp["conversation_id"] = convoId;
+        resp["contact_name"]    = adminName;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    }, NULL, jsonBodyHandler);
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: POST /agree-sos — record SOS agreement              │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/agree-sos", HTTP_POST, [](AsyncWebServerRequest *request) {
+        JsonDocument jsonBody;
+        getJsonBody(request, jsonBody);
+
+        int userId = getParamInt(request, jsonBody, "user_id");
+        if (userId <= 0) {
+            JsonDocument r; r["success"] = false; r["message"] = "user_id required";
+            String out; serializeJson(r, out);
+            request->send(400, "application/json", out);
+            return;
+        }
+
+        updateUserIntField(userId, "has_agreed_sos", 1);
+
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "SOS agreement recorded";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    }, NULL, jsonBodyHandler);
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: POST /change-password (root path, JSON body)        │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/change-password", HTTP_POST, [](AsyncWebServerRequest *request) {
+        JsonDocument jsonBody;
+        getJsonBody(request, jsonBody);
+
+        int userId  = getParamInt(request, jsonBody, "user_id");
+        String oldPw = getParam(request, jsonBody, "old_password");
+        String newPw = getParam(request, jsonBody, "new_password");
+
+        if (userId <= 0 || oldPw.isEmpty() || newPw.isEmpty()) {
+            JsonDocument r; r["success"] = false; r["message"] = "Missing fields";
+            String out; serializeJson(r, out);
+            request->send(400, "application/json", out);
+            return;
+        }
+        if (newPw.length() < 6) {
+            JsonDocument r; r["success"] = false; r["message"] = "Password must be >= 6 characters";
+            String out; serializeJson(r, out);
+            request->send(400, "application/json", out);
+            return;
+        }
+
+        JsonDocument userDoc = getUserById(userId);
+        if (userDoc.isNull() || userDoc.size() == 0) {
+            JsonDocument r; r["success"] = false; r["message"] = "User not found";
+            String out; serializeJson(r, out);
+            request->send(404, "application/json", out);
+            return;
+        }
+
+        String storedHash = userDoc["password_hash"] | "";
+        if (!verifyPassword(oldPw, storedHash)) {
+            JsonDocument r; r["success"] = false; r["message"] = "Current password is incorrect";
+            String out; serializeJson(r, out);
+            request->send(400, "application/json", out);
+            return;
+        }
+
+        String newHash = hashPassword(newPw);
+        updateUserField(userId, "password_hash", newHash.c_str());
+
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "Password changed successfully";
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    }, NULL, jsonBodyHandler);
 
     Serial.println("[HTTP] API routes registered");
 }

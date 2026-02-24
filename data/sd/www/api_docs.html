@@ -332,6 +332,93 @@
                     ]
                 }
             ]
+        },
+        {
+            group: "Mobile App Endpoints",
+            endpoints: [
+                {
+                    method: "GET", path: "/status", desc: "Health check — returns {online: true}",
+                    auth: false, params: []
+                },
+                {
+                    method: "POST", path: "/login", desc: "Mobile login (JSON body) — returns user info",
+                    auth: false, bodyType: "json",
+                    params: [
+                        { name: "username", type: "text", required: true, desc: "Username" },
+                        { name: "password", type: "password", required: true, desc: "Password" }
+                    ]
+                },
+                {
+                    method: "GET", path: "/users?user_id={user_id}", desc: "List all users (excluding self)",
+                    auth: false,
+                    params: [
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "GET", path: "/conversations?user_id={user_id}", desc: "List conversations for a user",
+                    auth: false,
+                    params: [
+                        { name: "user_id", type: "number", required: true, desc: "User ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "GET", path: "/messages?conversation_id={conversation_id}&user_id={user_id}", desc: "Get messages in a conversation",
+                    auth: false,
+                    params: [
+                        { name: "conversation_id", type: "number", required: true, desc: "Conversation ID", isPath: true },
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "POST", path: "/send", desc: "Send a direct message (JSON body)",
+                    auth: false, bodyType: "json",
+                    params: [
+                        { name: "conversation_id", type: "number", required: true, desc: "Conversation ID" },
+                        { name: "sender_id", type: "number", required: true, desc: "Sender user ID" },
+                        { name: "message_text", type: "text", required: true, desc: "Message text" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/create-chat", desc: "Find or create a conversation between two users (JSON body)",
+                    auth: false, bodyType: "json",
+                    params: [
+                        { name: "user1_id", type: "number", required: true, desc: "First user ID" },
+                        { name: "user2_id", type: "number", required: true, desc: "Second user ID" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/sos", desc: "Find or create SOS conversation with admin (JSON body)",
+                    auth: false, bodyType: "json",
+                    params: [
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID" }
+                    ]
+                },
+                {
+                    method: "GET", path: "/new-messages?last_id={last_id}&user_id={user_id}", desc: "Poll for new messages since last ID",
+                    auth: false,
+                    params: [
+                        { name: "last_id", type: "number", required: true, desc: "Last seen message ID", isPath: true },
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "POST", path: "/agree-sos", desc: "Record SOS agreement (JSON body)",
+                    auth: false, bodyType: "json",
+                    params: [
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/change-password", desc: "Change password (JSON body, mobile)",
+                    auth: false, bodyType: "json",
+                    params: [
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID" },
+                        { name: "old_password", type: "password", required: true, desc: "Current password" },
+                        { name: "new_password", type: "password", required: true, desc: "New password" }
+                    ]
+                }
+            ]
         }
     ];
 
@@ -451,14 +538,28 @@
 
         const opts = { method: ep.method, credentials: 'same-origin' };
         if (ep.method !== 'GET') {
-            const formData = new FormData();
-            ep.params.forEach(p => {
-                if (p.isPath) return;
-                const input = document.getElementById('param-' + ep.path + '-' + p.name);
-                const val = input ? input.value : '';
-                if (val !== '') formData.append(p.name, val);
-            });
-            opts.body = formData;
+            if (ep.bodyType === 'json') {
+                const jsonObj = {};
+                ep.params.forEach(p => {
+                    if (p.isPath) return;
+                    const input = document.getElementById('param-' + ep.path + '-' + p.name);
+                    const val = input ? input.value : '';
+                    if (val !== '') {
+                        jsonObj[p.name] = (p.type === 'number') ? Number(val) : val;
+                    }
+                });
+                opts.headers = { 'Content-Type': 'application/json' };
+                opts.body = JSON.stringify(jsonObj);
+            } else {
+                const formData = new FormData();
+                ep.params.forEach(p => {
+                    if (p.isPath) return;
+                    const input = document.getElementById('param-' + ep.path + '-' + p.name);
+                    const val = input ? input.value : '';
+                    if (val !== '') formData.append(p.name, val);
+                });
+                opts.body = formData;
+            }
         }
 
         const startTime = performance.now();

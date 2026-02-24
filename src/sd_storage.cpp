@@ -85,6 +85,8 @@ bool initSDCard() {
     seedFileIfMissing(SD_RECIPS_FILE);
     seedFileIfMissing(SD_EVENTS_FILE);
     seedFileIfMissing(SD_RES_MSG_FILE);
+    seedFileIfMissing(SD_CONVOS_FILE);
+    seedFileIfMissing(SD_DMS_FILE);
 
     return true;
 }
@@ -190,8 +192,9 @@ int createUser(const char *username, const char *email,
     user["email"]         = email;
     user["password_hash"] = passwordHash;
     user["role"]          = role;
-    user["is_active"]     = active ? 1 : 0;
-    user["created_at"]    = currentTimestamp();
+    user["is_active"]      = active ? 1 : 0;
+    user["has_agreed_sos"] = 0;
+    user["created_at"]     = currentTimestamp();
 
     writeJsonArray(SD_USERS_FILE, doc);
     Serial.printf("[SD] Created user id=%d username=%s\n", id, username);
@@ -497,4 +500,85 @@ void getBroadcastEvents(int broadcastId, JsonDocument &outDoc) {
             out.add(ev);
         }
     }
+}
+
+// ── Conversation helpers (mobile chat) ──────────────────────────────
+
+int findOrCreateConversation(int user1Id, int user2Id, bool isSos) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_CONVOS_FILE, doc)) {
+        doc.to<JsonArray>();
+    }
+    JsonArray arr = doc.as<JsonArray>();
+
+    // Find existing conversation between these two users
+    for (JsonObject c : arr) {
+        int u1 = c["user1_id"] | 0;
+        int u2 = c["user2_id"] | 0;
+        if ((u1 == user1Id && u2 == user2Id) ||
+            (u1 == user2Id && u2 == user1Id)) {
+            return c["id"] | 0;
+        }
+    }
+
+    // Create new
+    int id = nextId(SD_CONVOS_FILE);
+    JsonObject c = arr.add<JsonObject>();
+    c["id"]         = id;
+    c["user1_id"]   = user1Id;
+    c["user2_id"]   = user2Id;
+    c["is_sos"]     = isSos ? 1 : 0;
+    c["created_at"] = currentTimestamp();
+
+    writeJsonArray(SD_CONVOS_FILE, doc);
+    Serial.printf("[SD] Created conversation id=%d between users %d and %d\n", id, user1Id, user2Id);
+    return id;
+}
+
+// ── Direct message helpers (mobile chat) ────────────────────────────
+
+int createDirectMessage(int conversationId, int senderId, const char *text) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_DMS_FILE, doc)) {
+        doc.to<JsonArray>();
+    }
+    JsonArray arr = doc.as<JsonArray>();
+    int id = nextId(SD_DMS_FILE);
+
+    JsonObject msg = arr.add<JsonObject>();
+    msg["id"]              = id;
+    msg["conversation_id"] = conversationId;
+    msg["sender_id"]       = senderId;
+    msg["message_text"]    = text;
+    msg["sent_at"]         = currentTimestamp();
+
+    writeJsonArray(SD_DMS_FILE, doc);
+    return id;
+}
+
+// ── Additional user helpers ─────────────────────────────────────────
+
+JsonDocument getUserByUsername(const char *username) {
+    JsonDocument result;
+    JsonDocument doc;
+    if (!readJsonArray(SD_USERS_FILE, doc)) return result;
+    for (JsonObject u : doc.as<JsonArray>()) {
+        if (strcmp(u["username"] | "", username) == 0) {
+            result.set(u);
+            return result;
+        }
+    }
+    return result;
+}
+
+bool updateUserIntField(int userId, const char *field, int value) {
+    JsonDocument doc;
+    if (!readJsonArray(SD_USERS_FILE, doc)) return false;
+    for (JsonObject u : doc.as<JsonArray>()) {
+        if ((u["id"] | 0) == userId) {
+            u[field] = value;
+            return writeJsonArray(SD_USERS_FILE, doc);
+        }
+    }
+    return false;
 }

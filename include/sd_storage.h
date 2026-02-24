@@ -56,4 +56,14 @@ void getRecipientStatusCounts(int broadcastId, int &total, int &queued,
 void addBroadcastEvent(int broadcastId, const char *eventType, const char *message = nullptr);
 void getBroadcastEvents(int broadcastId, JsonDocument &outDoc);
 
+// ── Conversation helpers (mobile chat) ──────────────────────────────
+int  findOrCreateConversation(int user1Id, int user2Id, bool isSos = false);
+
+// ── Direct message helpers (mobile chat) ────────────────────────────
+int  createDirectMessage(int conversationId, int senderId, const char *text);
+
+// ── Additional user helpers ─────────────────────────────────────────
+JsonDocument getUserByUsername(const char *username);
+bool updateUserIntField(int userId, const char *field, int value);
+
 #endif // SD_STORAGE_H

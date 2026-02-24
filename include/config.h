@@ -51,6 +51,8 @@
 #define SD_RECIPS_FILE "/db/broadcast_recipients.json"
 #define SD_EVENTS_FILE "/db/broadcast_events.json"
 #define SD_RES_MSG_FILE "/db/resident_admin_msgs.json"
+#define SD_CONVOS_FILE  "/db/conversations.json"
+#define SD_DMS_FILE     "/db/direct_messages.json"
 
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
 // XBee always uses UART2 (Serial2) so UART0 stays free for Serial Monitor.
@@ -72,5 +74,8 @@
 #define MAX_MESSAGES      200
 #define MAX_FOG_DEVICES   20
 #define MAX_BROADCASTS    100
+#define MAX_CONVERSATIONS 100
+#define MAX_DIRECT_MSGS   500
+#define MAX_JSON_BODY     4096  // max POST body size for JSON parsing (bytes)
 
 #endif // CONFIG_H

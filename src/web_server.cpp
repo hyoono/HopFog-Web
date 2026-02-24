@@ -5,6 +5,7 @@
 #include "web_server.h"
 #include "auth.h"
 #include "config.h"
+#include "sd_storage.h"
 
 #ifdef USE_SD_MMC
   #include <SD_MMC.h>
@@ -91,6 +92,26 @@ void setupWebServer(AsyncWebServer &server) {
         serveProtectedPage(request, "/www/dashboard.html");
     });
     server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
+        // Mobile API: GET /users?user_id=X → JSON user list
+        if (request->hasParam("user_id")) {
+            int userId = request->getParam("user_id")->value().toInt();
+            JsonDocument doc;
+            readJsonArray(SD_USERS_FILE, doc);
+            JsonDocument resp;
+            JsonArray arr = resp.to<JsonArray>();
+            for (JsonObject u : doc.as<JsonArray>()) {
+                if (!(u["is_active"] | 0)) continue;
+                if ((u["id"] | 0) == userId) continue;
+                JsonObject o = arr.add<JsonObject>();
+                o["id"]       = u["id"];
+                o["username"] = u["username"];
+            }
+            String out;
+            serializeJson(resp, out);
+            request->send(200, "application/json", out);
+            return;
+        }
+        // Web admin: serve HTML page
         serveProtectedPage(request, "/www/users.html");
     });
     server.on("/logs", HTTP_GET, [](AsyncWebServerRequest *request) {
