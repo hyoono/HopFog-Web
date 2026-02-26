@@ -657,6 +657,10 @@ void registerApiRoutes(AsyncWebServer &server) {
         String xbeePayload = msgType + "|" + subject + "|" + body;
         xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
+        // Log activity
+        String logSubject = "[Sent] " + subject;
+        logActivity(uid, logSubject.c_str(), body.c_str());
+
         JsonDocument resp;
         resp["message"] = "Marked as sent";
         String out; serializeJson(resp, out);
@@ -694,6 +698,10 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         updateBroadcastStatus(bId, "cancelled");
         addBroadcastEvent(bId, "cancelled", "Broadcast cancelled by admin");
+
+        // Log activity
+        String logSubject = "[Cancelled] Broadcast #" + String(bId);
+        logActivity(uid, logSubject.c_str(), "Broadcast cancelled by admin");
 
         JsonDocument resp;
         resp["message"] = "Broadcast cancelled";
@@ -802,6 +810,10 @@ void registerApiRoutes(AsyncWebServer &server) {
                 status = "failed";
             }
         }
+
+        // Log activity
+        String logSubject = "[Broadcast] " + subject;
+        logActivity(uid, logSubject.c_str(), body.c_str());
 
         JsonDocument resp;
         resp["message"]      = "Broadcast created";
@@ -1008,6 +1020,10 @@ void registerApiRoutes(AsyncWebServer &server) {
         String xbeePayload = escalateTo + "|" + subject + "|" + body;
         xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
+        // Log activity
+        String logSubject = "[SOS Escalated] " + subject;
+        logActivity(uid, logSubject.c_str(), body.c_str());
+
         JsonDocument resp;
         resp["message"] = "Escalated successfully";
         String out; serializeJson(resp, out);
@@ -1024,6 +1040,7 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         int reqId = request->pathArg(0).toInt();
         if (updateResidentAdminMsg(reqId, "dismissed", "handled_privately", uid)) {
+            logActivity(uid, "[SOS Dismissed]", ("SOS request #" + String(reqId) + " dismissed").c_str());
             JsonDocument resp;
             resp["message"] = "Dismissed";
             String out; serializeJson(resp, out);
@@ -1305,6 +1322,10 @@ void registerApiRoutes(AsyncWebServer &server) {
         String xbeePayload = xbeeType + "|" + senderName + "|" + text;
         xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
 
+        // Log activity
+        String logSubject = isSos ? "[SOS Message] from " + senderName : "[DM] from " + senderName;
+        logActivity(senderId, logSubject.c_str(), text.c_str());
+
         JsonDocument resp;
         resp["success"] = true;
         resp["message"] = "Message sent";
@@ -1382,6 +1403,10 @@ void registerApiRoutes(AsyncWebServer &server) {
         String userName = userDoc["username"] | "Unknown";
         String xbeePayload = "SOS_ALERT|" + userName + "|SOS activated";
         xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+
+        // Log activity
+        String logSubject = "[SOS Alert] " + userName + " triggered SOS";
+        logActivity(userId, logSubject.c_str(), "SOS activated via mobile app");
 
         JsonDocument resp;
         resp["conversation_id"] = convoId;

@@ -28,6 +28,8 @@ bool     toggleUserActive(int userId);
 // ── Message helpers ─────────────────────────────────────────────────
 int  createMessage(int senderId, const char *subject, const char *body,
                    JsonArray recipientIds);
+// Log an activity with no recipients (convenience wrapper for system events)
+int  logActivity(int actorId, const char *subject, const char *body);
 bool deleteMessage(int messageId);
 
 // ── Fog device helpers ──────────────────────────────────────────────

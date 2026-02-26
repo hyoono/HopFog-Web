@@ -255,6 +255,12 @@ int createMessage(int senderId, const char *subject, const char *body,
     return id;
 }
 
+int logActivity(int actorId, const char *subject, const char *body) {
+    JsonDocument tmp;
+    JsonArray empty = tmp.to<JsonArray>();
+    return createMessage(actorId, subject, body, empty);
+}
+
 bool deleteMessage(int messageId) {
     JsonDocument doc;
     if (!readJsonArray(SD_MSGS_FILE, doc)) return false;

@@ -58,15 +58,15 @@
         <div id="layoutSidenav_content">
             <main class="p-4">
                 <div class="card mb-4">
-                    <div class="card-header">
-                        <i class="fas fa-table me-1"></i>
-                        Latest Messages
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div><i class="fas fa-table me-1"></i> Activity Log</div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadLogs()"><i class="fas fa-sync-alt"></i> Refresh</button>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive">
                         <table id="datatablesSimple" class="table table-bordered table-hover">
-                            <thead><tr><th>ID</th><th>From</th><th>To</th><th>Message</th><th>Date</th></tr></thead>
-                            <tfoot><tr><th>ID</th><th>From</th><th>To</th><th>Message</th><th>Date</th></tr></tfoot>
+                            <thead><tr><th>ID</th><th>Type</th><th>From</th><th>Subject</th><th>Message</th><th>Date</th></tr></thead>
+                            <tfoot><tr><th>ID</th><th>Type</th><th>From</th><th>Subject</th><th>Message</th><th>Date</th></tr></tfoot>
                             <tbody id="logsTableBody"></tbody>
                         </table>
                         </div>
@@ -86,20 +86,48 @@
     <script src="/static/js/scripts.js"></script>
     <script src="/static/vendor/simple-datatables/simple-datatables.min.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        var dtInstance = null;
+        function getTypeBadge(subject) {
+            var s = (subject || '').toLowerCase();
+            if (s.indexOf('[sos alert]') === 0)      return '<span class="badge bg-danger">SOS Alert</span>';
+            if (s.indexOf('[sos message]') === 0)     return '<span class="badge bg-danger">SOS Message</span>';
+            if (s.indexOf('[sos escalated]') === 0)   return '<span class="badge bg-warning text-dark">SOS Escalated</span>';
+            if (s.indexOf('[sos dismissed]') === 0)   return '<span class="badge bg-secondary">SOS Dismissed</span>';
+            if (s.indexOf('[broadcast]') === 0)       return '<span class="badge bg-primary">Broadcast</span>';
+            if (s.indexOf('[sent]') === 0)            return '<span class="badge bg-success">Sent</span>';
+            if (s.indexOf('[cancelled]') === 0)       return '<span class="badge bg-secondary">Cancelled</span>';
+            if (s.indexOf('[dm]') === 0)              return '<span class="badge bg-info text-dark">DM</span>';
+            return '<span class="badge bg-dark">System</span>';
+        }
+        function cleanSubject(subject) {
+            return (subject || '').replace(/^\[.*?\]\s*/, '');
+        }
+        function fmtDate(ts) {
+            if (!ts) return 'N/A';
+            var d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
+            if (isNaN(d.getTime())) return ts;
+            return d.toLocaleString();
+        }
+        function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        function loadLogs() {
             fetch('/api/messages').then(function(r){return r.json();}).then(function(messages) {
+                if (dtInstance) { dtInstance.destroy(); dtInstance = null; }
                 var tbody = document.getElementById('logsTableBody');
-                if (messages.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No messages found</td></tr>'; }
+                tbody.innerHTML = '';
+                if (messages.length === 0) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No activity logged yet</td></tr>'; }
+                messages.reverse();
                 messages.forEach(function(m) {
                     var tr = document.createElement('tr');
-                    var to = Array.isArray(m.to) ? m.to.join(', ') : (m.to || '');
-                    tr.innerHTML = '<td>'+m.id+'</td><td>'+(m.from||'')+'</td><td>'+to+'</td><td>'+(m.body||'')+'</td><td>'+(m.created_at||'N/A')+'</td>';
+                    tr.innerHTML = '<td>'+m.id+'</td><td>'+getTypeBadge(m.subject)+'</td><td>'+esc(m.from||'System')+'</td><td>'+esc(cleanSubject(m.subject))+'</td><td>'+esc(m.body||'')+'</td><td>'+fmtDate(m.created_at)+'</td>';
                     tbody.appendChild(tr);
                 });
                 var dt = document.getElementById('datatablesSimple');
-                if (dt) new simpleDatatables.DataTable(dt);
+                if (dt) dtInstance = new simpleDatatables.DataTable(dt);
+            }).catch(function(err) {
+                document.getElementById('logsTableBody').innerHTML = '<tr><td colspan="6" class="text-danger text-center">Failed to load logs</td></tr>';
             });
-        });
+        }
+        document.addEventListener('DOMContentLoaded', loadLogs);
     </script>
 </body>
 </html>
