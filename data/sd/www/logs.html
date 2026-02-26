@@ -110,7 +110,11 @@
         }
         function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
         function loadLogs() {
-            fetch('/api/messages').then(function(r){return r.json();}).then(function(messages) {
+            fetch('/api/messages').then(function(r){
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            }).then(function(messages) {
+                if (!Array.isArray(messages)) throw new Error('Expected array, got: ' + JSON.stringify(messages).substring(0, 100));
                 if (dtInstance) { dtInstance.destroy(); dtInstance = null; }
                 var tbody = document.getElementById('logsTableBody');
                 tbody.innerHTML = '';
@@ -124,7 +128,7 @@
                 var dt = document.getElementById('datatablesSimple');
                 if (dt) dtInstance = new simpleDatatables.DataTable(dt);
             }).catch(function(err) {
-                document.getElementById('logsTableBody').innerHTML = '<tr><td colspan="6" class="text-danger text-center">Failed to load logs</td></tr>';
+                document.getElementById('logsTableBody').innerHTML = '<tr><td colspan="6" class="text-danger text-center">Failed to load logs: ' + esc(err.message) + '</td></tr>';
             });
         }
         document.addEventListener('DOMContentLoaded', loadLogs);

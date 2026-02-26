@@ -15,6 +15,7 @@
   #include <SD.h>
 #endif
 #include <time.h>
+#include <sys/time.h>
 
 static unsigned long currentEpoch() {
     time_t now;
@@ -1117,6 +1118,34 @@ void registerApiRoutes(AsyncWebServer &server) {
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
     });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  TIME: POST /api/set-time — sync ESP32 clock from browser    │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/set-time", HTTP_POST, [](AsyncWebServerRequest *request) {
+        JsonDocument jsonBody;
+        bool isJson = getJsonBody(request, jsonBody);
+        unsigned long epoch = 0;
+        if (isJson && jsonBody["epoch"].is<unsigned long>()) {
+            epoch = jsonBody["epoch"].as<unsigned long>();
+        } else if (request->hasParam("epoch", true)) {
+            epoch = request->getParam("epoch", true)->value().toInt();
+        }
+        if (epoch < 1700000000UL) { // sanity: must be after Nov 14, 2023
+            sendJsonError(request, 400, "Invalid epoch timestamp");
+            return;
+        }
+        struct timeval tv;
+        tv.tv_sec  = (time_t)epoch;
+        tv.tv_usec = 0;
+        settimeofday(&tv, NULL);
+        Serial.printf("[Time] Clock set to %lu (from browser)\n", epoch);
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["epoch"]   = epoch;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    }, NULL, jsonBodyHandler);
 
     // ╭───────────────────────────────────────────────────────────────╮
     // │  MOBILE: GET /conversations?user_id=X                        │
