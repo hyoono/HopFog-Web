@@ -206,10 +206,17 @@
                         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No messages found</td></tr>';
                         return;
                     }
+                    function fmtDate(v) {
+                        if (!v) return 'N/A';
+                        var n = Number(v);
+                        // Unix epoch > 1e9 means after Sep 2001 = valid timestamp
+                        if (n > 1000000000) { var d = new Date(n * 1000); return d.toLocaleString(); }
+                        return String(v);
+                    }
                     messages.forEach(function(m) {
                         var tr = document.createElement('tr');
                         var to = Array.isArray(m.to) ? m.to.join(', ') : (m.to || '');
-                        tr.innerHTML = '<td>' + m.id + '</td><td>' + (m.from || '') + '</td><td>' + to + '</td><td>' + (m.body || '') + '</td><td>' + (m.created_at || 'N/A') + '</td>';
+                        tr.innerHTML = '<td>' + m.id + '</td><td>' + (m.from || '') + '</td><td>' + to + '</td><td>' + (m.body || '') + '</td><td>' + fmtDate(m.created_at) + '</td>';
                         tbody.appendChild(tr);
                     });
                     var dt = document.getElementById('datatablesSimple');

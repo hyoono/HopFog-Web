@@ -337,6 +337,10 @@
             group: "Mobile App Endpoints",
             endpoints: [
                 {
+                    method: "GET", path: "/announcements", desc: "List sent broadcasts as announcements (no auth needed)",
+                    auth: false, params: []
+                },
+                {
                     method: "GET", path: "/status", desc: "Health check — returns {online: true}",
                     auth: false, params: []
                 },

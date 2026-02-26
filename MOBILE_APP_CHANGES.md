@@ -4,7 +4,7 @@ This document lists the changes needed in the [HopFogMobile](https://github.com/
 
 ## Summary
 
-The ESP32 firmware now implements **all 11 API endpoints** that the mobile app calls, at the **exact paths and response formats** the app expects. Most features work without any Android code changes. The changes below are for robustness, WiFi handling, and minor field alignment.
+The ESP32 firmware now implements **all 12 API endpoints** that the mobile app calls, at the **exact paths and response formats** the app expects. Most features work without any Android code changes. The changes below are for robustness, WiFi handling, and minor field alignment.
 
 ---
 
@@ -23,6 +23,7 @@ The ESP32 firmware now implements **all 11 API endpoints** that the mobile app c
 | 9 | `GET /new-messages?last_id=X&user_id=Y` | ✅ Returns `[Message]` | Works |
 | 10 | `POST /agree-sos` (JSON: user_id) | ✅ Returns `{success, message}` | Works |
 | 11 | `POST /change-password` (JSON: user_id, old_password, new_password) | ✅ Returns `{success, message}` | Works |
+| 12 | `GET /announcements` | ✅ Returns `[{id, title, message, created_at}]` — sent broadcasts | Works |
 
 ---
 

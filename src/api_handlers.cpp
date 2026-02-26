@@ -1148,6 +1148,27 @@ void registerApiRoutes(AsyncWebServer &server) {
     }, NULL, jsonBodyHandler);
 
     // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /announcements — sent broadcasts as list        │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/announcements", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument bDoc;
+        readJsonArray(SD_BCASTS_FILE, bDoc);
+        JsonDocument resp;
+        JsonArray out = resp.to<JsonArray>();
+        for (JsonObject b : bDoc.as<JsonArray>()) {
+            String st = b["status"] | "";
+            if (st != "sent" && st != "queued") continue; // only sent/queued
+            JsonObject a = out.add<JsonObject>();
+            a["id"]         = b["id"];
+            a["title"]      = b["subject"] | "";
+            a["message"]    = b["body"] | "";
+            a["created_at"] = String(b["created_at"] | 0); // String: mobile app expects String? (Announcement.createdAt)
+        }
+        String outStr; serializeJson(resp, outStr);
+        request->send(200, "application/json", outStr);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
     // │  MOBILE: GET /conversations?user_id=X                        │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/conversations", HTTP_GET, [](AsyncWebServerRequest *request) {
