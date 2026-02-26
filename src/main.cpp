@@ -16,6 +16,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 
@@ -52,6 +53,14 @@ static void startAP() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONN);
     delay(100); // let the AP interface stabilise
+
+    // Optimise for short-range reliability:
+    // Lower TX power reduces interference & power consumption on ESP32-CAM
+    WiFi.setTxPower(WIFI_POWER_17dBm);   // ~50 mW, plenty for indoor AP
+
+    // Disable WiFi power-saving (DTIM buffering) so packets aren't delayed
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
     Serial.printf("[WiFi] AP running — IP: %s  max_conn: %d\n",
                   WiFi.softAPIP().toString().c_str(), AP_MAX_CONN);
     Serial.printf("[WiFi] Connect to WiFi \"%s\" (password: %s)\n", AP_SSID, AP_PASSWORD);

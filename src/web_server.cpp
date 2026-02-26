@@ -38,7 +38,16 @@ static void serveStaticFile(AsyncWebServerRequest *request, const String &sdPath
         request->send(404, "text/plain", "File not found: " + sdPath);
         return;
     }
-    request->send(SD_FS, sdPath, mimeType(sdPath));
+    AsyncWebServerResponse *response = request->beginResponse(SD_FS, sdPath, mimeType(sdPath));
+    // Cache immutable assets (CSS, JS, fonts, images) for 1 hour.
+    // Saves SD card reads and keeps WiFi responsive.
+    if (sdPath.endsWith(".css") || sdPath.endsWith(".js") ||
+        sdPath.endsWith(".woff2") || sdPath.endsWith(".woff") ||
+        sdPath.endsWith(".png") || sdPath.endsWith(".jpg") ||
+        sdPath.endsWith(".svg") || sdPath.endsWith(".ico")) {
+        response->addHeader("Cache-Control", "public, max-age=3600");
+    }
+    request->send(response);
 }
 
 // ── Auth guard helper ────────────────────────────────────────────────

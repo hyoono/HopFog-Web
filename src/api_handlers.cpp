@@ -438,9 +438,14 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument doc;
         readJsonArray(SD_MSGS_FILE, doc);
 
-        // Enrich with sender username
+        // Build user ID → name lookup map (O(m) once, not O(m) per message)
         JsonDocument usersDoc;
         readJsonArray(SD_USERS_FILE, usersDoc);
+        JsonDocument userMap;
+        for (JsonObject u : usersDoc.as<JsonArray>()) {
+            String key = String(u["id"] | 0);
+            userMap[key] = u["username"] | "Unknown";
+        }
 
         JsonDocument resp;
         JsonArray out = resp.to<JsonArray>();
@@ -452,27 +457,15 @@ void registerApiRoutes(AsyncWebServer &server) {
             m["subject"]    = msg["subject"];
             m["created_at"] = msg["created_at"];
 
-            int sid = msg["sender_id"] | 0;
-            String senderName = "Unknown";
-            for (JsonObject u : usersDoc.as<JsonArray>()) {
-                if ((u["id"] | 0) == sid) {
-                    senderName = u["username"] | "Unknown";
-                    break;
-                }
-            }
-            m["from"] = senderName;
+            String sKey = String(msg["sender_id"] | 0);
+            m["from"] = userMap[sKey] | "Unknown";
 
             // Resolve recipient usernames
             JsonArray toArr = m["to"].to<JsonArray>();
             if (msg["recipients"].is<JsonArray>()) {
                 for (JsonObject r : msg["recipients"].as<JsonArray>()) {
-                    int rid = r["user_id"] | 0;
-                    for (JsonObject u : usersDoc.as<JsonArray>()) {
-                        if ((u["id"] | 0) == rid) {
-                            toArr.add(u["username"] | "Unknown");
-                            break;
-                        }
-                    }
+                    String rKey = String(r["user_id"] | 0);
+                    toArr.add(userMap[rKey] | "Unknown");
                 }
             }
         }
@@ -718,6 +711,10 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument doc;
         readJsonArray(SD_BCASTS_FILE, doc);
 
+        // Read ALL recipient status counts in one pass (avoids N+1 SD reads)
+        JsonDocument countsMap;
+        getAllRecipientStatusCounts(countsMap);
+
         // Enrich each broadcast with recipient status counts
         JsonDocument resp;
         JsonArray out = resp.to<JsonArray>();
@@ -726,15 +723,20 @@ void registerApiRoutes(AsyncWebServer &server) {
             for (JsonPair kv : b) {
                 o[kv.key()] = kv.value();
             }
-            int total=0, queued=0, sent=0, delivered=0, readCount=0, failed=0;
-            getRecipientStatusCounts(b["id"] | 0, total, queued, sent, delivered, readCount, failed);
+            String key = String(b["id"] | 0);
             JsonObject sc = o["status_counts"].to<JsonObject>();
-            sc["total"]     = total;
-            sc["queued"]    = queued;
-            sc["sent"]      = sent;
-            sc["delivered"] = delivered;
-            sc["read"]      = readCount;
-            sc["failed"]    = failed;
+            if (countsMap[key].is<JsonObject>()) {
+                JsonObject src = countsMap[key].as<JsonObject>();
+                sc["total"]     = src["total"]     | 0;
+                sc["queued"]    = src["queued"]    | 0;
+                sc["sent"]      = src["sent"]      | 0;
+                sc["delivered"] = src["delivered"] | 0;
+                sc["read"]      = src["read"]      | 0;
+                sc["failed"]    = src["failed"]    | 0;
+            } else {
+                sc["total"]=0; sc["queued"]=0; sc["sent"]=0;
+                sc["delivered"]=0; sc["read"]=0; sc["failed"]=0;
+            }
         }
 
         String outStr;
@@ -1090,7 +1092,13 @@ void registerApiRoutes(AsyncWebServer &server) {
     // │  MOBILE: GET /status — health check (no auth)                │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "application/json", "{\"online\":true}");
+        JsonDocument resp;
+        resp["online"] = true;
+        resp["free_heap"] = ESP.getFreeHeap();
+        resp["min_free_heap"] = ESP.getMinFreeHeap();
+        resp["wifi_stations"] = WiFi.softAPgetStationNum();
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
     });
 
     // ╭───────────────────────────────────────────────────────────────╮

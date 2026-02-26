@@ -69,7 +69,13 @@
 #define MAX_ACTIVE_TOKENS 16
 
 // ── Misc ────────────────────────────────────────────────────────────
-#define JSON_DOC_SIZE     8192
+// ESP32-CAM has 4 MB PSRAM — allow larger JSON documents.
+// Generic ESP32 uses internal RAM only, keep conservative.
+#ifdef BOARD_HAS_PSRAM
+  #define JSON_DOC_SIZE   16384
+#else
+  #define JSON_DOC_SIZE    8192
+#endif
 #define MAX_USERS         50
 #define MAX_MESSAGES      200
 #define MAX_FOG_DEVICES   20

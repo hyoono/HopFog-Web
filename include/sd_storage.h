@@ -51,6 +51,9 @@ void createRecipientsForBroadcast(int broadcastId);
 void updateRecipientsStatus(int broadcastId, const char *newStatus);
 void getRecipientStatusCounts(int broadcastId, int &total, int &queued,
                               int &sent, int &delivered, int &read, int &failed);
+// Bulk variant — reads recipients file ONCE, returns counts per broadcast ID.
+// Avoids N+1 SD reads when listing multiple broadcasts.
+void getAllRecipientStatusCounts(JsonDocument &outMap);
 
 // ── Broadcast event helpers ─────────────────────────────────────────
 void addBroadcastEvent(int broadcastId, const char *eventType, const char *message = nullptr);

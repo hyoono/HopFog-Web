@@ -468,6 +468,29 @@ void getRecipientStatusCounts(int broadcastId, int &total, int &queued,
     }
 }
 
+void getAllRecipientStatusCounts(JsonDocument &outMap) {
+    outMap.to<JsonObject>();
+    JsonDocument doc;
+    if (!readJsonArray(SD_RECIPS_FILE, doc)) return;
+
+    for (JsonObject r : doc.as<JsonArray>()) {
+        String key = String(r["broadcast_id"] | 0);
+        if (!outMap[key].is<JsonObject>()) {
+            JsonObject sc = outMap[key].to<JsonObject>();
+            sc["total"]=0; sc["queued"]=0; sc["sent"]=0;
+            sc["delivered"]=0; sc["read"]=0; sc["failed"]=0;
+        }
+        JsonObject sc = outMap[key].as<JsonObject>();
+        sc["total"] = (sc["total"] | 0) + 1;
+        String s = r["status"] | "queued";
+        if      (s == "queued")    sc["queued"]    = (sc["queued"]    | 0) + 1;
+        else if (s == "sent")      sc["sent"]      = (sc["sent"]      | 0) + 1;
+        else if (s == "delivered") sc["delivered"]  = (sc["delivered"] | 0) + 1;
+        else if (s == "read")      sc["read"]      = (sc["read"]      | 0) + 1;
+        else if (s == "failed")    sc["failed"]    = (sc["failed"]    | 0) + 1;
+    }
+}
+
 // ── Broadcast event helpers ─────────────────────────────────────────
 
 void addBroadcastEvent(int broadcastId, const char *eventType, const char *message) {
