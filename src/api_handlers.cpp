@@ -7,6 +7,7 @@
 #include "auth.h"
 #include "config.h"
 #include "xbee_comm.h"
+#include "node_protocol.h"
 
 #include <ArduinoJson.h>
 #ifdef USE_SD_MMC
@@ -652,11 +653,18 @@ void registerApiRoutes(AsyncWebServer &server) {
         // Create audit event
         addBroadcastEvent(bId, "marked_sent", "Manually marked as sent (simulation)");
 
-        // ── Send via XBee S2C (ZigBee broadcast) ────────────────────
-        // Payload format: "TYPE|SUBJECT|BODY" — pipe-delimited so the
-        // receiving XBee node can parse msg_type, subject, and body.
-        String xbeePayload = msgType + "|" + subject + "|" + body;
-        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+        // ── Send via XBee S2C (JSON command for node protocol) ────────
+        JsonDocument markCmd;
+        markCmd["cmd"] = "BROADCAST_MSG";
+        JsonObject markParams = markCmd["params"].to<JsonObject>();
+        markParams["from"] = "admin";
+        markParams["to"] = "all";
+        markParams["message"] = body;
+        markParams["subject"] = subject;
+        markParams["msg_type"] = msgType;
+        String markJson;
+        serializeJson(markCmd, markJson);
+        xbeeSendBroadcast(markJson.c_str(), markJson.length());
 
         // Log activity
         String logSubject = "[Sent] " + subject;
@@ -798,8 +806,19 @@ void registerApiRoutes(AsyncWebServer &server) {
 
             // ── ESP32 auto-dispatch: no background dispatcher exists, so
             //    immediately send via XBee and mark as "sent". ──────────
-            String xbeePayload = msgType + "|" + subject + "|" + body;
-            uint8_t frameId = xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+            // Send JSON-framed command (for HopFog-Node protocol)
+            JsonDocument bcastCmd;
+            bcastCmd["cmd"] = "BROADCAST_MSG";
+            JsonObject bcastParams = bcastCmd["params"].to<JsonObject>();
+            bcastParams["from"] = "admin";
+            bcastParams["to"] = "all";
+            bcastParams["message"] = body;
+            bcastParams["subject"] = subject;
+            bcastParams["msg_type"] = msgType;
+            bcastParams["severity"] = severity;
+            String bcastJson;
+            serializeJson(bcastCmd, bcastJson);
+            uint8_t frameId = xbeeSendBroadcast(bcastJson.c_str(), bcastJson.length());
             if (frameId > 0) {
                 updateBroadcastStatus(id, "sent");
                 updateRecipientsStatus(id, "sent");
@@ -1016,10 +1035,18 @@ void registerApiRoutes(AsyncWebServer &server) {
         updateResidentAdminMsg(reqId, "resolved",
             (String("escalated_to_") + escalateTo).c_str(), uid);
 
-        // ── Send SOS via XBee S2C (ZigBee broadcast) ────────────────
-        // Same pipe-delimited format as mark_sent: "TYPE|SUBJECT|BODY"
-        String xbeePayload = escalateTo + "|" + subject + "|" + body;
-        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+        // ── Send SOS via XBee S2C (JSON command for node protocol) ────
+        JsonDocument sosCmd;
+        sosCmd["cmd"] = "BROADCAST_MSG";
+        JsonObject sosParams = sosCmd["params"].to<JsonObject>();
+        sosParams["from"] = "admin";
+        sosParams["to"] = "all";
+        sosParams["message"] = body;
+        sosParams["subject"] = subject;
+        sosParams["msg_type"] = escalateTo;
+        String sosJson;
+        serializeJson(sosCmd, sosJson);
+        xbeeSendBroadcast(sosJson.c_str(), sosJson.length());
 
         // Log activity
         String logSubject = "[SOS Escalated] " + subject;
@@ -1355,7 +1382,7 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         createDirectMessage(convoId, senderId, text.c_str());
 
-        // ── Relay message via XBee S2C ──────────────────────────────
+        // ── Relay message via XBee S2C (JSON command for node protocol) ─
         // Check if this conversation is SOS-flagged to set the type.
         JsonDocument convosDoc;
         readJsonArray(SD_CONVOS_FILE, convosDoc);
@@ -1368,9 +1395,19 @@ void registerApiRoutes(AsyncWebServer &server) {
         }
         JsonDocument senderDoc = getUserById(senderId);
         String senderName = senderDoc["username"] | "Unknown";
-        String xbeeType = isSos ? "SOS" : "DM";
-        String xbeePayload = xbeeType + "|" + senderName + "|" + text;
-        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+
+        JsonDocument dmCmd;
+        dmCmd["cmd"] = "RELAY_CHAT_MSG";
+        dmCmd["node_id"] = "admin";
+        JsonObject dmParams = dmCmd["params"].to<JsonObject>();
+        dmParams["conversation_id"] = convoId;
+        dmParams["sender_id"] = senderId;
+        dmParams["sender_name"] = senderName;
+        dmParams["message_text"] = text;
+        dmParams["is_sos"] = isSos;
+        String dmJson;
+        serializeJson(dmCmd, dmJson);
+        xbeeSendBroadcast(dmJson.c_str(), dmJson.length());
 
         // Log activity
         String logSubject = isSos ? "[SOS Message] from " + senderName : "[DM] from " + senderName;
@@ -1451,8 +1488,17 @@ void registerApiRoutes(AsyncWebServer &server) {
         // Look up the triggering user's name for the alert payload.
         JsonDocument userDoc = getUserById(userId);
         String userName = userDoc["username"] | "Unknown";
-        String xbeePayload = "SOS_ALERT|" + userName + "|SOS activated";
-        xbeeSendBroadcast(xbeePayload.c_str(), xbeePayload.length());
+        // Send SOS alert via XBee in JSON format (for node protocol)
+        JsonDocument sosAlertCmd;
+        sosAlertCmd["cmd"] = "SOS_ALERT";
+        sosAlertCmd["node_id"] = "admin";
+        JsonObject sosAlertParams = sosAlertCmd["params"].to<JsonObject>();
+        sosAlertParams["user_id"] = userId;
+        sosAlertParams["conversation_id"] = convoId;
+        sosAlertParams["username"] = userName;
+        String sosAlertJson;
+        serializeJson(sosAlertCmd, sosAlertJson);
+        xbeeSendBroadcast(sosAlertJson.c_str(), sosAlertJson.length());
 
         // Log activity
         String logSubject = "[SOS Alert] " + userName + " triggered SOS";
@@ -1538,6 +1584,68 @@ void registerApiRoutes(AsyncWebServer &server) {
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
     }, NULL, jsonBodyHandler);
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  NODE MANAGEMENT: GET /api/nodes                              │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/nodes", HTTP_GET, [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        JsonDocument resp;
+        resp["total"]  = nodeProtocolTotalCount();
+        resp["active"] = nodeProtocolActiveCount();
+        JsonArray arr = resp["nodes"].to<JsonArray>();
+        nodeProtocolGetNodes(arr);
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  NODE MANAGEMENT: POST /api/nodes/{id}/sync                   │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/nodes\\/([^/]+)\\/sync$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        String nodeId = request->pathArg(0);
+        // Trigger a SYNC_DATA send to this node
+        JsonDocument cmd;
+        cmd["cmd"] = "SYNC_DATA";
+        // Build sync data inline (calls the same logic as node_protocol)
+        // For simplicity, just send the request via the protocol handler
+        xbeeSendBroadcast("{\"cmd\":\"SYNC_DATA\"}", 19);
+
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "Sync request sent to " + nodeId;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  NODE MANAGEMENT: POST /api/nodes/{id}/get-stats              │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/nodes\\/([^/]+)\\/get-stats$", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        String nodeId = request->pathArg(0);
+        JsonDocument cmd;
+        cmd["cmd"] = "GET_STATS";
+        cmd["node_id"] = nodeId;
+        String json;
+        serializeJson(cmd, json);
+        xbeeSendBroadcast(json.c_str(), json.length());
+
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "Stats request sent to " + nodeId;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
 
     Serial.println("[HTTP] API routes registered");
 }

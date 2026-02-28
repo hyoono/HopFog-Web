@@ -1,4 +1,5 @@
 import asyncio
+import json
 from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import BroadcastMessage
@@ -34,7 +35,18 @@ class BroadcastDispatcher:
             print(f"⚡ dispatch_now: Dispatching broadcast ID {b.id}")
 
             try:
-                send_broadcast(b.body or b.subject)
+                payload = json.dumps({
+                    "cmd": "BROADCAST_MSG",
+                    "params": {
+                        "from": "admin",
+                        "to": "all",
+                        "message": b.body or b.subject,
+                        "subject": b.subject,
+                        "msg_type": b.msg_type,
+                        "severity": b.severity,
+                    }
+                }, separators=(",", ":"))
+                send_broadcast(payload)
                 b.status = "sent"
                 db.commit()
                 print("✅ dispatch_now: sent")
@@ -80,7 +92,18 @@ class BroadcastDispatcher:
                 print(f"📡 Dispatching broadcast ID {broadcast.id}")
 
                 try:
-                    send_broadcast(broadcast.body or broadcast.subject)
+                    payload = json.dumps({
+                        "cmd": "BROADCAST_MSG",
+                        "params": {
+                            "from": "admin",
+                            "to": "all",
+                            "message": broadcast.body or broadcast.subject,
+                            "subject": broadcast.subject,
+                            "msg_type": broadcast.msg_type,
+                            "severity": broadcast.severity,
+                        }
+                    }, separators=(",", ":"))
+                    send_broadcast(payload)
                     broadcast.status = "sent"
                     db.commit()
                     print("✅ Broadcast sent successfully")

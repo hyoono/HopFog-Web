@@ -1,4 +1,5 @@
 # services/xbee_service.py
+import json
 import os
 import threading
 import time
@@ -11,9 +12,14 @@ class XBeeService:
         self.baud = int(os.getenv("XBEE_BAUD", "9600"))
         self._lock = threading.Lock()
         self.device: XBeeDevice | None = None
+        self._command_handler = None  # callback for parsed JSON commands
 
         # ✅ in-memory RX buffer (for testing)
         self._rx = []  # list of dicts
+
+    def set_command_handler(self, handler):
+        """Register a callback: handler(command_dict, from_64bit_addr_str)"""
+        self._command_handler = handler
 
     def open(self):
         with self._lock:
@@ -32,9 +38,11 @@ class XBeeService:
         except Exception:
             text = "<decode error>"
 
+        from_addr = str(xbee_message.remote_device.get_64bit_addr())
+
         item = {
             "text": text,
-            "from_64bit": str(xbee_message.remote_device.get_64bit_addr()),
+            "from_64bit": from_addr,
             "ts": time.time(),
         }
 
@@ -45,6 +53,15 @@ class XBeeService:
             self._rx = self._rx[-200:]
 
         print("XBee RX:", item)
+
+        # Parse as JSON command and dispatch to node protocol handler
+        try:
+            doc = json.loads(text)
+            if isinstance(doc, dict) and "cmd" in doc:
+                if self._command_handler:
+                    self._command_handler(doc, from_addr)
+        except (json.JSONDecodeError, ValueError):
+            pass  # not a JSON command — ignore
 
     def close(self):
         with self._lock:
@@ -64,6 +81,11 @@ class XBeeService:
         self.open()
         self.device.send_data_broadcast(text)
         return {"sent": True, "text": text}
+
+    def send_json(self, data: dict):
+        """Send a JSON-encoded command via broadcast."""
+        text = json.dumps(data, separators=(",", ":"))
+        return self.send_broadcast(text)
 
     # ✅ expose RX buffer for API
     def get_received(self):

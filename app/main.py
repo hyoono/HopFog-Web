@@ -20,6 +20,7 @@ from routes.resident_admin import router as resident_admin_router
 from routes.admin_messaging import router as admin_messaging_router
 from routes.fog_nodes import fog_router
 from routes.xbee_api import router as xbee_router
+from routes.node_api import router as node_router
 
 from services.broadcast_dispatcher import dispatcher
 
@@ -40,6 +41,7 @@ app.include_router(resident_admin_router)
 app.include_router(admin_messaging_router)
 app.include_router(fog_router)
 app.include_router(xbee_router)
+app.include_router(node_router)
 
 
 @app.on_event("startup")
@@ -50,6 +52,15 @@ def on_startup():
 @app.on_event("startup")
 async def on_startup():
     await dispatcher.start()
+    # Start XBee node protocol handler
+    try:
+        from services.xbee_service import xbee_service
+        from services.node_protocol import handle_node_command
+        xbee_service.open()
+        xbee_service.set_command_handler(handle_node_command)
+        print("[XBEE] Node protocol handler registered")
+    except Exception as e:
+        print(f"[XBEE] Could not start: {e}")
 
 @app.on_event("shutdown")
 async def on_shutdown():

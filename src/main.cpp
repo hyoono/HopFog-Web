@@ -26,6 +26,7 @@
 #include "web_server.h"
 #include "api_handlers.h"
 #include "xbee_comm.h"
+#include "node_protocol.h"
 
 AsyncWebServer server(HTTP_PORT);
 DNSServer     dnsServer;
@@ -99,13 +100,18 @@ void setup() {
     Serial.printf("[HTTP] Server listening on port %d\n", HTTP_PORT);
     Serial.printf("[HTTP] Open http://%s in your browser\n", CUSTOM_DOMAIN);
 
-    // 6. XBee S2C (ZigBee) communication
+    // 6. XBee S2C (ZigBee) communication + node protocol
     xbeeInit();
+    nodeProtocolInit();
     xbeeSetReceiveCallback([](const uint8_t* data, size_t len,
                               uint32_t sHi, uint32_t sLo) {
-        Serial.printf("[XBee] RX from %08X%08X (%d bytes): ", sHi, sLo, (int)len);
-        Serial.write(data, len);
-        Serial.println();
+        // Try to handle as JSON node command first
+        if (!nodeProtocolHandleData(data, len, sHi, sLo)) {
+            // Not a JSON command — log as raw data
+            Serial.printf("[XBee] RX from %08X%08X (%d bytes): ", sHi, sLo, (int)len);
+            Serial.write(data, len);
+            Serial.println();
+        }
     });
 }
 
