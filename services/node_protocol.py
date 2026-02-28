@@ -40,6 +40,11 @@ def handle_node_command(doc: dict, from_addr: str):
         print(f"[NODE-PROTO] Unknown command from {node_id}: {cmd}")
 
 
+def trigger_sync_request(node_id: str):
+    """Public API: trigger a data sync to a specific node."""
+    _handle_sync_request(node_id, {}, "")
+
+
 def _handle_register(node_id, params, from_addr):
     """Node registered — store it and reply REGISTER_ACK."""
     node_registry.register(node_id, params, from_addr)

@@ -211,9 +211,17 @@ static void handleSosAlert(const char* nodeId, JsonObject params) {
     writeJsonArray(SD_RES_MSG_FILE, doc);
     Serial.printf("[NODE] SOS alert from user %d via %s\n", userId, nodeId);
 
-    // Also send SOS via XBee to other nodes
-    String xbeeMsg = "SOS_ALERT|" + username + "|SOS via " + String(nodeId);
-    xbeeSendBroadcast(xbeeMsg.c_str(), xbeeMsg.length());
+    // Also send SOS via XBee in JSON format (for node protocol)
+    String sosXbeePayload = "SOS_ALERT|" + username + "|SOS via " + String(nodeId);
+    JsonDocument sosRelayCmd;
+    sosRelayCmd["cmd"] = "SOS_ALERT";
+    sosRelayCmd["node_id"] = "admin";
+    JsonObject sosRelayParams = sosRelayCmd["params"].to<JsonObject>();
+    sosRelayParams["user_id"] = userId;
+    sosRelayParams["username"] = username;
+    String sosRelayJson;
+    serializeJson(sosRelayCmd, sosRelayJson);
+    xbeeSendBroadcast(sosRelayJson.c_str(), sosRelayJson.length());
 }
 
 static void handleChangePassword(JsonObject params) {
@@ -227,7 +235,7 @@ static void handleChangePassword(JsonObject params) {
 
     for (JsonObject u : doc.as<JsonArray>()) {
         if ((u["id"] | 0) == userId) {
-            u["password_hash"] = newPw;  // stored as plaintext on ESP32
+            u["password_hash"] = newPw;  // ESP32: stored as-is (no bcrypt on MCU)
             writeJsonArray(SD_USERS_FILE, doc);
             Serial.printf("[NODE] Password changed for user %d\n", userId);
             return;
@@ -383,4 +391,8 @@ int nodeProtocolActiveCount() {
 
 int nodeProtocolTotalCount() {
     return nodeCount;
+}
+
+void nodeProtocolTriggerSync(const char* nodeId) {
+    handleSyncRequest(nodeId);
 }

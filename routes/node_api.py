@@ -22,8 +22,8 @@ def list_nodes():
 @router.post("/{node_id}/sync")
 def trigger_sync(node_id: str):
     """Manually trigger a data sync to a specific node."""
-    from services.node_protocol import _handle_sync_request
-    _handle_sync_request(node_id, {}, "")
+    from services.node_protocol import trigger_sync_request
+    trigger_sync_request(node_id)
     return {"success": True, "message": f"Sync sent to {node_id}"}
 
 

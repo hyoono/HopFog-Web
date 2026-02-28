@@ -1610,12 +1610,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
         String nodeId = request->pathArg(0);
-        // Trigger a SYNC_DATA send to this node
-        JsonDocument cmd;
-        cmd["cmd"] = "SYNC_DATA";
-        // Build sync data inline (calls the same logic as node_protocol)
-        // For simplicity, just send the request via the protocol handler
-        xbeeSendBroadcast("{\"cmd\":\"SYNC_DATA\"}", 19);
+        nodeProtocolTriggerSync(nodeId.c_str());
 
         JsonDocument resp;
         resp["success"] = true;

@@ -51,4 +51,7 @@ int nodeProtocolActiveCount();
 /// Get total registered nodes.
 int nodeProtocolTotalCount();
 
+/// Trigger a SYNC_DATA send to a specific node by ID.
+void nodeProtocolTriggerSync(const char* nodeId);
+
 #endif // NODE_PROTOCOL_H
