@@ -4,13 +4,61 @@ How to test XBee S2C (ZigBee) communication between the ESP32 and a second XBee 
 
 ---
 
+## Mixing XBee S2C Pro and Regular S2C
+
+**Yes — XBee S2C Pro and regular XBee S2C are fully compatible.** You can mix them freely in the same ZigBee network. They use:
+
+- Same ZigBee protocol and firmware (ZB function set)
+- Same API frame format (API mode 1)
+- Same XCTU configuration parameters (PAN ID, CE, AP, BD)
+- Same serial interface (UART, 3.3V)
+
+The **only difference** is radio transmit power and range:
+
+| Module | Transmit Power | Indoor Range | Outdoor Range |
+|--------|---------------|-------------|---------------|
+| **XBee S2C** (regular) | 2 mW (+3 dBm) | ~40 m | ~120 m |
+| **XBee S2C Pro** | 63 mW (+18 dBm) | ~90 m | ~3.2 km |
+
+### Recommended Topology
+
+Use the **S2C Pro as Coordinator** (admin/ESP32 side) for maximum range, and **regular S2C as Routers** on nodes. The Pro's higher power ensures the coordinator can reach the farthest nodes:
+
+```
+   ┌──────────────────┐          ┌──────────────────┐
+   │  Admin (ESP32)   │          │  Node A          │
+   │  XBee S2C Pro    │◄──3km──►│  XBee S2C        │
+   │  CE=Coordinator  │          │  CE=Router       │
+   └──────────────────┘          └──────────────────┘
+           ▲                            ▲
+           │ ~3km range                 │ ~120m range
+           ▼                            ▼
+   ┌──────────────────┐          ┌──────────────────┐
+   │  Node B          │          │  Node C          │
+   │  XBee S2C        │          │  XBee S2C        │
+   │  CE=Router       │          │  CE=Router       │
+   └──────────────────┘          └──────────────────┘
+```
+
+> **Note:** When a Pro sends to a regular S2C, the range is limited by the
+> weaker module's receive sensitivity. In practice, Pro→Regular links still
+> have significantly better range than Regular→Regular links because the Pro's
+> higher power compensates. For multi-hop mesh routing, all XBees configured
+> as Routers (CE=0) will automatically relay frames to extend range.
+
+### XCTU Configuration
+
+Configure both Pro and regular S2C modules with the **exact same settings** — there is no special parameter for the Pro variant. The firmware detects the hardware automatically.
+
+---
+
 ## What You Need
 
 | Item | Purpose |
 |------|---------|
 | **ESP32-CAM** (or any ESP32) | Runs HopFog firmware with XBee attached via UART |
-| **XBee S2C module #1** | Connected to the ESP32 (wired to UART2) |
-| **XBee S2C module #2** | Connected to your PC via an XBee USB explorer/adapter |
+| **XBee S2C module #1** (Pro or regular) | Connected to the ESP32 (wired to UART2) |
+| **XBee S2C module #2** (Pro or regular) | Connected to your PC via an XBee USB explorer/adapter |
 | **XBee USB Explorer** | Sparkfun XBee Explorer, Digi XBIB-U-DEV, or similar USB adapter |
 | **XCTU** | Digi's free configuration & testing software |
 | **Micro-USB cable** | To connect the XBee USB explorer to your PC |
