@@ -4,15 +4,15 @@ How to test XBee S2C (ZigBee) communication between the ESP32 admin and HopFog-N
 
 ---
 
-## XBee Mode: AT/Transparent (AP=0)
+## XBee Mode: API Mode 1 (AP=1)
 
-HopFog uses **AT/transparent mode** (AP=0) with **newline-delimited JSON** over serial. Both the admin (HopFog-Web) and nodes (HopFog-Node) use the same text-based protocol:
+HopFog uses **API mode 1** (AP=1) with **binary-framed packets**. JSON payloads are wrapped in standard XBee API frames:
 
-- **Send:** `Serial.println(json)` — writes JSON text + newline
-- **Receive:** Buffer bytes until `\n`, then parse as JSON
-- **No binary API frames** — pure text mode
+- **Send:** Build a `0x10` Transmit Request frame → XBee broadcasts the RF data
+- **Receive:** Parse `0x90` Receive Packet frame → extract RF data (JSON payload)
+- **Advantages:** Delivery status feedback (`0x8B` TX Status), sender address in received frames, reliable framing with checksums
 
-This is simple, debuggable (human-readable in any serial monitor), and compatible across all XBee S2C variants (regular and Pro).
+Both the admin (HopFog-Web) and nodes (HopFog-Node) use the same API mode 1 protocol.
 
 ---
 
@@ -21,7 +21,7 @@ This is simple, debuggable (human-readable in any serial monitor), and compatibl
 **Yes — XBee S2C Pro and regular XBee S2C are fully compatible.** You can mix them freely in the same ZigBee network. They use:
 
 - Same ZigBee protocol and firmware (ZB function set)
-- Same XCTU configuration parameters (PAN ID, CE, BD, DH, DL)
+- Same XCTU configuration parameters (PAN ID, CE, BD, AP)
 - Same serial interface (UART, 3.3V)
 
 The **only difference** is radio transmit power and range:
@@ -40,7 +40,7 @@ Use the **S2C Pro as Coordinator** (admin/ESP32 side) for maximum range, and **r
    │  Admin (ESP32)   │          │  Node A          │
    │  XBee S2C Pro    │◄──3km──►│  XBee S2C        │
    │  CE=Coordinator  │          │  CE=Router       │
-   │  AP=0 (AT mode)  │          │  AP=0 (AT mode)  │
+   │  AP=1 (API mode) │          │  AP=1 (API mode) │
    └──────────────────┘          └──────────────────┘
            ▲                            ▲
            │ ~3km range                 │ ~120m range
@@ -87,14 +87,14 @@ Plug XBee #2 into the USB explorer, connect to your PC, then in XCTU:
 
 | Parameter | Setting | Description |
 |-----------|---------|-------------|
-| **ID** (PAN ID) | `1234` | Must match on both XBees |
+| **ID** (PAN ID) | `1234` | Must match on all XBees |
 | **CE** (Coordinator Enable) | `Coordinator [1]` | This XBee is the coordinator |
-| **AP** (API Enable) | `Transparent Mode [0]` | AT/transparent mode — raw text |
+| **AP** (API Enable) | `API enabled [1]` | API mode 1 — binary framed packets |
 | **BD** (Baud Rate) | `9600 [3]` | Must match `XBEE_BAUD` in config.h |
-| **DH** (Dest. Address High) | `0` | Broadcast high byte |
-| **DL** (Dest. Address Low) | `FFFF` | Broadcast to all devices |
 
 5. Click **"Write"** (pencil icon) to save settings to the module
+
+> **Note:** In API mode 1, DH/DL are not needed for broadcast — the destination address is specified in each Transmit Request frame.
 
 ---
 
@@ -108,16 +108,14 @@ Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 | Parameter | Setting | Description |
 |-----------|---------|-------------|
 | **ID** (PAN ID) | `1234` | Same PAN ID as module #2 |
-| **CE** (Coordinator Enable) | `Join Network [0]` | This one is a router/end device |
-| **AP** (API Enable) | `Transparent Mode [0]` | AT/transparent mode — raw text |
+| **CE** (Coordinator Enable) | `Join Network [0]` | This one is a router |
+| **AP** (API Enable) | `API enabled [1]` | API mode 1 — binary framed packets |
 | **BD** (Baud Rate) | `9600 [3]` | Matches config.h |
-| **DH** (Dest. Address High) | `0` | Broadcast high byte |
-| **DL** (Dest. Address Low) | `FFFF` | Broadcast to all devices |
 
 3. Click **"Write"** to save
 4. Unplug XBee #1 from the USB explorer and wire it to the ESP32
 
-> **Node XBees:** Configure the same way (AP=0, DH=0, DL=FFFF, same PAN ID, CE=0).
+> **Node XBees:** Configure the same way (AP=1, same PAN ID, CE=0).
 
 ---
 
@@ -176,21 +174,38 @@ pio device monitor -b 115200
 You should see in the serial output:
 
 ```
-[XBee] UART2 started (AT mode) — TX=GPIO13  RX=GPIO12  baud=9600
+[XBee] UART2 started (API mode 1) — TX=GPIO13  RX=GPIO12  baud=9600
 ```
 
 ---
 
-## Step 6: Test with XCTU Terminal
+## Step 6: Test with XCTU API Frame Tools
 
-Since both XBees are in AT/transparent mode, you can use XCTU's **serial terminal** (not the API frame console):
+Since both XBees are in API mode 1, use XCTU's **API frames console**:
 
 1. In XCTU, select XBee module #2 (the PC-side coordinator)
 2. Click the **"Console"** tab (terminal icon)
 3. Click **"Open"** to start the serial connection
-4. Switch to **text mode** (not hex mode)
+4. Switch to the **"Frames Generator"** view (API frames mode)
 
-Any text you type and send will be broadcast to all devices in the PAN.
+### Send a test JSON to the ESP32
+
+1. Click **"Add Frame"** (+ icon)
+2. Select frame type: **0x10 - Transmit Request**
+3. Set 64-bit destination: `000000000000FFFF` (broadcast)
+4. Set 16-bit destination: `FFFE`
+5. Set RF Data (hex-encode your JSON):
+   - Example JSON: `{"cmd":"REGISTER","node_id":"xctu-test","params":{"device_name":"XCTU Test"}}`
+   - Paste the ASCII text in the RF Data field
+6. Click **"Send"**
+
+### Verify the response
+
+The ESP32 will process the command and reply with a `REGISTER_ACK` frame. In XCTU's frame log, you'll see an incoming `0x90 Receive Packet` frame containing:
+
+```json
+{"cmd":"REGISTER_ACK","node_id":"xctu-test"}
+```
 
 ---
 
@@ -201,7 +216,7 @@ Any text you type and send will be broadcast to all devices in the PAN.
 1. Connect your phone/laptop to the **"HopFog-Network"** WiFi
 2. Open **http://hopfog.com** in your browser
 3. Log in with your admin account
-4. Navigate to **Testing** (in the Admin sidebar)
+4. Navigate to **Testing** (in the Messaging sidebar)
 5. In the **XBee S2C Communication Test** panel:
    - Type a custom message (or use the default)
    - Click **"Send Test Message"**
@@ -217,61 +232,46 @@ curl -X POST http://192.168.4.1/api/xbee/test ^
 
 ---
 
-## Step 8: Verify in XCTU Terminal
+## Step 8: Verify in XCTU
 
-In the XCTU terminal, you should see the JSON text appear as a single line:
-
-```
-{"cmd":"BROADCAST_MSG","params":{"from":"admin","to":"all","message":"Hello from HopFog!","subject":"Test","msg_type":"test"}}
-```
-
-This is human-readable JSON — no binary framing needed.
-
----
-
-## Step 9: Send a Message FROM XCTU TO the ESP32
-
-1. In the XCTU terminal (text mode), type a JSON command and press Enter:
+In XCTU's frames log, you should see a `0x90 Receive Packet` frame.
+Click on it to see the decoded RF data:
 
 ```json
-{"cmd":"REGISTER","node_id":"test-node","ts":12345,"params":{"device_name":"XCTU Test","ip_address":"0.0.0.0"}}
-```
-
-2. Press Enter to send (the newline is the message delimiter)
-
-3. On the ESP32 serial monitor, you should see:
-
-```
-[NODE] CMD=REGISTER from test-node
-[NODE] Registered test-node ()
-```
-
-4. The admin will reply with a `REGISTER_ACK` which you'll see in XCTU:
-
-```
-{"cmd":"REGISTER_ACK","node_id":"test-node"}
+{"cmd":"BROADCAST_MSG","params":{"from":"admin","to":"all","message":"Hello from HopFog!","subject":"Test","msg_type":"test"}}
 ```
 
 ---
 
 ## Troubleshooting
 
-### Nothing appears in XCTU Terminal
+### Nothing appears in XCTU
 
 | Check | Fix |
 |-------|-----|
-| PAN ID mismatch | Both XBees must have the same **ID** (e.g., `1234`) |
-| AP mode mismatch | Both must be set to **AP = 0** (Transparent Mode) |
-| DH/DL not set | Both must have **DH=0, DL=FFFF** for broadcast |
+| PAN ID mismatch | All XBees must have the same **ID** (e.g., `1234`) |
+| AP mode mismatch | All must be set to **AP = 1** (API mode 1) |
 | Baud rate mismatch | XCTU serial port baud must match XBee's **BD** setting (9600) |
 | Not associated | In XCTU, check **AI** (Association Indication) — should be `0x00` (associated) |
 | Wrong wiring | Verify DIN/DOUT connections (TX→DIN, RX←DOUT, NOT crossed twice) |
+| XCTU in text mode | Switch to **API frames mode** (not serial terminal text mode) |
 
 ### ESP32 serial shows no XBee activity
 
 - Verify `xbeeInit()` is called in `setup()` (check `src/main.cpp`)
 - Check wiring: GPIO 13 → XBee DIN, GPIO 12 → XBee DOUT
 - Verify XBee module is getting 3.3V power (LED on the XBee should blink)
+
+### ESP32 serial shows "RX frame checksum error"
+
+- XBee module may not be in API mode 1 (check AP=1 in XCTU)
+- Baud rate mismatch between ESP32 and XBee module
+- Electrical noise on UART lines (try shorter wires)
+
+### ESP32 serial shows "TX status: delivery FAILED"
+
+- No other XBee in range to receive the frame
+- Destination XBee not associated with the network (check AI=0x00)
 
 ### ESP32-CAM: Boot failure with XBee connected
 
@@ -283,9 +283,9 @@ during power-on, or burn the VDD_SDIO efuse (see Step 4).
 
 ## Message Format Reference
 
-All HopFog XBee messages use **newline-delimited JSON**:
+All HopFog XBee messages are JSON payloads inside API mode 1 frames:
 
-| Command | Direction | Example |
+| Command | Direction | Payload (inside 0x10/0x90 frame) |
 |---------|-----------|---------|
 | `REGISTER` | Node → Admin | `{"cmd":"REGISTER","node_id":"node-01","params":{"device_name":"Node 1","ip_address":"192.168.4.1"}}` |
 | `REGISTER_ACK` | Admin → Node | `{"cmd":"REGISTER_ACK","node_id":"node-01"}` |
@@ -297,9 +297,30 @@ All HopFog XBee messages use **newline-delimited JSON**:
 
 ---
 
+## API Mode 1 Frame Reference
+
+### Transmit Request (0x10) — sent by ESP32/node
+
+```
+Byte:  0x7E | LenHi LenLo | 0x10 FrameID Dest64[8] Dest16[2] Radius Options | RFData... | Checksum
+       ──── | ──────────── | ─────────────────────────────────────────────── | ───────── | ────────
+Start  Delim  Length         Frame Type + Header (14 bytes)                    Payload     0xFF - sum
+```
+
+### Receive Packet (0x90) — received by ESP32/node
+
+```
+Byte:  0x7E | LenHi LenLo | 0x90 Source64[8] Source16[2] Options | RFData... | Checksum
+       ──── | ──────────── | ──────────────────────────────────── | ───────── | ────────
+Start  Delim  Length         Frame Type + Header (12 bytes)         Payload     0xFF - sum
+```
+
+---
+
 ## Useful XCTU Features
 
 - **Network Discovery:** Click the network icon to see all XBee modules in the PAN
 - **Range Test:** Built-in tool to test signal strength and packet loss
 - **Firmware Update:** Keep your XBee S2C firmware up to date via XCTU
-- **Terminal:** Type and receive text directly in AT/transparent mode
+- **API Frames Console:** Build and decode API frames with visual frame builder
+- **Frame Generator:** Create test frames to send to devices

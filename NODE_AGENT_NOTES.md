@@ -1,109 +1,249 @@
 # Notes for HopFog-Node Copilot Agent
 
-> **Context:** These notes are for the Copilot agent working on [hyoono/HopFog-Node](https://github.com/hyoono/HopFog-Node) branch `copilot/add-xbee-node-functionality`. The admin repo ([hyoono/HopFog-Web](https://github.com/hyoono/HopFog-Web)) has been updated to be fully compatible with the node's XBee protocol.
+> **Context:** These notes are for the Copilot agent working on [hyoono/HopFog-Node](https://github.com/hyoono/HopFog-Node) branch `copilot/add-xbee-node-functionality`. The admin repo ([hyoono/HopFog-Web](https://github.com/hyoono/HopFog-Web)) uses **XBee API mode 1** (binary-framed packets). The node must be updated to also use API mode 1.
 
 ---
 
-## What Changed on the Admin Side
+## What the Node Must Change
 
-The admin ESP32 firmware was previously using **XBee API mode 1** (binary frames with 0x7E start byte, checksums, etc.). This was **incompatible** with the node's AT/transparent mode (`Serial.println(json)`).
+The node currently uses **AT/transparent mode** (`Serial.println(json)` to send, read-until-newline to receive). This is **incompatible** with the admin which uses API mode 1 (binary API frames with start delimiter `0x7E`, length, frame type, checksum).
 
-**The admin has now been switched to AT/transparent mode (AP=0)** to match the node exactly:
+**The node must be switched from AT mode to API mode 1.**
 
-| Feature | Before (broken) | After (compatible) |
-|---------|-----------------|-------------------|
-| XBee mode | API mode 1 (binary frames) | AT/transparent (text) |
-| How admin sends | `sendFrame(0x7E, len, payload, checksum)` | `Serial.println(json)` |
-| How admin receives | Parse 0x7E binary frames | Buffer until `\n`, parse JSON |
-| XBee module config | AP=1 | AP=0, DH=0, DL=FFFF |
+### Summary of Required Changes
 
-**The admin now speaks the exact same newline-delimited JSON protocol as the node.**
+| Area | Current (AT mode) | Required (API mode 1) |
+|------|-------------------|----------------------|
+| **XBee config (XCTU)** | AP=0, DH=0, DL=FFFF | **AP=1** |
+| **How node sends** | `Serial.println(json)` | Build 0x10 Transmit Request frame |
+| **How node receives** | Read bytes until `\n` | Parse 0x7E API frames, extract from 0x90 |
+| **Frame structure** | Raw text with newline delimiter | Binary: `0x7E \| Len \| FrameType \| Data... \| Checksum` |
 
 ---
 
-## XBee Module Configuration (All Modules Must Match)
+## XBee Module Configuration (All Modules)
 
 | Parameter | Admin XBee | Node XBee | Description |
 |-----------|-----------|-----------|-------------|
-| **AP** | `0` (Transparent) | `0` (Transparent) | AT mode — raw text passthrough |
+| **AP** | `1` (API mode 1) | `1` (API mode 1) | Binary framed packets |
 | **CE** | `1` (Coordinator) | `0` (Router) | One coordinator, multiple routers |
 | **ID** | `1234` | `1234` | Same PAN ID on all devices |
 | **BD** | `3` (9600) | `3` (9600) | Baud rate |
-| **DH** | `0` | `0` | Broadcast destination high |
-| **DL** | `FFFF` | `FFFF` | Broadcast destination low |
+
+> **Note:** In API mode 1, DH/DL are NOT needed — the destination address is specified in each Transmit Request frame header.
 
 ---
 
-## Protocol Compatibility Verification
+## Implementation Guide: API Mode 1 for ESP32 Node
 
-### Commands the admin now handles (Node → Admin)
+### Step 1: Create XBee API Frame Builder/Parser
 
-| Command | Admin Response | Status |
-|---------|---------------|--------|
-| `REGISTER` | `REGISTER_ACK` | ✅ Working |
-| `HEARTBEAT` | `PONG` | ✅ Working |
-| `SYNC_REQUEST` | `SYNC_DATA` (users, announcements, conversations, chat_messages, fog_nodes) | ✅ Working |
-| `RELAY_MSG` | _(logged)_ | ✅ Working |
-| `RELAY_FOG_NODE` | _(stored in fog_devices.json)_ | ✅ Working |
-| `RELAY_CHAT_MSG` | _(stored in direct_messages.json)_ | ✅ Working |
-| `SOS_ALERT` | _(creates SOS request in resident_admin_msgs.json)_ | ✅ Working |
-| `CHANGE_PASSWORD` | _(updates user in users.json)_ | ✅ Working |
-| `STATS_RESPONSE` | _(updates node registry in memory)_ | ✅ Working |
-
-### Commands the admin now sends (Admin → Node)
-
-| Command | When Sent | Status |
-|---------|-----------|--------|
-| `REGISTER_ACK` | Reply to REGISTER | ✅ Working |
-| `PONG` | Reply to HEARTBEAT | ✅ Working |
-| `SYNC_DATA` | Reply to SYNC_REQUEST | ✅ Working |
-| `BROADCAST_MSG` | Admin creates/sends a broadcast | ✅ Working |
-| `GET_STATS` | Admin requests node stats via web UI | ✅ Working |
-| `SOS_ALERT` (relay) | Admin escalates SOS to XBee | ✅ Working |
-| `RELAY_CHAT_MSG` (relay) | Mobile user sends DM via admin | ✅ Working |
-
----
-
-## Things the Node Agent Should Verify
-
-### 1. The node already works correctly — no changes needed for basic protocol
-
-The node code in `src/main.cpp` already:
-- Uses `xbeeSerial.println(json)` to send ✅
-- Buffers incoming bytes until `\n` to receive ✅
-- Parses JSON with ArduinoJson ✅
-- Handles PONG, REGISTER_ACK, SYNC_DATA, BROADCAST_MSG, ADD_FOG_NODE, GET_STATS ✅
-
-### 2. Verify the `StaticJsonDocument<1024>` size is sufficient
-
-The admin's `SYNC_DATA` response can be large (users + announcements + conversations + chat_messages + fog_nodes). If there are many users/messages, the JSON payload may exceed:
-
-- The XBee's single-frame RF limit (~256 bytes for transparent mode)
-- The ArduinoJson document size on the node (`StaticJsonDocument<1024>`)
-
-**Note on large payloads:** In AT mode, XBee automatically fragments long serial data into multiple RF frames using the RO (Packetization Timeout) parameter. The node's line-buffer approach (read until `\n`) should reassemble correctly in most cases since XBee delivers RF fragments in order. However, if packets are lost mid-line or there are timing gaps, the node may receive a partial line. The node should handle JSON parse failures gracefully (which it already does by checking `deserializeJson` return value).
-
-**Recommendation:** If SYNC_DATA fails for large datasets, increase the JsonDocument size on the node or have the admin send smaller chunked syncs.
-
-### 3. The `containsKey()` deprecation
-
-The node uses `doc.containsKey("key")` which is deprecated in ArduinoJson v7+. The admin has already migrated to `doc["key"].is<JsonVariant>()`. If the node uses ArduinoJson v7+, consider updating:
+Add these functions to the node (new file or in existing XBee code):
 
 ```cpp
-// Old (deprecated in v7):
-if (doc.containsKey("users")) { ... }
+// ── Constants ──────────────────────────────────────────────────────
+#define XBEE_START_DELIM  0x7E
+#define XBEE_TX_REQUEST   0x10   // Transmit Request frame type
+#define XBEE_RX_PACKET    0x90   // Receive Packet frame type
+#define XBEE_TX_STATUS    0x8B   // Transmit Status frame type
+#define XBEE_MAX_FRAME    512    // max frame data buffer
 
-// New (v7+):
-if (doc["users"].is<JsonArray>()) { ... }
+// ── Send a JSON payload as a broadcast ────────────────────────────
+// Builds a 0x10 Transmit Request frame with 64-bit dest = 0x000000000000FFFF
+//
+// Frame structure:
+//   0x7E | LenHi LenLo | 0x10 FrameID Dest64[8] Dest16[2] Radius Options | payload | Checksum
+//
+// Frame data = 14 header bytes + payload length
+//
+static uint8_t frameIdCounter = 0;
+
+uint8_t xbeeSendBroadcast(HardwareSerial& xbeeSerial, const char* payload, size_t len) {
+    if (len == 0 || len > XBEE_MAX_FRAME - 14) return 0;
+
+    uint16_t frameDataLen = 14 + len;
+    if (++frameIdCounter == 0) frameIdCounter = 1;
+    uint8_t fid = frameIdCounter;
+
+    uint8_t hdr[14] = {
+        XBEE_TX_REQUEST,            // [0]  frame type
+        fid,                        // [1]  frame ID
+        0x00, 0x00, 0x00, 0x00,     // [2-5]  64-bit dest high
+        0x00, 0x00, 0xFF, 0xFF,     // [6-9]  64-bit dest low (broadcast)
+        0xFF, 0xFE,                 // [10-11] 16-bit dest (broadcast)
+        0x00,                       // [12] broadcast radius
+        0x00                        // [13] options
+    };
+
+    // Checksum = 0xFF - (sum of all frame data bytes)
+    uint8_t cksum = 0;
+    for (int i = 0; i < 14; i++) cksum += hdr[i];
+    for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
+    cksum = 0xFF - cksum;
+
+    // Write frame
+    xbeeSerial.write(XBEE_START_DELIM);
+    xbeeSerial.write((uint8_t)(frameDataLen >> 8));   // length MSB
+    xbeeSerial.write((uint8_t)(frameDataLen & 0xFF)); // length LSB
+    xbeeSerial.write(hdr, 14);                        // frame header
+    xbeeSerial.write((const uint8_t*)payload, len);   // RF data
+    xbeeSerial.write(cksum);                          // checksum
+    xbeeSerial.flush();
+
+    return fid;
+}
 ```
 
-### 4. No changes needed to the node's XBee configuration
+### Step 2: Replace AT-mode Send Calls
 
-The node's XBee should already be in AT mode (AP=0) since it uses `Serial.println()`. Just verify:
-- AP=0 (transparent mode)
-- CE=0 (router, not coordinator)
-- DH=0, DL=FFFF (broadcast)
-- Same PAN ID as the admin's XBee
+Every place in the node code that currently does:
+
+```cpp
+// OLD — AT mode (REMOVE THIS):
+xbeeSerial.println(json);
+```
+
+Must change to:
+
+```cpp
+// NEW — API mode 1:
+String json = /* your JSON */;
+xbeeSendBroadcast(xbeeSerial, json.c_str(), json.length());
+```
+
+### Step 3: Add API Frame Receive Parser
+
+Replace the current `readStringUntil('\n')` approach with a state machine that parses API frames:
+
+```cpp
+// ── Frame receive state machine ─────────────────────────────────────
+enum RxState { WAIT_DELIM, GOT_LEN_HI, GOT_LEN_LO, READING_DATA, GOT_CHECKSUM };
+
+static RxState  rxState     = WAIT_DELIM;
+static uint16_t rxFrameLen  = 0;
+static uint16_t rxIdx       = 0;
+static uint8_t  rxFrame[XBEE_MAX_FRAME];
+static uint8_t  rxChecksum  = 0;
+
+// Call this from loop() instead of Serial.readStringUntil('\n'):
+void xbeeProcessIncoming(HardwareSerial& xbeeSerial) {
+    while (xbeeSerial.available()) {
+        uint8_t b = xbeeSerial.read();
+
+        switch (rxState) {
+        case WAIT_DELIM:
+            if (b == XBEE_START_DELIM) rxState = GOT_LEN_HI;
+            break;
+
+        case GOT_LEN_HI:
+            rxFrameLen = (uint16_t)b << 8;
+            rxState = GOT_LEN_LO;
+            break;
+
+        case GOT_LEN_LO:
+            rxFrameLen |= b;
+            rxIdx = 0;
+            rxChecksum = 0;
+            rxState = (rxFrameLen > 0 && rxFrameLen <= XBEE_MAX_FRAME)
+                      ? READING_DATA : WAIT_DELIM;
+            break;
+
+        case READING_DATA:
+            rxFrame[rxIdx++] = b;
+            rxChecksum += b;
+            if (rxIdx >= rxFrameLen) rxState = GOT_CHECKSUM;
+            break;
+
+        case GOT_CHECKSUM:
+            rxChecksum += b;
+            if (rxChecksum == 0xFF) {
+                // Valid frame!
+                uint8_t frameType = rxFrame[0];
+
+                if (frameType == XBEE_RX_PACKET && rxFrameLen > 12) {
+                    // 0x90 Receive Packet:
+                    //   [0]     0x90
+                    //   [1-8]   64-bit source address
+                    //   [9-10]  16-bit source address
+                    //   [11]    receive options
+                    //   [12..]  RF data (the JSON payload)
+                    const char* rfData = (const char*)&rxFrame[12];
+                    size_t rfLen = rxFrameLen - 12;
+
+                    // Strip trailing newline if present
+                    while (rfLen > 0 && (rfData[rfLen-1] == '\n' || rfData[rfLen-1] == '\r'))
+                        rfLen--;
+
+                    if (rfLen > 0) {
+                        // Null-terminate and pass to your existing JSON handler
+                        rxFrame[12 + rfLen] = '\0';
+                        handleXBeeData(String(rfData));  // your existing handler
+                    }
+                }
+                else if (frameType == XBEE_TX_STATUS && rxFrameLen >= 7) {
+                    // 0x8B Transmit Status — check delivery result
+                    uint8_t delivery = rxFrame[5];
+                    if (delivery != 0) {
+                        Serial.printf("[XBee] TX delivery failed (0x%02X)\n", delivery);
+                    }
+                }
+            }
+            rxState = WAIT_DELIM;
+            break;
+        }
+    }
+}
+```
+
+### Step 4: Update loop()
+
+```cpp
+void loop() {
+    // ... existing code ...
+
+    // OLD — AT mode (REMOVE):
+    // if (xbeeSerial.available()) {
+    //     String data = xbeeSerial.readStringUntil('\n');
+    //     handleXBeeData(data);
+    // }
+
+    // NEW — API mode 1:
+    xbeeProcessIncoming(xbeeSerial);
+
+    // ... rest of loop ...
+}
+```
+
+### Step 5: Reconfigure XBee Module in XCTU
+
+Change the node's XBee module setting:
+
+| Parameter | Old Value | New Value |
+|-----------|-----------|-----------|
+| **AP** | `0` (Transparent) | **`1` (API enabled)** |
+
+All other settings stay the same (CE=0, ID=1234, BD=9600).
+
+---
+
+## Protocol — No Changes Needed
+
+The JSON command protocol stays exactly the same. Only the serial framing changes:
+
+| Command | Direction | JSON Payload (inside API frame) |
+|---------|-----------|------|
+| `REGISTER` | Node → Admin | `{"cmd":"REGISTER","node_id":"node-01","ts":12345,"params":{"device_name":"Node 1","ip_address":"192.168.4.1"}}` |
+| `REGISTER_ACK` | Admin → Node | `{"cmd":"REGISTER_ACK","node_id":"node-01"}` |
+| `HEARTBEAT` | Node → Admin | `{"cmd":"HEARTBEAT","node_id":"node-01","params":{"uptime":300,"free_heap":45000}}` |
+| `PONG` | Admin → Node | `{"cmd":"PONG","node_id":"node-01"}` |
+| `SYNC_REQUEST` | Node → Admin | `{"cmd":"SYNC_REQUEST","node_id":"node-01"}` |
+| `SYNC_DATA` | Admin → Node | `{"cmd":"SYNC_DATA","node_id":"node-01","users":[...],"announcements":[...]}` |
+| `BROADCAST_MSG` | Admin → Node | `{"cmd":"BROADCAST_MSG","params":{"from":"admin","to":"all","message":"..."}}` |
+| `RELAY_CHAT_MSG` | Node → Admin | `{"cmd":"RELAY_CHAT_MSG","node_id":"node-01","params":{"conversation_id":1,"sender_id":2,"message_text":"Hello"}}` |
+| `SOS_ALERT` | Node → Admin | `{"cmd":"SOS_ALERT","node_id":"node-01","params":{"user_id":3}}` |
+| `CHANGE_PASSWORD` | Node → Admin | `{"cmd":"CHANGE_PASSWORD","node_id":"node-01","params":{"user_id":2,"new_password":"newpw"}}` |
+| `GET_STATS` | Admin → Node | `{"cmd":"GET_STATS","node_id":"node-01"}` |
+| `STATS_RESPONSE` | Node → Admin | `{"cmd":"STATS_RESPONSE","node_id":"node-01","params":{"free_heap":45000,"uptime":300}}` |
 
 ---
 
@@ -116,27 +256,29 @@ The node's XBee should already be in AT mode (AP=0) since it uses `Serial.printl
 │  Web UI (browser) ──HTTP──► API Handlers ──► SD Card JSON   │
 │                                   │                         │
 │                                   ▼                         │
-│                             xbeeSendBroadcast()             │
+│                        xbeeSendBroadcast()                  │
 │                                   │                         │
-│                     Serial.println(json) + '\n'             │
+│                     Build 0x10 TX Request frame              │
+│                    (0x7E | Len | 0x10 | hdr | json | cksum) │
 │                                   │                         │
 │                              UART2 TX                       │
 └───────────────────────────────────┼─────────────────────────┘
                                     │
                               XBee S2C Pro
-                            (AP=0, CE=1, DL=FFFF)
+                            (AP=1, CE=1, ID=1234)
                                     │
                               ~~~~ RF ~~~~
                                     │
                               XBee S2C
-                            (AP=0, CE=0, DL=FFFF)
+                            (AP=1, CE=0, ID=1234)
                                     │
 ┌───────────────────────────────────┼─────────────────────────┐
 │                              UART RX                        │
 │                                   │                         │
-│                     Buffer until '\n'                       │
+│                    Parse 0x90 RX Packet frame                │
+│                    Extract RF data (JSON payload)            │
 │                                   │                         │
-│                         handleXBeeData(line)                │
+│                     handleXBeeData(json)                    │
 │                                   │                         │
 │                     Parse JSON, dispatch command             │
 │                                                             │
@@ -172,12 +314,42 @@ The node's XBee should already be in AT mode (AP=0) since it uses `Serial.printl
 }
 ```
 
+> **Important for large SYNC_DATA:** XBee API mode 1 has a maximum RF payload size per frame, determined by the NP (Maximum Packet Payload Bytes) parameter — typically **72-256 bytes** depending on encryption and addressing overhead. Frames with payloads exceeding NP will be **rejected** by the XBee module (not fragmented). The admin limits SYNC_DATA to 50 announcements and 100 chat messages and uses compact JSON (`separators=(",",":")`) to stay within limits. If SYNC_DATA still exceeds the max payload, increase the node's `JsonDocument` size and consider having the admin send smaller chunked syncs (e.g., users in one frame, announcements in another).
+
+---
+
+## ArduinoJson v7 Note
+
+If using ArduinoJson v7+, `doc.containsKey("key")` is deprecated. Use:
+
+```cpp
+// Old (deprecated in v7):
+if (doc.containsKey("users")) { ... }
+
+// New (v7+):
+if (doc["users"].is<JsonArray>()) { ... }
+```
+
+---
+
+## Checklist for the Node Agent
+
+1. [ ] **Create `xbeeSendBroadcast()` function** — builds 0x10 Transmit Request frame with checksum
+2. [ ] **Create `xbeeProcessIncoming()` state machine** — parses 0x7E API frames byte-by-byte
+3. [ ] **Replace all `xbeeSerial.println(json)`** with `xbeeSendBroadcast(xbeeSerial, json.c_str(), json.length())`
+4. [ ] **Replace `readStringUntil('\n')`** in loop() with `xbeeProcessIncoming(xbeeSerial)` call
+5. [ ] **Handle 0x90 Receive Packet** — extract RF data starting at byte [12], pass to existing `handleXBeeData()`
+6. [ ] **Handle 0x8B Transmit Status** — log delivery failures for debugging
+7. [ ] **Reconfigure XBee module** — change AP from 0 to 1 in XCTU
+8. [ ] **Test** — verify REGISTER → REGISTER_ACK round-trip with admin
+9. [ ] **Test** — verify SYNC_REQUEST → SYNC_DATA response
+10. [ ] **Test** — verify HEARTBEAT → PONG response
+
 ---
 
 ## Summary
 
-**The admin is now fully compatible with the node. No protocol changes needed on the node side.** The only potential issues are:
-
-1. Large SYNC_DATA payloads exceeding JsonDocument size on the node
-2. ArduinoJson v7 deprecation warnings (optional cleanup)
-3. XBee module configuration — ensure AP=0 on ALL modules
+**The JSON protocol stays exactly the same. Only the serial transport changes from raw text to binary API frames.** The node needs:
+1. A function to build 0x10 TX Request frames (send)
+2. A state machine to parse 0x90 RX Packet frames (receive)
+3. XBee module reconfigured to AP=1 in XCTU

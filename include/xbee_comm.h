@@ -1,12 +1,13 @@
 /*
  * xbee_comm.h — Digi XBee S2C (ZigBee) serial interface.
  *
- * Uses AT/transparent mode (AP=0) with newline-delimited JSON.
- * This is compatible with HopFog-Node which also uses AT mode.
+ * Uses XBee API mode 1 (AP=1) with binary-framed packets.
+ * JSON payloads are wrapped in 0x10 Transmit Request frames for
+ * sending, and extracted from 0x90 Receive Packet frames on receive.
  *
  * XBee modules must be configured:
- *   AP  = 0 (transparent mode)
- *   DH  = 0, DL = FFFF (broadcast)
+ *   AP  = 1 (API mode without escapes)
+ *   CE  = 1 (Coordinator) on admin, CE = 0 (Router) on nodes
  *   BD  = 3 (9600 baud)
  *   ID  = same PAN ID on all modules
  *
@@ -25,26 +26,33 @@
 
 #include <Arduino.h>
 
+// ── API Mode 1 Constants ────────────────────────────────────────────
+#define XBEE_START_DELIM   0x7E
+#define XBEE_TX_REQUEST    0x10  // Transmit Request frame type
+#define XBEE_RX_PACKET     0x90  // Receive Packet frame type
+#define XBEE_TX_STATUS     0x8B  // Transmit Status frame type
+
 // ── Public API ──────────────────────────────────────────────────────
 
-/// Initialise the XBee serial port (UART2, 9600 baud).
+/// Initialise the XBee serial port (UART2, 9600 baud, API mode 1).
 void xbeeInit();
 
-/// Send a text payload as a newline-terminated line.
-/// In AT mode the XBee broadcasts to all nodes (DH=0, DL=FFFF).
-/// Returns 1 on success, 0 if payload is empty or too long.
+/// Build a 0x10 Transmit Request frame and send the payload as a
+/// broadcast (64-bit dest = 0x000000000000FFFF).
+/// Returns the frame ID (1-255) on success, 0 on failure.
 uint8_t xbeeSendBroadcast(const char* payload, size_t len);
 
-/// Call from loop() to process any incoming XBee data.
-/// Buffers bytes until a newline ('\n') is received, then passes
-/// the complete line to the callback set by xbeeSetReceiveCallback().
+/// Call from loop() to process any incoming XBee serial data.
+/// Reassembles API frames byte-by-byte and, for 0x90 Receive Packet
+/// frames, extracts the RF data payload and passes it to the callback.
 void xbeeProcessIncoming();
 
-/// Callback signature: (line text, length)
-/// In AT mode there is no sender address — all data is broadcast.
-typedef void (*XBeeReceiveCB)(const char* line, size_t len);
+/// Callback signature: (payload text, length).
+/// The payload is the raw RF data extracted from the 0x90 frame
+/// (typically a JSON line without trailing newline).
+typedef void (*XBeeReceiveCB)(const char* payload, size_t len);
 
-/// Register a callback for incoming lines.
+/// Register a callback for incoming receive packets.
 void xbeeSetReceiveCallback(XBeeReceiveCB cb);
 
 #endif // XBEE_COMM_H

@@ -4,8 +4,9 @@
  * Parses incoming JSON commands from HopFog-Node devices over XBee
  * and sends appropriate responses (REGISTER_ACK, PONG, SYNC_DATA, etc).
  *
- * Protocol: newline-delimited JSON over XBee.  Every message has at
- * minimum:  {"cmd":"COMMAND","node_id":"node-01","ts":12345}
+ * Protocol: JSON payloads inside XBee API mode 1 frames.
+ * Every message has at minimum:
+ *   {"cmd":"COMMAND","node_id":"node-01","ts":12345}
  */
 
 #ifndef NODE_PROTOCOL_H
@@ -36,9 +37,9 @@ struct NodeInfo {
 /// Initialise the node registry (call once in setup).
 void nodeProtocolInit();
 
-/// Try to parse a line as a JSON node command and dispatch it.
-/// Called from the XBee receive callback (AT/transparent mode).
-/// Returns true if the line was a valid JSON command and was handled.
+/// Try to parse a payload as a JSON node command and dispatch it.
+/// Called from the XBee receive callback (API mode 1, payload from 0x90 frame).
+/// Returns true if the payload was a valid JSON command and was handled.
 bool nodeProtocolHandleLine(const char* line, size_t len);
 
 /// Get all registered nodes as a JSON array (for /api/nodes).
