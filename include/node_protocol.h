@@ -36,11 +36,10 @@ struct NodeInfo {
 /// Initialise the node registry (call once in setup).
 void nodeProtocolInit();
 
-/// Try to parse data as a JSON node command and dispatch it.
-/// Called from the XBee receive callback.
-/// Returns true if the data was a valid JSON command and was handled.
-bool nodeProtocolHandleData(const uint8_t* data, size_t len,
-                            uint32_t senderHi, uint32_t senderLo);
+/// Try to parse a line as a JSON node command and dispatch it.
+/// Called from the XBee receive callback (AT/transparent mode).
+/// Returns true if the line was a valid JSON command and was handled.
+bool nodeProtocolHandleLine(const char* line, size_t len);
 
 /// Get all registered nodes as a JSON array (for /api/nodes).
 void nodeProtocolGetNodes(JsonArray& arr);

@@ -103,14 +103,11 @@ void setup() {
     // 6. XBee S2C (ZigBee) communication + node protocol
     xbeeInit();
     nodeProtocolInit();
-    xbeeSetReceiveCallback([](const uint8_t* data, size_t len,
-                              uint32_t sHi, uint32_t sLo) {
+    xbeeSetReceiveCallback([](const char* line, size_t len) {
         // Try to handle as JSON node command first
-        if (!nodeProtocolHandleData(data, len, sHi, sLo)) {
+        if (!nodeProtocolHandleLine(line, len)) {
             // Not a JSON command — log as raw data
-            Serial.printf("[XBee] RX from %08X%08X (%d bytes): ", sHi, sLo, (int)len);
-            Serial.write(data, len);
-            Serial.println();
+            Serial.printf("[XBee] RX (%d bytes): %s\n", (int)len, line);
         }
     });
 }

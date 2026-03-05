@@ -51,8 +51,7 @@ static void sendJsonCommand(JsonDocument& doc) {
 
 // ── Command handlers ───────────────────────────────────────────────
 
-static void handleRegister(const char* nodeId, JsonObject params,
-                           uint32_t sHi, uint32_t sLo) {
+static void handleRegister(const char* nodeId, JsonObject params) {
     NodeInfo* n = registerNode(nodeId);
     if (!n) {
         Serial.println("[NODE] Registry full, cannot register");
@@ -66,8 +65,6 @@ static void handleRegister(const char* nodeId, JsonObject params,
             sizeof(n->ip_address) - 1);
     strncpy(n->status, "active", sizeof(n->status) - 1);
     n->last_heartbeat = millis();
-    snprintf(n->xbee_addr, sizeof(n->xbee_addr),
-             "%08X%08X", sHi, sLo);
 
     // Reply REGISTER_ACK
     JsonDocument ack;
@@ -77,8 +74,7 @@ static void handleRegister(const char* nodeId, JsonObject params,
     Serial.printf("[NODE] Registered %s (%s)\n", nodeId, n->ip_address);
 }
 
-static void handleHeartbeat(const char* nodeId, JsonObject params,
-                            uint32_t sHi, uint32_t sLo) {
+static void handleHeartbeat(const char* nodeId, JsonObject params) {
     NodeInfo* n = findNode(nodeId);
     if (!n) n = registerNode(nodeId);
     if (!n) return;
@@ -317,11 +313,10 @@ void nodeProtocolInit() {
     memset(nodes, 0, sizeof(nodes));
 }
 
-bool nodeProtocolHandleData(const uint8_t* data, size_t len,
-                            uint32_t senderHi, uint32_t senderLo) {
+bool nodeProtocolHandleLine(const char* line, size_t len) {
     // Try to parse as JSON
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, data, len);
+    DeserializationError err = deserializeJson(doc, line, len);
     if (err) return false;
 
     const char* cmd = doc["cmd"];
@@ -333,9 +328,9 @@ bool nodeProtocolHandleData(const uint8_t* data, size_t len,
     Serial.printf("[NODE] CMD=%s from %s\n", cmd, nodeId);
 
     if (strcmp(cmd, "REGISTER") == 0) {
-        handleRegister(nodeId, params, senderHi, senderLo);
+        handleRegister(nodeId, params);
     } else if (strcmp(cmd, "HEARTBEAT") == 0) {
-        handleHeartbeat(nodeId, params, senderHi, senderLo);
+        handleHeartbeat(nodeId, params);
     } else if (strcmp(cmd, "SYNC_REQUEST") == 0) {
         handleSyncRequest(nodeId);
     } else if (strcmp(cmd, "SOS_ALERT") == 0) {
