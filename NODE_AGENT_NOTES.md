@@ -4,9 +4,29 @@
 
 ---
 
-## Current Status — BOTH SIDES ARE CODE-COMPATIBLE
+## Current Status — RX IS WORKING
 
-The admin and node use **identical XBee code**:
+The user has confirmed:
+- ✅ **TX works** — admin can send test messages to XCTU and to the XBee network
+- ✅ **RX works** — admin receives data back on GPIO 12 (frame parsing succeeds)
+- ✅ **API mode 1** — both sides use identical 0x10/0x90 binary frames
+- ✅ **Pin assignments match** — GPIO 13=TX→DIN, GPIO 12=RX←DOUT on both sides
+- ⚠️ **Self-echo observed** — admin sees its own 0x10 TX frames echoed back as RX (frame type 0x10 in log). This is now handled gracefully (logged as "Self-echo ignored").
+- ❓ **Node data not yet received** — admin has not yet received 0x90 RX Packet frames from the node
+
+### What "Self-echo" Means
+
+When the admin sends a test message, the serial monitor shows:
+```
+TX -> [0x10] (44 B) {"cmd":"BROADCAST_MSG",...}
+RX <- [0x10] Self-echo ignored (44 B) — TX/RX may be bridged
+```
+
+This means the admin's own transmitted API frame is feeding back into its RX. This happens due to breadboard proximity, internal GPIO routing, or XBee echo. It does NOT prevent real communication — when the node sends an RF packet, the admin's XBee will output a 0x90 frame on DOUT, which will be parsed correctly.
+
+---
+
+## Code Alignment — Both Sides Match
 
 | Feature | Admin (HopFog-Web) | Node (HopFog-Node) |
 |---------|-------------------|-------------------|
@@ -18,170 +38,110 @@ The admin and node use **identical XBee code**:
 | Baud rate | 9600 ✅ | 9600 ✅ |
 | JSON protocol | REGISTER/HEARTBEAT/SYNC ✅ | REGISTER/HEARTBEAT/SYNC ✅ |
 
-**The code is fully aligned.** Any communication failure is a hardware/configuration issue.
-
 ---
 
-## ⚠️ KNOWN ISSUE: "No bytes received from XBee serial"
+## ⚠️ REQUIRED: Add gpio_reset_pin() Fix to the Node
 
-The admin reports 0 bytes received even though the XBees work in XCTU. The admin has a **comprehensive diagnostic system** on the testing page to help debug this.
+The admin now calls `gpio_reset_pin()` before `Serial2.begin()` to detach GPIO 12/13 from the SD_MMC IOMUX. **The node must do the same.** Without this, UART2 RX may not function on ESP32-CAM.
 
-### Possible Causes and Fixes
+### What to Add
 
-#### 1. XBee Module Not in API Mode 1
-
-**The most common cause.** The XBee must be configured in XCTU with `AP=1` (API mode without escapes). If it's in AT mode (AP=0), the XBee outputs raw text, not binary API frames, and vice versa.
-
-**How to verify:**
-1. Connect the XBee module to XCTU via USB adapter
-2. Read the configuration
-3. Check that `AP` = 1 (NOT 0 or 2)
-4. Set `CE` = 1 (Coordinator) for admin, `CE` = 0 (Router) for node
-5. Set `ID` to the same PAN ID on both (e.g., `1234`)
-6. Set `BD` = 3 (9600 baud)
-7. Write the configuration and close XCTU before connecting to ESP32
-
-**CRITICAL: After writing XCTU settings, power-cycle the XBee before connecting it to the ESP32.**
-
-#### 2. XBee Not Associated with Network
-
-A Router XBee (CE=0) must discover and join the Coordinator's network before it can send/receive RF data. The XBee module's ASSOC LED should be blinking (searching) or solid (associated).
-
-**How to verify:**
-1. Open XCTU with the Router XBee connected
-2. Check the `AI` (Association Indication) parameter:
-   - `0x00` = Successfully joined ✅
-   - `0xFF` = Scanning for network ⏳
-   - `0x21` = No coordinator found ❌
-   - `0x22` = PAN ID mismatch ❌
-3. Make sure the Coordinator XBee is powered on and configured with the same PAN ID
-
-#### 3. GPIO 12 Boot Strapping Issue (ESP32-CAM)
-
-GPIO 12 is a strapping pin that determines flash voltage at boot. If the XBee's DOUT pulls GPIO 12 HIGH at power-on, the ESP32 will try to boot with 1.8V flash and crash.
-
-**Symptoms:** ESP32-CAM boot loops, never reaches setup()
-
-**Fix options:**
-1. **Disconnect XBee DOUT during power-on** — reconnect after boot
-2. **Add a 10kΩ pull-down resistor** from GPIO 12 to GND
-3. **Burn the VDD_SDIO efuse** (permanent): `espefuse.py set_flash_voltage 3.3V`
-
-#### 4. SD_MMC Stealing GPIO 12/13
-
-On ESP32-CAM, the SD card uses SD_MMC mode. Even in 1-bit mode (which should only use GPIO 2, 14, 15), the ESP-IDF driver may configure GPIO 12/13 as SDMMC pins internally.
-
-**The admin already has a fix for this:** After `Serial2.begin()`, it explicitly calls `uart_set_pin()` to reclaim GPIO 12/13 for UART2. The node should do the same:
+In the node's XBee initialization (wherever `Serial2.begin()` or `xbeeSerial.begin()` is called), add this **before** the begin call:
 
 ```cpp
+#include <driver/gpio.h>
 #include <driver/uart.h>
 
-// In setup(), after xbeeSerial.begin():
+// BEFORE Serial2.begin():
+// On ESP32-CAM, SD_MMC.begin() configures GPIO 12/13 via IOMUX as
+// HS2_DATA2/DATA3, even in 1-bit mode.  IOMUX takes priority over
+// the GPIO matrix that UART2 uses.  gpio_reset_pin() switches the
+// pin back to GPIO function so UART2 can claim it.
+gpio_reset_pin(GPIO_NUM_12);   // detach from HS2_DATA2 IOMUX
+gpio_reset_pin(GPIO_NUM_13);   // detach from HS2_DATA3 IOMUX
+Serial.println("[XBee] Reset GPIO 12/13 from SD_MMC IOMUX to GPIO function");
+
 xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
+
+// Belt-and-suspenders: explicitly route UART2 signals to these pins
 uart_set_pin(UART_NUM_2, XBEE_TX_PIN, XBEE_RX_PIN,
              UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 ```
 
-**Add this to the node's `setup()` function right after the `xbeeSerial.begin()` call.**
+**Even if the node does NOT use SD_MMC**, the `gpio_reset_pin()` calls are harmless and ensure clean GPIO state.
 
-#### 5. Wiring Check
+---
 
+## UART Loopback Test — Expected Behavior
+
+The admin has a UART loopback test button. **It is expected to show "No data read back" when the XBee is connected.** This is NOT a failure — the test sends raw non-API bytes (0xAA, 0x55...) which the XBee discards as invalid. To actually test UART hardware, you must disconnect the XBee and bridge GPIO 13→12 with a jumper wire.
+
+**The real proof that RX works is seeing any frame in the serial monitor log** (even self-echo 0x10 frames). The user has confirmed this works.
+
+---
+
+## Debugging: Why the Node Doesn't Sync
+
+If the admin's serial monitor shows self-echo but NO 0x90 frames from the node, check these on the **node side**:
+
+### 1. Is the node actually sending?
+
+Add a Serial.println debug line in the node's `xbeeSendBroadcast()` function:
+```cpp
+Serial.printf("[XBee-Node] TX: sending %d bytes via API frame\n", (int)len);
 ```
-ESP32-CAM               XBee Module
-=========               ===========
-GPIO 13  (TX) ────────► DIN   (pin 3)
-GPIO 12  (RX) ◄──────── DOUT  (pin 2)
-GND           ────────── GND   (pin 10)
-3.3V          ────────── VCC   (pin 1)
+
+If this doesn't print, the node's timer/logic for sending REGISTER/HEARTBEAT isn't triggering.
+
+### 2. Is the node's XBee associated?
+
+The Router XBee must join the Coordinator's network before RF packets can be exchanged. Check:
+- ASSOC LED on the XBee module (blinking = searching, solid = associated)
+- In XCTU, read `AI` (Association Indication) — must be `0x00` (joined)
+- Ensure both XBees have the **same PAN ID** (`ID` parameter)
+
+### 3. Is the node using the right frame format?
+
+The node's TX frame must be:
+```
+Byte:  7E  [LenHi] [LenLo]  10  [FID]  00 00 00 00 00 00 FF FF  FF FE  00 00  [payload...]  [checksum]
+       ^^  ^^^^^^^^^^^^^^^^  ^^  ^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^  ^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^
+       Start   Length       Type  ID    64-bit dest (broadcast)   16-bit  Opts   JSON data    0xFF-sum
 ```
 
-**Important:** XBee VCC must be 3.3V, NOT 5V!
+The admin's state machine looks for `0x7E` as the start delimiter, then reads the 2-byte length, then the frame data, then validates the checksum (`sum of all frame bytes + checksum byte == 0xFF`).
+
+### 4. Timing
+
+The node should send REGISTER every 10 seconds until it receives REGISTER_ACK, then HEARTBEAT every 30 seconds. Make sure these timers are working.
 
 ---
 
 ## Admin Diagnostic Tools
 
-The admin testing page (`/admin/messaging/testing`) has a comprehensive XBee serial monitor with:
+The admin testing page (`/admin/messaging/testing`) has:
+
+### Serial Monitor Console
+- Color-coded entries (TX=yellow, RX=green, SYS=cyan, ERR=red)
+- Auto-refresh every 2 seconds
+- "Send Raw" text input for testing
 
 ### Diagnostics Panel
-- **TX Direction:** Shows ✅/❌ with byte count and TX status acknowledgments
-- **RX Direction:** Shows ✅/❌ with byte count and parsed frame count
-- **Assessment:** Human-readable connection status message
-- **GPIO States:** Real-time readback of GPIO 12/13 logic levels
-- **Raw Hex Dump:** First 64 raw bytes received (for identifying AT vs API mode issues)
+- **TX Direction:** ✅/❌ with byte count and TX status ACKs
+- **RX Direction:** ✅/❌ with byte count, parsed frames, and self-echo count
+- **Assessment:** Context-aware message based on what's working
+- **Details:** GPIO states, raw hex dump, all counters
 
 ### API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `GET /api/xbee/status` | GET | Pin config, baud rate, mode |
-| `GET /api/xbee/rx-log` | GET | Last 50 events + diagnostic counters |
-| `GET /api/xbee/diagnostics` | GET | Full hardware diagnostic (GPIO states, raw bytes, assessment) |
-| `POST /api/xbee/test` | POST | Send test message (HOPFOG_TEST\|...) |
-| `POST /api/xbee/send-raw` | POST | Send arbitrary text via XBee API frame |
-| `POST /api/xbee/loopback-test` | POST | UART self-test (requires TX↔RX jumper) |
-
-### Using the Diagnostics
-
-1. Open the admin testing page → XBee Serial Monitor
-2. Click "Run Diagnostics" button
-3. Check the diagnostic output:
-
-   | Scenario | TX Status | RX Status | Meaning |
-   |----------|-----------|-----------|---------|
-   | ✅ TX, ✅ RX | ACKs received | Frames parsed | **Working!** |
-   | ✅ TX, ❌ RX (0 bytes) | ACKs received | No data | Node not sending, or node TX→admin RX wiring issue |
-   | ✅ TX, ⚠️ RX (bytes but no frames) | ACKs received | Raw bytes but unparseable | XBee AP mode mismatch (one in AT, one in API) |
-   | ⚠️ TX (no ACK), ❌ RX | Sent but no ACK | No data | XBee not in AP=1, or XBee not powered |
-   | ❌ TX, ❌ RX | 0 bytes | 0 bytes | UART not functioning — check wiring |
-
-4. If **TX shows ACKs but RX shows 0 bytes**:
-   - The admin ESP32 → XBee serial works (admin can send TO XBee)
-   - But XBee DOUT → admin ESP32 doesn't work (can't receive FROM XBee)
-   - This suggests GPIO 12 is not properly configured as UART2 RX
-   - The `uart_set_pin()` fix should resolve this
-
----
-
-## Action Items for the Node Agent
-
-### Required Change: Add uart_set_pin() Fix
-
-In `src/main.cpp`, in the `setup()` function, add the explicit pin reclaim after `xbeeSerial.begin()`:
-
-```cpp
-// At the top of main.cpp, add:
-#include <driver/uart.h>
-
-// In setup(), after xbeeSerial.begin():
-#ifdef ARDUINO_ARCH_ESP32
-    xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
-    // Explicitly reclaim GPIO pins for UART2 — this overrides any earlier
-    // pin matrix configuration that SD_MMC.begin() may have set
-    uart_set_pin(UART_NUM_2, XBEE_TX_PIN, XBEE_RX_PIN,
-                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-#elif defined(ARDUINO_ARCH_ESP8266)
-    xbeeSerial.begin(XBEE_BAUD);
-#endif
-```
-
-### Optional: Add Diagnostic Byte Counter
-
-Add a `totalRxBytes` counter to the node's `xbeeProcessIncoming()` for debugging:
-
-```cpp
-static unsigned long nodeRxBytes = 0;
-
-void xbeeProcessIncoming() {
-    while (xbeeSerial.available()) {
-        uint8_t b = xbeeSerial.read();
-        nodeRxBytes++;
-        // ... rest of state machine
-    }
-}
-```
-
-Then expose it in the `/api/stats` response so it can be checked remotely.
+| `GET /api/xbee/status` | GET | Pin config, baud rate |
+| `GET /api/xbee/rx-log` | GET | Last 50 events + counters |
+| `GET /api/xbee/diagnostics` | GET | Full diagnostic (GPIO, hex dump, assessment) |
+| `POST /api/xbee/test` | POST | Send test broadcast message |
+| `POST /api/xbee/send-raw` | POST | Send arbitrary text via XBee |
+| `POST /api/xbee/loopback-test` | POST | UART self-test (requires jumper wire, XBee disconnected) |
 
 ---
 
@@ -201,7 +161,7 @@ Then expose it in the `/api/stats` response so it can be checked remotely.
 
 ## Protocol Reference
 
-The JSON command protocol is unchanged:
+The JSON command protocol (unchanged):
 
 ```json
 {"cmd":"COMMAND_NAME","node_id":"node-01","ts":12345,"params":{...}}

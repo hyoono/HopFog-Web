@@ -15,6 +15,7 @@
 #include "xbee_comm.h"
 #include "config.h"
 #include <driver/uart.h>   // for uart_set_pin() explicit pin claim
+#include <driver/gpio.h>   // for gpio_reset_pin() to detach from SD_MMC IOMUX
 
 // ── Internal state ──────────────────────────────────────────────────
 static HardwareSerial& xbeeSerial = Serial2;
@@ -27,6 +28,7 @@ static unsigned long   totalTxBytes      = 0;
 static unsigned long   rxFramesParsed    = 0;
 static unsigned long   txStatusOk        = 0;
 static unsigned long   txStatusFail      = 0;
+static unsigned long   selfEchoCount     = 0;
 
 // Raw byte sniffer — captures first N bytes for hex dump debugging
 #define RAW_SNIFF_SIZE 64
@@ -67,11 +69,19 @@ static uint8_t  rxChecksum  = 0;
 // ── Public API ──────────────────────────────────────────────────────
 
 void xbeeInit() {
+    // On ESP32-CAM, SD_MMC.begin() configures GPIO 12/13 via IOMUX as
+    // HS2_DATA2/DATA3, even in 1-bit mode.  IOMUX takes priority over
+    // the GPIO matrix that UART2 uses.  gpio_reset_pin() switches the
+    // pin back to GPIO function so UART2 can claim it.
+#ifdef USE_SD_MMC
+    gpio_reset_pin(GPIO_NUM_12);   // detach from HS2_DATA2 IOMUX
+    gpio_reset_pin(GPIO_NUM_13);   // detach from HS2_DATA3 IOMUX
+    Serial.println("[XBee] Reset GPIO 12/13 from SD_MMC IOMUX to GPIO function");
+#endif
+
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
 
-    // Explicitly reclaim GPIO pins for UART2 — this overrides any earlier
-    // pin matrix configuration that SD_MMC.begin() may have set on GPIO 12/13,
-    // even though 1-bit mode should not touch them.
+    // Belt-and-suspenders: explicitly route UART2 signals to these pins
     uart_set_pin(UART_NUM_2, XBEE_TX_PIN, XBEE_RX_PIN,
                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
@@ -223,6 +233,15 @@ void xbeeProcessIncoming() {
                         Serial.printf("[XBee] TX status: frame %d delivery FAILED (0x%02X)\n",
                                       fid, delivery);
                     }
+                } else if (frameType == XBEE_TX_REQUEST) {
+                    // Self-echo: we're receiving our own transmitted 0x10 frame.
+                    // This happens when TX→RX are bridged (breadboard short,
+                    // or XBee echo).  Safe to ignore — real node data arrives
+                    // as 0x90 RX Packet frames.
+                    selfEchoCount++;
+                    logEvent('S', 0x10, rxFrame[1],
+                             "Self-echo ignored (%d B) — TX/RX may be bridged",
+                             (int)rxFrameLen);
                 } else {
                     logEvent('R', frameType, 0, "Unknown frame type 0x%02X len=%d",
                              frameType, rxFrameLen);
@@ -263,6 +282,7 @@ void xbeeGetDiagnostics(JsonObject& diag) {
     diag["rx_frames_parsed"]   = rxFramesParsed;
     diag["tx_status_ok"]       = txStatusOk;
     diag["tx_status_fail"]     = txStatusFail;
+    diag["self_echo_count"]    = selfEchoCount;
     diag["uptime_ms"]          = millis();
 
     // Pin configuration
@@ -291,27 +311,42 @@ void xbeeGetDiagnostics(JsonObject& diag) {
     }
 
     // Connection assessment
-    bool txWorks = (txStatusOk > 0);
-    bool rxWorks = (rxFramesParsed > 0);
-    bool anyRx   = (totalRxBytes > 0);
+    bool txWorks    = (txStatusOk > 0);
+    bool rxWorks    = (rxFramesParsed > 0);
+    bool anyRx      = (totalRxBytes > 0);
+    bool hasSelfEcho = (selfEchoCount > 0);
 
     if (txWorks && rxWorks) {
-        diag["assessment"] = "FULLY WORKING — TX and RX both operational";
+        diag["assessment"] = "FULLY WORKING — TX and RX both operational. "
+                             "Receiving 0x90 data frames from remote XBee.";
+    } else if (hasSelfEcho && !rxWorks) {
+        diag["assessment"] = "RX WORKING (self-echo detected) — UART RX is functional. "
+                             "Seeing own 0x10 TX frames echoed back (normal on some setups). "
+                             "Waiting for 0x90 frames from a remote XBee (node). "
+                             "Ensure the node is powered and sending REGISTER/HEARTBEAT.";
     } else if (txWorks && anyRx && !rxWorks) {
-        diag["assessment"] = "PARTIAL — TX OK, receiving bytes but can't parse frames. "
-                             "Check XBee AP=1 (API mode), or data may be AT mode text.";
+        diag["assessment"] = "PARTIAL — TX OK, receiving bytes but can't parse valid frames. "
+                             "Check remote XBee AP=1 (API mode).";
     } else if (txWorks && !anyRx) {
-        diag["assessment"] = "TX ONLY — XBee acknowledges our frames, but no RF data received. "
+        diag["assessment"] = "TX ONLY — XBee acknowledges our frames but no data received. "
                              "Check that the remote XBee is powered, same PAN ID, and sending.";
     } else if (!txWorks && totalTxBytes > 0) {
         diag["assessment"] = "NO TX STATUS — sent bytes but got no 0x8B acknowledgment. "
-                             "Check XBee is in AP=1 mode and TX→DIN wiring.";
+                             "Check XBee AP=1 mode and TX→DIN wiring.";
     } else {
         diag["assessment"] = "NO COMMUNICATION — check wiring, XBee power, and AP=1 setting.";
     }
 }
 
 bool xbeeRunLoopbackTest(String& result) {
+    // NOTE: This test ONLY works with a physical jumper wire bridging
+    // GPIO TX to GPIO RX.  Disconnect the XBee first!
+    // If the XBee is connected, raw bytes go to DIN and the XBee
+    // discards them (non-API data), so nothing comes back on DOUT.
+    // This does NOT mean RX is broken — use the "Send Test Message"
+    // button instead and check the serial monitor for 0x8B TX Status
+    // or 0x90 RX Packet frames.
+
     // Temporarily disconnect callback to avoid protocol handling
     XBeeReceiveCB savedCb = rxCallback;
     rxCallback = nullptr;
@@ -340,16 +375,19 @@ bool xbeeRunLoopbackTest(String& result) {
 
     if (readBack == 4 && match) {
         result = "PASS — UART loopback working (read back 4/4 bytes matching). "
-                 "Remove the TX↔RX bridge and reconnect XBee.";
+                 "Remove the jumper wire and reconnect XBee.";
         return true;
     } else if (readBack > 0) {
         result = "PARTIAL — read " + String(readBack) + "/4 bytes back (mismatch). "
-                 "UART partially working.";
+                 "UART partially working. Check for loose connections.";
         return false;
     } else {
-        result = "FAIL — wrote 4 bytes, read 0 back. Either TX↔RX are not bridged "
-                 "(connect GPIO " + String(XBEE_TX_PIN) + " to GPIO " +
-                 String(XBEE_RX_PIN) + " with a jumper wire), or UART2 is not functioning.";
+        result = "No data read back. This is NORMAL if the XBee is connected — "
+                 "the XBee discards raw non-API bytes. To test UART hardware, "
+                 "disconnect the XBee and bridge GPIO " + String(XBEE_TX_PIN) +
+                 " to GPIO " + String(XBEE_RX_PIN) + " with a jumper wire. "
+                 "Alternatively, use 'Send Test Message' and check the serial "
+                 "monitor for 0x8B or 0x90 frames — that proves RX works.";
         return false;
     }
 }

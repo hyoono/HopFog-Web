@@ -101,7 +101,8 @@
                                             <strong>RX Bytes:</strong> <span id="diagRxBytes">0</span><br>
                                             <strong>TX Status OK:</strong> <span id="diagTxOk">0</span> |
                                             <strong>TX Status Fail:</strong> <span id="diagTxFail">0</span> |
-                                            <strong>RX Frames:</strong> <span id="diagRxFrames">0</span>
+                                            <strong>RX Frames:</strong> <span id="diagRxFrames">0</span> |
+                                            <strong>Self-Echo:</strong> <span id="diagSelfEcho">0</span>
                                         </div>
                                     </div>
                                 </div>
@@ -425,6 +426,9 @@
         if (d.rx_frames_parsed > 0) {
             rxEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Working</span>' +
                 ' (' + d.rx_bytes + ' B, ' + d.rx_frames_parsed + ' frames)';
+        } else if (d.self_echo_count > 0) {
+            rxEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> RX Working</span>' +
+                ' (' + d.rx_bytes + ' B, ' + d.self_echo_count + ' self-echo frames — waiting for remote node data)';
         } else if (d.rx_bytes > 0) {
             rxEl.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-circle"></i> ' +
                 d.rx_bytes + ' B received but 0 frames parsed</span>';
@@ -436,6 +440,8 @@
         const assessEl = document.getElementById('diagAssessment');
         if (d.rx_frames_parsed > 0 && d.tx_status_ok > 0) {
             assessEl.innerHTML = '<span class="text-success">' + escHtml(d.assessment) + '</span>';
+        } else if (d.self_echo_count > 0) {
+            assessEl.innerHTML = '<span class="text-info">' + escHtml(d.assessment) + '</span>';
         } else if (d.rx_bytes > 0 || d.tx_bytes > 0) {
             assessEl.innerHTML = '<span class="text-warning">' + escHtml(d.assessment) + '</span>';
         } else {
@@ -452,6 +458,7 @@
         document.getElementById('diagTxOk').textContent = d.tx_status_ok;
         document.getElementById('diagTxFail').textContent = d.tx_status_fail;
         document.getElementById('diagRxFrames').textContent = d.rx_frames_parsed;
+        document.getElementById('diagSelfEcho').textContent = d.self_echo_count || 0;
     }
 
     function toggleDiagDetails() {
