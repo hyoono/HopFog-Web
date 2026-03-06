@@ -25,12 +25,25 @@
 #define XBEE_COMM_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 // ── API Mode 1 Constants ────────────────────────────────────────────
 #define XBEE_START_DELIM   0x7E
 #define XBEE_TX_REQUEST    0x10  // Transmit Request frame type
 #define XBEE_RX_PACKET     0x90  // Receive Packet frame type
 #define XBEE_TX_STATUS     0x8B  // Transmit Status frame type
+
+// ── Event log ───────────────────────────────────────────────────────
+#define XBEE_LOG_SIZE      50    // ring buffer capacity
+#define XBEE_LOG_MSG_MAX  200    // max message text per entry
+
+struct XBeeLogEntry {
+    unsigned long ts;         // millis()
+    char direction;           // 'T' = TX, 'R' = RX, 'E' = error, 'S' = status
+    uint8_t frameType;        // 0x10, 0x90, 0x8B, or 0 for errors
+    uint8_t frameId;          // frame ID (if applicable)
+    char msg[XBEE_LOG_MSG_MAX]; // human-readable summary / payload text
+};
 
 // ── Public API ──────────────────────────────────────────────────────
 
@@ -54,5 +67,12 @@ typedef void (*XBeeReceiveCB)(const char* payload, size_t len);
 
 /// Register a callback for incoming receive packets.
 void xbeeSetReceiveCallback(XBeeReceiveCB cb);
+
+/// Populate a JSON array with the event log (newest first).
+void xbeeGetLog(JsonArray& arr);
+
+/// Return the total count of raw bytes received on the serial port
+/// (useful for diagnostics — if 0, the ESP32 isn't reading from XBee at all).
+unsigned long xbeeGetRxByteCount();
 
 #endif // XBEE_COMM_H

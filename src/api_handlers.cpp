@@ -1129,6 +1129,50 @@ void registerApiRoutes(AsyncWebServer &server) {
         request->send(frameId > 0 ? 200 : 400, "application/json", out);
     });
 
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  XBEE: GET /api/xbee/rx-log — event log for serial monitor   │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/xbee/rx-log", HTTP_GET,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        JsonDocument resp;
+        resp["rx_bytes_total"] = xbeeGetRxByteCount();
+        resp["uptime_ms"]      = millis();
+        JsonArray log = resp["log"].to<JsonArray>();
+        xbeeGetLog(log);
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  XBEE: POST /api/xbee/send-raw — send arbitrary text        │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/xbee/send-raw", HTTP_POST,
+              [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        String text = "";
+        if (request->hasParam("text", true)) {
+            text = request->getParam("text", true)->value();
+        }
+        if (text.length() == 0 || text.length() > 400) {
+            sendJsonError(request, 400, "Text required (1-400 chars)");
+            return;
+        }
+
+        uint8_t frameId = xbeeSendBroadcast(text.c_str(), text.length());
+
+        JsonDocument resp;
+        resp["success"]  = (frameId > 0);
+        resp["frame_id"] = frameId;
+        resp["length"]   = text.length();
+        String out; serializeJson(resp, out);
+        request->send(frameId > 0 ? 200 : 400, "application/json", out);
+    });
+
     // ════════════════════════════════════════════════════════════════
     //  MOBILE APP ENDPOINTS (match HopFogMobile expected API)
     // ════════════════════════════════════════════════════════════════

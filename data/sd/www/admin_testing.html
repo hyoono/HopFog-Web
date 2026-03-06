@@ -63,6 +63,44 @@
                         <li class="breadcrumb-item"><a href="/admin/messaging">Admin Messaging</a></li>
                         <li class="breadcrumb-item active">Testing</li>
                     </ol>
+                    <!-- XBee Serial Monitor -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-dark text-white">
+                            <i class="fas fa-terminal me-1"></i>XBee Serial Monitor
+                            <span class="badge bg-secondary ms-2" id="rxByteCount">0 bytes received</span>
+                            <button class="btn btn-sm btn-outline-light float-end" id="btnAutoRefresh" onclick="toggleAutoRefresh()">
+                                <i class="fas fa-sync-alt me-1"></i><span id="autoRefreshLabel">Auto-Refresh: OFF</span>
+                            </button>
+                        </div>
+                        <div class="card-body p-0">
+                            <!-- Diagnostics bar -->
+                            <div class="px-3 py-2 bg-light border-bottom small">
+                                <strong>Diagnostics:</strong>
+                                <span id="diagStatus" class="text-muted">Loading...</span>
+                            </div>
+
+                            <!-- Console output -->
+                            <div id="xbeeConsole" style="height:300px; overflow-y:auto; background:#1e1e1e; color:#d4d4d4; font-family:'Courier New',monospace; font-size:13px; padding:8px;">
+                                <div class="text-muted">[Waiting for data... click Refresh or enable Auto-Refresh]</div>
+                            </div>
+
+                            <!-- Send bar -->
+                            <div class="p-2 border-top d-flex gap-2">
+                                <input type="text" class="form-control form-control-sm font-monospace" id="rawSendText"
+                                       placeholder='Send raw text via XBee (e.g. {"cmd":"REGISTER","node_id":"test"})' maxlength="400">
+                                <button class="btn btn-sm btn-warning" onclick="sendRawXBee()" style="white-space:nowrap">
+                                    <i class="fas fa-paper-plane me-1"></i>Send
+                                </button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="refreshLog()" style="white-space:nowrap">
+                                    <i class="fas fa-sync-alt me-1"></i>Refresh
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearConsole()" style="white-space:nowrap">
+                                    <i class="fas fa-trash me-1"></i>Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- XBee Communication Test -->
                     <div class="card mb-4">
                         <div class="card-header bg-primary text-white">
@@ -256,6 +294,142 @@
             '<td><span class="badge ' + badgeClass + '">' + status + '</span></td>';
         tbody.insertBefore(tr, tbody.firstChild);
     }
+
+    // ── XBee Serial Monitor ──────────────────────────────────────
+    let autoRefreshInterval = null;
+    let lastLogTs = 0;
+    let consoleHasData = false;
+
+    function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function dirLabel(dir) {
+        switch (dir) {
+            case 'T': return '<span class="text-warning">TX →</span>';
+            case 'R': return '<span class="text-success">RX ←</span>';
+            case 'E': return '<span class="text-danger">ERR!</span>';
+            case 'S': return '<span class="text-info">SYS </span>';
+            default:  return '<span class="text-muted">??? </span>';
+        }
+    }
+
+    function formatMs(ms) {
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        const h = Math.floor(m / 60);
+        if (h > 0) return h + 'h ' + (m % 60) + 'm ' + (s % 60) + 's';
+        if (m > 0) return m + 'm ' + (s % 60) + 's';
+        return s + 's';
+    }
+
+    function refreshLog() {
+        fetch('/api/xbee/rx-log', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                const con = document.getElementById('xbeeConsole');
+                const bytesEl = document.getElementById('rxByteCount');
+                const diagEl = document.getElementById('diagStatus');
+
+                bytesEl.textContent = data.rx_bytes_total + ' bytes received';
+
+                // Diagnostics
+                if (data.rx_bytes_total === 0) {
+                    diagEl.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-triangle me-1"></i>' +
+                        'No bytes received from XBee serial. Check wiring: ESP32 GPIO ' + document.getElementById('xbeeRxPin').textContent +
+                        ' must be connected to XBee DOUT (pin 2).</span>';
+                } else {
+                    diagEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>' +
+                        'Serial link active. Uptime: ' + formatMs(data.uptime_ms) +
+                        '. Total RX: ' + data.rx_bytes_total + ' bytes.</span>';
+                }
+
+                if (!data.log || data.log.length === 0) {
+                    con.innerHTML = '<div class="text-muted">[No events yet. Send a test message or wait for incoming data.]</div>';
+                    return;
+                }
+
+                // Only update if new data
+                const newestTs = data.log[0].ts;
+                if (newestTs === lastLogTs && consoleHasData) return;
+                lastLogTs = newestTs;
+
+                let html = '';
+                // Show in reverse (oldest first, newest at bottom)
+                for (let i = data.log.length - 1; i >= 0; i--) {
+                    const e = data.log[i];
+                    const timeStr = formatMs(e.ts);
+                    const ft = e.frame_type ? ' [0x' + e.frame_type.toString(16).toUpperCase() + ']' : '';
+                    const fid = e.frame_id ? ' #' + e.frame_id : '';
+                    html += '<div>' + dirLabel(e.dir) +
+                            ' <span class="text-muted">' + escHtml(timeStr) + '</span>' +
+                            ft + fid + ' ' + escHtml(e.msg) + '</div>';
+                }
+                con.innerHTML = html;
+                con.scrollTop = con.scrollHeight;
+                consoleHasData = true;
+            })
+            .catch(err => {
+                document.getElementById('diagStatus').innerHTML =
+                    '<span class="text-danger">Failed to fetch log: ' + escHtml(err.message) + '</span>';
+            });
+    }
+
+    function toggleAutoRefresh() {
+        const label = document.getElementById('autoRefreshLabel');
+        const btn = document.getElementById('btnAutoRefresh');
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+            label.textContent = 'Auto-Refresh: OFF';
+            btn.className = 'btn btn-sm btn-outline-light float-end';
+        } else {
+            refreshLog();
+            autoRefreshInterval = setInterval(refreshLog, 2000);
+            label.textContent = 'Auto-Refresh: ON (2s)';
+            btn.className = 'btn btn-sm btn-success float-end';
+        }
+    }
+
+    function sendRawXBee() {
+        const text = document.getElementById('rawSendText').value.trim();
+        if (!text) return;
+
+        const formData = new FormData();
+        formData.append('text', text);
+
+        fetch('/api/xbee/send-raw', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('rawSendText').value = '';
+                setTimeout(refreshLog, 500);
+            } else {
+                alert('Send failed: ' + (data.error || 'unknown'));
+            }
+        })
+        .catch(err => alert('Network error: ' + err.message));
+    }
+
+    function clearConsole() {
+        document.getElementById('xbeeConsole').innerHTML =
+            '<div class="text-muted">[Console cleared. Click Refresh to reload.]</div>';
+        consoleHasData = false;
+        lastLogTs = 0;
+    }
+
+    // Send on Enter key
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('rawSendText').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); sendRawXBee(); }
+        });
+    });
     </script>
 </body>
 </html>
