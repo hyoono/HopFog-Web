@@ -296,24 +296,31 @@ bool writeJsonFile(const char* path, JsonDocument& doc);
 ```cpp
 #include "sd_storage.h"
 #include "config.h"
-#include <SD_MMC.h>
+#include <SD.h>
+#include <SPI.h>
 
 bool initSDCard() {
-    // ESP32-CAM flash LED (GPIO 4) can interfere with SD bus — keep it OFF
-    pinMode(4, OUTPUT);
-    digitalWrite(4, LOW);
-
-    if (!SD_MMC.begin("/sdcard", true)) {  // true = 1-bit mode
-        Serial.println("[SD] SD_MMC init FAILED");
+#ifdef ESP32CAM_SPI_SD
+    SPIClass spiSD(HSPI);
+    spiSD.begin(SD_SPI_CLK, SD_SPI_MISO, SD_SPI_MOSI, SD_CS_PIN);
+    if (!SD.begin(SD_CS_PIN, spiSD)) {
+        Serial.println("[SD] SPI SD mount failed!");
         return false;
     }
+    Serial.println("[SD] SPI mode (HSPI) — mounted OK");
+#else
+    if (!SD.begin(SD_CS_PIN)) {
+        Serial.println("[SD] SD init FAILED");
+        return false;
+    }
+#endif
 
     Serial.printf("[SD] Card mounted — size: %lluMB\n",
-                  SD_MMC.totalBytes() / (1024 * 1024));
+                  SD.totalBytes() / (1024 * 1024));
 
     // Create /db directory if it doesn't exist
-    if (!SD_MMC.exists(SD_DB_DIR)) {
-        SD_MMC.mkdir(SD_DB_DIR);
+    if (!SD.exists(SD_DB_DIR)) {
+        SD.mkdir(SD_DB_DIR);
     }
 
     // Create default empty JSON files if they don't exist
@@ -322,8 +329,8 @@ bool initSDCard() {
         SD_DMS_FILE, SD_FOG_FILE, SD_MSGS_FILE
     };
     for (const char* f : files) {
-        if (!SD_MMC.exists(f)) {
-            File file = SD_MMC.open(f, FILE_WRITE);
+        if (!SD.exists(f)) {
+            File file = SD.open(f, FILE_WRITE);
             if (file) {
                 file.print("[]");
                 file.close();
@@ -335,7 +342,7 @@ bool initSDCard() {
 }
 
 bool readJsonFile(const char* path, JsonDocument& doc) {
-    File file = SD_MMC.open(path, FILE_READ);
+    File file = SD.open(path, FILE_READ);
     if (!file) {
         Serial.printf("[SD] File not found: %s\n", path);
         return false;
@@ -350,7 +357,7 @@ bool readJsonFile(const char* path, JsonDocument& doc) {
 }
 
 bool writeJsonFile(const char* path, JsonDocument& doc) {
-    File file = SD_MMC.open(path, FILE_WRITE);
+    File file = SD.open(path, FILE_WRITE);
     if (!file) {
         Serial.printf("[SD] Cannot write: %s\n", path);
         return false;

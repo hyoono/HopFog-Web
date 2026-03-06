@@ -4,7 +4,7 @@
 >
 > **Prerequisites:** Complete Parts 1 and 2 first (XBee driver, node client, SD storage).
 >
-> **This part covers:** Web server for mobile app, main.cpp, protocol reference, GPIO fix, debugging, and implementation checklist.
+> **This part covers:** Web server for mobile app, main.cpp, protocol reference, SPI SD fix, debugging, and implementation checklist.
 
 ---
 
@@ -256,31 +256,28 @@ Node                                     Admin
 
 ---
 
-## 15. CRITICAL: GPIO Fix for ESP32-CAM
+## 15. CRITICAL: SD Card SPI Mode for ESP32-CAM
 
 **This is the #1 cause of "no communication" on ESP32-CAM boards.**
 
-On ESP32-CAM, the SD card uses `SD_MMC.begin()` which configures GPIO 12 and 13 via the **IOMUX** peripheral as HS2_DATA2 and HS2_DATA3 (even in 1-bit mode where they're not needed). The UART2 peripheral routes through the **GPIO matrix**, which has lower priority than IOMUX.
+On ESP32-CAM, using `SD_MMC.begin()` permanently claims GPIO 12 and 13 via the **IOMUX** peripheral as HS2_DATA2 and HS2_DATA3 (even in 1-bit mode where they're not needed). The UART2 peripheral routes through the **GPIO matrix**, which has lower priority than IOMUX. This prevents XBee UART2 communication from working.
 
-**Result:** UART TX still works (output can override), but UART RX does NOT work (input is routed to the SD peripheral instead of UART2).
-
-**Fix:** Call `gpio_reset_pin()` BEFORE `Serial2.begin()`:
+**Fix:** Use SPI-based SD card access instead of SD_MMC. SPI SD only uses GPIO 2 (MISO), 13 (CS), 14 (CLK), and 15 (MOSI) via the HSPI bus. This frees GPIO 4 and 12 for XBee TX and RX respectively.
 
 ```cpp
-#include <driver/gpio.h>
-#include <driver/uart.h>
+#include <SD.h>
+#include <SPI.h>
 
-// This MUST be called AFTER SD_MMC.begin() and BEFORE Serial2.begin()
-gpio_reset_pin(GPIO_NUM_12);   // Detach from HS2_DATA2
-gpio_reset_pin(GPIO_NUM_13);   // Detach from HS2_DATA3
+// SPI SD init — uses HSPI, does NOT conflict with UART2
+SPIClass spiSD(HSPI);
+spiSD.begin(SD_SPI_CLK, SD_SPI_MISO, SD_SPI_MOSI, SD_CS_PIN);
+SD.begin(SD_CS_PIN, spiSD);
 
-Serial2.begin(9600, SERIAL_8N1, 12, 13);
-
-uart_set_pin(UART_NUM_2, 13, 12,
-             UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+// Then XBee UART2 works on GPIO 4 (TX) and GPIO 12 (RX)
+Serial2.begin(9600, SERIAL_8N1, 12, 4);
 ```
 
-**The admin has confirmed this fix works.** Without it, the loopback test fails (write 4 bytes, read 0 back). With it, RX works correctly.
+**Key point:** SD card init MUST come before XBee init. The order is `initSDCard()` then `xbeeInit()` — the SPI SD does not interfere with UART2 pins, so no GPIO workarounds are needed.
 
 ---
 
@@ -293,7 +290,7 @@ uart_set_pin(UART_NUM_2, 13, 12,
 
 ### Step 2: Verify ESP32 Serial
 1. Open Serial Monitor on the node (115200 baud)
-2. Look for: `[XBee] UART2 init: TX=GPIO13 RX=GPIO12 baud=9600 (API mode 1)`
+2. Look for: `[XBee] UART2 init: TX=GPIO4 RX=GPIO12 baud=9600 (API mode 1)`
 3. Look for: `[Node] Sent REGISTER` (should appear every 10 seconds)
 4. If no REGISTER prints, the node's main loop or timer isn't running
 
@@ -306,7 +303,7 @@ uart_set_pin(UART_NUM_2, 13, 12,
 ### Step 4: Verify RX Works
 1. On admin: click "Send Test Message"
 2. Node serial monitor should show: `[XBee] RX 0x90 (...bytes): {"cmd":"BROADCAST_MSG",...}`
-3. If node shows nothing → check `gpio_reset_pin()` fix, check wiring
+3. If node shows nothing → check SPI SD init order (must be before xbeeInit), check wiring
 
 ### Step 5: Monitor Full Handshake
 ```
@@ -328,8 +325,7 @@ Node serial output:
 - [ ] Create `platformio.ini` with ESP32-CAM + libraries
 - [ ] Create `config.h` with pin definitions and node identity
 - [ ] Create `xbee_comm.h` and `xbee_comm.cpp` (API mode 1 driver)
-  - [ ] **Include `gpio_reset_pin()` fix** (most critical!)
-  - [ ] `xbeeInit()` — UART2 setup with gpio fix
+  - [ ] `xbeeInit()` — UART2 setup (GPIO 4 TX, GPIO 12 RX)
   - [ ] `xbeeSendBroadcast()` — build 0x10 TX Request frame
   - [ ] `xbeeProcessIncoming()` — state machine to parse 0x90 RX frames
 - [ ] Create `sd_storage.h` and `sd_storage.cpp`

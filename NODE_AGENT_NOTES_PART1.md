@@ -24,7 +24,7 @@
 12. [Implementation: web_server & API handlers](#12-implementation-web-server--api-handlers)
 13. [Implementation: main.cpp](#13-implementation-maincpp)
 14. [Protocol Reference](#14-protocol-reference)
-15. [CRITICAL: GPIO Fix for ESP32-CAM](#15-critical-gpio-fix-for-esp32-cam)
+15. [CRITICAL: SD Card SPI Mode for ESP32-CAM](#15-critical-sd-card-spi-mode-for-esp32-cam)
 16. [Debugging Guide](#16-debugging-guide)
 17. [Implementation Checklist](#17-implementation-checklist)
 
@@ -81,7 +81,7 @@
 ```
 ESP32-CAM          XBee Module
 ─────────          ───────────
-GPIO 13 (TX) ────► DIN  (pin 3)
+GPIO 4  (TX) ────► DIN  (pin 3)
 GPIO 12 (RX) ◄──── DOUT (pin 2)
 3.3V         ────► VCC  (pin 1)
 GND          ────► GND  (pin 10)
@@ -92,7 +92,7 @@ GND          ────► GND  (pin 10)
 - Or burn the VDD_SDIO efuse to force 3.3V (permanent, one-time): `espefuse.py set_flash_voltage 3.3V`
 
 ### SD Card
-The ESP32-CAM's built-in SD card slot is used in 1-bit SD_MMC mode. No external wiring needed — just insert a FAT32-formatted micro SD card.
+The ESP32-CAM's built-in SD card slot is used via SPI (HSPI bus). The SPI pins are: CLK=GPIO 14, MISO=GPIO 2, MOSI=GPIO 15, CS=GPIO 13. This avoids the GPIO conflict that SD_MMC causes with UART2/XBee pins. Just insert a FAT32-formatted micro SD card.
 
 ---
 
@@ -152,7 +152,7 @@ board_build.partitions = min_spiffs.csv
 build_flags =
     -DCORE_DEBUG_LEVEL=3
     -DBOARD_HAS_PSRAM=1
-    -DUSE_SD_MMC=1
+    -DESP32CAM_SPI_SD=1
 ```
 
 ---
@@ -208,7 +208,13 @@ HopFog-Node/
 #define NODE_ID       "node-01"           // Unique ID for this node
 #define DEVICE_NAME   "HopFog-Node-01"    // Human-readable name
 
-// ── SD Card (ESP32-CAM built-in slot, 1-bit SD_MMC mode) ───────────
+// ── SD Card (ESP32-CAM built-in slot, SPI mode via HSPI) ───────────
+#ifdef ESP32CAM_SPI_SD
+  #define SD_CS_PIN       13
+  #define SD_SPI_CLK      14
+  #define SD_SPI_MISO      2
+  #define SD_SPI_MOSI     15
+#endif
 #define SD_DB_DIR           "/db"
 #define SD_USERS_FILE       "/db/users.json"
 #define SD_ANNOUNCE_FILE    "/db/announcements.json"
@@ -220,7 +226,11 @@ HopFog-Node/
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
 // Uses UART2 (Serial2) so UART0 (Serial) stays free for Serial Monitor.
 #define XBEE_BAUD       9600
-#define XBEE_TX_PIN     13    // ESP32 TX → XBee DIN  (pin 3)
+#ifdef ESP32CAM_SPI_SD
+  #define XBEE_TX_PIN    4    // ESP32 TX → XBee DIN  (pin 3)
+#else
+  #define XBEE_TX_PIN   13    // Non-CAM boards: GPIO 13
+#endif
 #define XBEE_RX_PIN     12    // ESP32 RX ← XBee DOUT (pin 2)
 
 // ── Timing ─────────────────────────────────────────────────────────
@@ -280,7 +290,6 @@ void xbeeSetReceiveCallback(XBeeReceiveCB cb);
 #include "xbee_comm.h"
 #include "config.h"
 #include <driver/uart.h>
-#include <driver/gpio.h>
 
 static HardwareSerial& xbeeSerial = Serial2;
 static XBeeReceiveCB   rxCallback = nullptr;
@@ -295,16 +304,6 @@ static uint8_t   rxFrame[XBEE_MAX_FRAME];
 static uint8_t   rxChecksum = 0;
 
 void xbeeInit() {
-    // *** CRITICAL: On ESP32-CAM, SD_MMC.begin() claims GPIO 12/13 via ***
-    // *** IOMUX as HS2_DATA2/DATA3.  IOMUX takes priority over the     ***
-    // *** GPIO matrix that UART2 uses.  gpio_reset_pin() detaches the   ***
-    // *** pins from IOMUX so UART2 can claim them.                      ***
-#ifdef USE_SD_MMC
-    gpio_reset_pin(GPIO_NUM_12);
-    gpio_reset_pin(GPIO_NUM_13);
-    Serial.println("[XBee] Reset GPIO 12/13 from SD_MMC IOMUX");
-#endif
-
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
 
     // Explicitly route UART2 signals to these pins (belt-and-suspenders)

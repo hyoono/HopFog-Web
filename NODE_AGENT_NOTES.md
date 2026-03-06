@@ -21,10 +21,10 @@ Give each part to the Copilot agent as a separate task, **in order**:
 - File structure
 - `config.h` — complete code
 - `xbee_comm.h` — complete code
-- `xbee_comm.cpp` — complete XBee API mode 1 driver code (0x10 TX, 0x90 RX state machine, gpio_reset_pin fix)
+- `xbee_comm.cpp` — complete XBee API mode 1 driver code (0x10 TX, 0x90 RX state machine)
 
 **Copilot task prompt:**
-> "Read the instructions in NODE_AGENT_NOTES_PART1.md from the HopFog-Web repo. Create all the files described: platformio.ini, config.h, xbee_comm.h, xbee_comm.cpp. Use the exact code provided. Make sure to include the gpio_reset_pin() fix."
+> "Read the instructions in NODE_AGENT_NOTES_PART1.md from the HopFog-Web repo. Create all the files described: platformio.ini, config.h, xbee_comm.h, xbee_comm.cpp. Use the exact code provided. Make sure to use SPI SD (not SD_MMC) for ESP32-CAM."
 
 ---
 
@@ -35,7 +35,7 @@ Give each part to the Copilot agent as a separate task, **in order**:
 - `node_client.h` — state machine (UNREGISTERED → REGISTERED → SYNCING → RUNNING)
 - `node_client.cpp` — complete code: REGISTER/HEARTBEAT/SYNC_REQUEST senders, REGISTER_ACK/PONG/SYNC_DATA/BROADCAST_MSG/GET_STATS handlers
 - `sd_storage.h` — read/write JSON files
-- `sd_storage.cpp` — SD_MMC 1-bit mode init, JSON file I/O
+- `sd_storage.cpp` — SPI SD init, JSON file I/O
 
 **Copilot task prompt:**
 > "Read the instructions in NODE_AGENT_NOTES_PART2.md from the HopFog-Web repo. Create: node_client.h, node_client.cpp, sd_storage.h, sd_storage.cpp. Use the exact code provided."
@@ -50,7 +50,7 @@ Give each part to the Copilot agent as a separate task, **in order**:
 - How to relay user actions to admin via XBee (code examples)
 - `main.cpp` — complete setup() and loop()
 - Protocol reference (binary frame diagrams, JSON command tables, flow diagram)
-- **CRITICAL: GPIO fix** for ESP32-CAM (most important debugging info)
+- **CRITICAL: SPI SD fix** for ESP32-CAM (most important debugging info)
 - Debugging guide (5-step sequence)
 - Implementation checklist (3 phases with checkboxes)
 - Admin diagnostic endpoints (for remote debugging)
@@ -69,7 +69,7 @@ Give each part to the Copilot agent as a separate task, **in order**:
 | Node XBee | Router (CE=0, JV=1) |
 | PAN ID | 1234 (must match) |
 | Baud | 9600 |
-| GPIO TX | 13 → XBee DIN (pin 3) |
+| GPIO TX | 4 → XBee DIN (pin 3) |
 | GPIO RX | 12 ← XBee DOUT (pin 2) |
 | Frame format | 0x7E | Length(2B) | FrameData | Checksum |
 | TX frame type | 0x10 (Transmit Request) |
@@ -79,6 +79,6 @@ Give each part to the Copilot agent as a separate task, **in order**:
 
 ## Critical Reminders
 
-1. **`gpio_reset_pin(GPIO_NUM_12)` and `gpio_reset_pin(GPIO_NUM_13)` MUST be called before `Serial2.begin()`** — without this, XBee RX will not work on ESP32-CAM
+1. **ESP32-CAM uses SPI SD (not SD_MMC)** — SD_MMC permanently claims GPIO 12/13 via IOMUX, preventing UART2/XBee. SPI SD uses GPIO 2/13/14/15 (MISO/CS/CLK/MOSI), freeing GPIO 4 and 12 for XBee.
 2. **SD card init MUST come before XBee init** — `initSDCard()` then `xbeeInit()` in that order
 3. **Both XBee modules must be in API mode 1 (AP=1)** — configure via XCTU before connecting to ESP32
