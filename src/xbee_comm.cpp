@@ -14,12 +14,24 @@
 
 #include "xbee_comm.h"
 #include "config.h"
+#include <driver/uart.h>   // for uart_set_pin() explicit pin claim
 
 // ── Internal state ──────────────────────────────────────────────────
 static HardwareSerial& xbeeSerial = Serial2;
 static XBeeReceiveCB   rxCallback = nullptr;
 static uint8_t         frameIdCounter = 0;
-static unsigned long   totalRxBytes   = 0;   // diagnostic counter
+
+// Diagnostic counters
+static unsigned long   totalRxBytes      = 0;
+static unsigned long   totalTxBytes      = 0;
+static unsigned long   rxFramesParsed    = 0;
+static unsigned long   txStatusOk        = 0;
+static unsigned long   txStatusFail      = 0;
+
+// Raw byte sniffer — captures first N bytes for hex dump debugging
+#define RAW_SNIFF_SIZE 64
+static uint8_t  rawSniffBuf[RAW_SNIFF_SIZE];
+static int      rawSniffCount = 0;
 
 // Maximum API frame payload we'll accept (0x90 overhead + RF data)
 #define XBEE_MAX_FRAME  512
@@ -56,6 +68,13 @@ static uint8_t  rxChecksum  = 0;
 
 void xbeeInit() {
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
+
+    // Explicitly reclaim GPIO pins for UART2 — this overrides any earlier
+    // pin matrix configuration that SD_MMC.begin() may have set on GPIO 12/13,
+    // even though 1-bit mode should not touch them.
+    uart_set_pin(UART_NUM_2, XBEE_TX_PIN, XBEE_RX_PIN,
+                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
     Serial.printf("[XBee] UART2 started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
                   XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
     logEvent('S', 0, 0, "XBee init: TX=GPIO%d RX=GPIO%d baud=%d",
@@ -95,6 +114,8 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     xbeeSerial.write(cksum);
     xbeeSerial.flush();
 
+    totalTxBytes += 3 + 14 + len + 1; // delim + lenHi/Lo + hdr + payload + checksum
+
     // Log a truncated preview of the payload (max ~170 chars to fit log entry)
     char preview[XBEE_LOG_MSG_MAX];
     snprintf(preview, sizeof(preview), "(%d B) %.170s%s",
@@ -113,6 +134,11 @@ void xbeeProcessIncoming() {
     while (xbeeSerial.available()) {
         uint8_t b = xbeeSerial.read();
         totalRxBytes++;
+
+        // Capture first N raw bytes for hex dump (diagnostic tool)
+        if (rawSniffCount < RAW_SNIFF_SIZE) {
+            rawSniffBuf[rawSniffCount++] = b;
+        }
 
         switch (rxState) {
         case WAIT_DELIM:
@@ -152,6 +178,7 @@ void xbeeProcessIncoming() {
                 uint8_t frameType = rxFrame[0];
 
                 if (frameType == XBEE_RX_PACKET && rxFrameLen >= 13) {
+                    rxFramesParsed++;
                     // Extract 64-bit source address for logging
                     char srcAddr[18];
                     snprintf(srcAddr, sizeof(srcAddr),
@@ -186,8 +213,10 @@ void xbeeProcessIncoming() {
                     uint8_t delivery = rxFrame[5];
                     uint8_t retries = rxFrame[4];
                     if (delivery == 0) {
+                        txStatusOk++;
                         logEvent('S', 0x8B, fid, "TX OK (retries=%d)", retries);
                     } else {
+                        txStatusFail++;
                         logEvent('E', 0x8B, fid,
                                  "TX FAILED delivery=0x%02X retries=%d",
                                  delivery, retries);
@@ -225,4 +254,102 @@ void xbeeGetLog(JsonArray& arr) {
 
 unsigned long xbeeGetRxByteCount() {
     return totalRxBytes;
+}
+
+void xbeeGetDiagnostics(JsonObject& diag) {
+    // Counters
+    diag["tx_bytes"]           = totalTxBytes;
+    diag["rx_bytes"]           = totalRxBytes;
+    diag["rx_frames_parsed"]   = rxFramesParsed;
+    diag["tx_status_ok"]       = txStatusOk;
+    diag["tx_status_fail"]     = txStatusFail;
+    diag["uptime_ms"]          = millis();
+
+    // Pin configuration
+    diag["tx_pin"]    = XBEE_TX_PIN;
+    diag["rx_pin"]    = XBEE_RX_PIN;
+    diag["baud"]      = XBEE_BAUD;
+
+    // GPIO state readback (logic level on the pin RIGHT NOW)
+    diag["gpio_rx_state"] = digitalRead(XBEE_RX_PIN);
+    diag["gpio_tx_state"] = digitalRead(XBEE_TX_PIN);
+
+    // Raw byte hex dump (first N bytes received)
+    if (rawSniffCount > 0) {
+        char hexStr[RAW_SNIFF_SIZE * 3 + 1];
+        hexStr[0] = '\0';
+        for (int i = 0; i < rawSniffCount && i < RAW_SNIFF_SIZE; i++) {
+            char tmp[4];
+            snprintf(tmp, sizeof(tmp), "%02X ", rawSniffBuf[i]);
+            strcat(hexStr, tmp);
+        }
+        diag["raw_hex_dump"] = hexStr;
+        diag["raw_sniff_count"] = rawSniffCount;
+    } else {
+        diag["raw_hex_dump"] = "(no bytes received)";
+        diag["raw_sniff_count"] = 0;
+    }
+
+    // Connection assessment
+    bool txWorks = (txStatusOk > 0);
+    bool rxWorks = (rxFramesParsed > 0);
+    bool anyRx   = (totalRxBytes > 0);
+
+    if (txWorks && rxWorks) {
+        diag["assessment"] = "FULLY WORKING — TX and RX both operational";
+    } else if (txWorks && anyRx && !rxWorks) {
+        diag["assessment"] = "PARTIAL — TX OK, receiving bytes but can't parse frames. "
+                             "Check XBee AP=1 (API mode), or data may be AT mode text.";
+    } else if (txWorks && !anyRx) {
+        diag["assessment"] = "TX ONLY — XBee acknowledges our frames, but no RF data received. "
+                             "Check that the remote XBee is powered, same PAN ID, and sending.";
+    } else if (!txWorks && totalTxBytes > 0) {
+        diag["assessment"] = "NO TX STATUS — sent bytes but got no 0x8B acknowledgment. "
+                             "Check XBee is in AP=1 mode and TX→DIN wiring.";
+    } else {
+        diag["assessment"] = "NO COMMUNICATION — check wiring, XBee power, and AP=1 setting.";
+    }
+}
+
+bool xbeeRunLoopbackTest(String& result) {
+    // Temporarily disconnect callback to avoid protocol handling
+    XBeeReceiveCB savedCb = rxCallback;
+    rxCallback = nullptr;
+
+    // Flush any pending RX data
+    while (xbeeSerial.available()) xbeeSerial.read();
+
+    // Write a unique test pattern (NOT a valid API frame — just raw bytes)
+    const uint8_t pattern[] = { 0xAA, 0x55, 0xBB, 0x42 };
+    xbeeSerial.write(pattern, 4);
+    xbeeSerial.flush();
+
+    // Wait for loopback (if TX↔RX are bridged)
+    delay(50);
+
+    int readBack = 0;
+    bool match = true;
+    while (xbeeSerial.available() && readBack < 4) {
+        uint8_t b = xbeeSerial.read();
+        if (b != pattern[readBack]) match = false;
+        readBack++;
+    }
+
+    // Restore callback
+    rxCallback = savedCb;
+
+    if (readBack == 4 && match) {
+        result = "PASS — UART loopback working (read back 4/4 bytes matching). "
+                 "Remove the TX↔RX bridge and reconnect XBee.";
+        return true;
+    } else if (readBack > 0) {
+        result = "PARTIAL — read " + String(readBack) + "/4 bytes back (mismatch). "
+                 "UART partially working.";
+        return false;
+    } else {
+        result = "FAIL — wrote 4 bytes, read 0 back. Either TX↔RX are not bridged "
+                 "(connect GPIO " + String(XBEE_TX_PIN) + " to GPIO " +
+                 String(XBEE_RX_PIN) + " with a jumper wire), or UART2 is not functioning.";
+        return false;
+    }
 }

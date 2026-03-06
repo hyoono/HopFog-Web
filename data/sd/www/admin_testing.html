@@ -73,10 +73,49 @@
                             </button>
                         </div>
                         <div class="card-body p-0">
-                            <!-- Diagnostics bar -->
-                            <div class="px-3 py-2 bg-light border-bottom small">
-                                <strong>Diagnostics:</strong>
-                                <span id="diagStatus" class="text-muted">Loading...</span>
+                            <!-- Diagnostics summary bar -->
+                            <div class="px-3 py-2 bg-light border-bottom">
+                                <div class="row small">
+                                    <div class="col-md-4">
+                                        <strong>TX Direction</strong> (ESP32 → XBee):<br>
+                                        <span id="diagTx" class="text-muted">Loading...</span>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <strong>RX Direction</strong> (XBee → ESP32):<br>
+                                        <span id="diagRx" class="text-muted">Loading...</span>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <strong>Assessment:</strong><br>
+                                        <span id="diagAssessment" class="text-muted">Loading...</span>
+                                    </div>
+                                </div>
+                                <div class="mt-2" id="diagDetails" style="display:none;">
+                                    <hr class="my-1">
+                                    <div class="row small">
+                                        <div class="col-md-6">
+                                            <strong>GPIO States:</strong> <span id="diagGpio"></span><br>
+                                            <strong>Raw Hex Dump:</strong> <code id="diagRawHex" class="small"></code>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <strong>TX Bytes:</strong> <span id="diagTxBytes">0</span> |
+                                            <strong>RX Bytes:</strong> <span id="diagRxBytes">0</span><br>
+                                            <strong>TX Status OK:</strong> <span id="diagTxOk">0</span> |
+                                            <strong>TX Status Fail:</strong> <span id="diagTxFail">0</span> |
+                                            <strong>RX Frames:</strong> <span id="diagRxFrames">0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-1">
+                                    <button class="btn btn-sm btn-outline-secondary py-0" onclick="toggleDiagDetails()">
+                                        <i class="fas fa-info-circle me-1"></i><span id="diagToggleLabel">Show Details</span>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-info py-0 ms-1" onclick="runDiagnostics()">
+                                        <i class="fas fa-stethoscope me-1"></i>Run Diagnostics
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-warning py-0 ms-1" onclick="runLoopbackTest()">
+                                        <i class="fas fa-exchange-alt me-1"></i>UART Loopback Test
+                                    </button>
+                                </div>
                             </div>
 
                             <!-- Console output -->
@@ -331,20 +370,11 @@
             .then(data => {
                 const con = document.getElementById('xbeeConsole');
                 const bytesEl = document.getElementById('rxByteCount');
-                const diagEl = document.getElementById('diagStatus');
 
                 bytesEl.textContent = data.rx_bytes_total + ' bytes received';
 
-                // Diagnostics
-                if (data.rx_bytes_total === 0) {
-                    diagEl.innerHTML = '<span class="text-danger"><i class="fas fa-exclamation-triangle me-1"></i>' +
-                        'No bytes received from XBee serial. Check wiring: ESP32 GPIO ' + document.getElementById('xbeeRxPin').textContent +
-                        ' must be connected to XBee DOUT (pin 2).</span>';
-                } else {
-                    diagEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>' +
-                        'Serial link active. Uptime: ' + formatMs(data.uptime_ms) +
-                        '. Total RX: ' + data.rx_bytes_total + ' bytes.</span>';
-                }
+                // Update diagnostics from embedded diag object
+                if (data.diag) updateDiagDisplay(data.diag);
 
                 if (!data.log || data.log.length === 0) {
                     con.innerHTML = '<div class="text-muted">[No events yet. Send a test message or wait for incoming data.]</div>';
@@ -372,8 +402,105 @@
                 consoleHasData = true;
             })
             .catch(err => {
-                document.getElementById('diagStatus').innerHTML =
+                document.getElementById('diagAssessment').innerHTML =
                     '<span class="text-danger">Failed to fetch log: ' + escHtml(err.message) + '</span>';
+            });
+    }
+
+    function updateDiagDisplay(d) {
+        // TX direction
+        const txEl = document.getElementById('diagTx');
+        if (d.tx_status_ok > 0) {
+            txEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Working</span>' +
+                ' (' + d.tx_bytes + ' B sent, ' + d.tx_status_ok + ' ACK)';
+        } else if (d.tx_bytes > 0) {
+            txEl.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-circle"></i> Sent ' +
+                d.tx_bytes + ' B, no ACK</span>';
+        } else {
+            txEl.innerHTML = '<span class="text-muted"><i class="fas fa-minus-circle"></i> No data sent yet</span>';
+        }
+
+        // RX direction
+        const rxEl = document.getElementById('diagRx');
+        if (d.rx_frames_parsed > 0) {
+            rxEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Working</span>' +
+                ' (' + d.rx_bytes + ' B, ' + d.rx_frames_parsed + ' frames)';
+        } else if (d.rx_bytes > 0) {
+            rxEl.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-circle"></i> ' +
+                d.rx_bytes + ' B received but 0 frames parsed</span>';
+        } else {
+            rxEl.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> No bytes received</span>';
+        }
+
+        // Assessment
+        const assessEl = document.getElementById('diagAssessment');
+        if (d.rx_frames_parsed > 0 && d.tx_status_ok > 0) {
+            assessEl.innerHTML = '<span class="text-success">' + escHtml(d.assessment) + '</span>';
+        } else if (d.rx_bytes > 0 || d.tx_bytes > 0) {
+            assessEl.innerHTML = '<span class="text-warning">' + escHtml(d.assessment) + '</span>';
+        } else {
+            assessEl.innerHTML = '<span class="text-danger">' + escHtml(d.assessment) + '</span>';
+        }
+
+        // Detail fields
+        document.getElementById('diagGpio').innerHTML =
+            'RX(GPIO' + d.rx_pin + ')=' + (d.gpio_rx_state ? 'HIGH' : 'LOW') +
+            ', TX(GPIO' + d.tx_pin + ')=' + (d.gpio_tx_state ? 'HIGH' : 'LOW');
+        document.getElementById('diagRawHex').textContent = d.raw_hex_dump || '(none)';
+        document.getElementById('diagTxBytes').textContent = d.tx_bytes;
+        document.getElementById('diagRxBytes').textContent = d.rx_bytes;
+        document.getElementById('diagTxOk').textContent = d.tx_status_ok;
+        document.getElementById('diagTxFail').textContent = d.tx_status_fail;
+        document.getElementById('diagRxFrames').textContent = d.rx_frames_parsed;
+    }
+
+    function toggleDiagDetails() {
+        const el = document.getElementById('diagDetails');
+        const label = document.getElementById('diagToggleLabel');
+        if (el.style.display === 'none') {
+            el.style.display = 'block';
+            label.textContent = 'Hide Details';
+        } else {
+            el.style.display = 'none';
+            label.textContent = 'Show Details';
+        }
+    }
+
+    function runDiagnostics() {
+        fetch('/api/xbee/diagnostics', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(d => {
+                updateDiagDisplay(d);
+                document.getElementById('diagDetails').style.display = 'block';
+                document.getElementById('diagToggleLabel').textContent = 'Hide Details';
+            })
+            .catch(err => alert('Failed: ' + err.message));
+    }
+
+    function runLoopbackTest() {
+        // Fetch pin config from status endpoint for accurate dialog
+        fetch('/api/xbee/status', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(cfg => {
+                if (!confirm('UART Loopback Test\n\n' +
+                    'This test verifies the ESP32 UART hardware works.\n\n' +
+                    'IMPORTANT: Disconnect the XBee first, then connect a jumper wire\n' +
+                    'from GPIO ' + cfg.tx_pin + ' (TX) directly to GPIO ' + cfg.rx_pin + ' (RX).\n\n' +
+                    'Press OK to run the test.')) return;
+
+                fetch('/api/xbee/loopback-test', {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                })
+                .then(r => r.json())
+                .then(data => {
+                    alert((data.success ? '✅ ' : '❌ ') + data.result);
+                    refreshLog();
+                })
+                .catch(err => alert('Network error: ' + err.message));
+            })
+            .catch(() => {
+                alert('Could not fetch pin configuration.');
             });
     }
 

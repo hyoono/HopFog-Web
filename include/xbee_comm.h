@@ -75,4 +75,15 @@ void xbeeGetLog(JsonArray& arr);
 /// (useful for diagnostics — if 0, the ESP32 isn't reading from XBee at all).
 unsigned long xbeeGetRxByteCount();
 
+/// Populate a JsonObject with comprehensive diagnostics:
+/// TX/RX byte counts, frame counts, GPIO states, raw hex dump,
+/// and a human-readable connection assessment.
+void xbeeGetDiagnostics(JsonObject& diag);
+
+/// Run a UART loopback test: writes 4 test bytes and tries to read them
+/// back. Requires TX pin to be physically jumpered to RX pin.
+/// Returns true if all 4 bytes were read back correctly.
+/// Stores a human-readable result message in `result`.
+bool xbeeRunLoopbackTest(String& result);
+
 #endif // XBEE_COMM_H
