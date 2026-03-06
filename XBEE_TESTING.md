@@ -121,8 +121,25 @@ Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 
 ## Step 4: Wire XBee #1 to ESP32
 
-Both ESP32-CAM and generic ESP32 use **UART2 on GPIO 13/12**.
-This keeps UART0 (Serial Monitor) free for debug output.
+UART0 (Serial Monitor) stays free for debug output on all boards.
+
+### ESP32-CAM (SPI SD mode)
+
+When using SPI-based SD card access (recommended), **GPIO 4 and 12 are free**:
+
+```
+ESP32 GPIO  4 (TX) ──→ XBee DIN  (pin 3)
+ESP32 GPIO 12 (RX) ←── XBee DOUT (pin 2)
+ESP32 3.3V         ──→ XBee VCC  (pin 1)
+ESP32 GND          ──→ XBee GND  (pin 10)
+```
+
+> **Note:** GPIO 4 has the on-board flash LED connected via a MOSFET (active-high).
+> UART idle state is HIGH, so the LED stays ON when XBee is idle and
+> flickers during transmissions. This is cosmetic only — it does not
+> affect signal quality. You can desolder the LED if it bothers you.
+
+### Generic ESP32 (SPI SD module)
 
 ```
 ESP32 GPIO 13 (TX) ──→ XBee DIN  (pin 3)

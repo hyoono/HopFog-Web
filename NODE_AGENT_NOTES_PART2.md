@@ -301,7 +301,8 @@ bool writeJsonFile(const char* path, JsonDocument& doc);
 
 bool initSDCard() {
 #ifdef ESP32CAM_SPI_SD
-    SPIClass spiSD(HSPI);
+    // Static so the SPI bus object persists (SD library holds a reference)
+    static SPIClass spiSD(HSPI);
     spiSD.begin(SD_SPI_CLK, SD_SPI_MISO, SD_SPI_MOSI, SD_CS_PIN);
     if (!SD.begin(SD_CS_PIN, spiSD)) {
         Serial.println("[SD] SPI SD mount failed!");

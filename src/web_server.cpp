@@ -7,13 +7,8 @@
 #include "config.h"
 #include "sd_storage.h"
 
-#ifdef USE_SD_MMC
-  #include <SD_MMC.h>
-  #define SD_FS SD_MMC
-#else
-  #include <SD.h>
-  #define SD_FS SD
-#endif
+#include <SD.h>
+#define SD_FS SD
 
 // ── MIME type helper ────────────────────────────────────────────────
 

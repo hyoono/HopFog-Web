@@ -27,18 +27,21 @@
 // 1. SPI mode (default) — for generic ESP32 + external SD card module
 //    Wiring: CS→GPIO 5, MOSI→23, MISO→19, CLK→18
 //
-// 2. SD_MMC 1-bit mode — for ESP32-CAM with built-in SD card slot
+// 2. SPI mode for ESP32-CAM — uses the built-in SD card slot via SPI
+//    (NOT SD_MMC) to avoid GPIO 12/13 conflicts with UART2/XBee.
 //    Enabled automatically when building with: pio run -e esp32cam
-//    No wiring needed (on-board slot uses GPIO 2, 14, 15)
+//    The on-board SD slot is hardware-wired: CS=13, CLK=14, MISO=2, MOSI=15
 //
-#ifdef USE_SD_MMC
-  // ESP32-CAM built-in SD slot — 1-bit SD_MMC mode
-  // GPIO 4 is the on-board flash LED; keep it OFF to avoid SD conflicts
-  #define ESP32CAM_FLASH_PIN  4
+#ifdef ESP32CAM_SPI_SD
+  // ESP32-CAM built-in SD slot — SPI mode (frees GPIO 4 and 12 for XBee)
+  #define SD_CS_PIN       13   // SD DAT3/CS — hardware-wired on ESP32-CAM
+  #define SD_SPI_CLK      14   // SD CLK — hardware-wired
+  #define SD_SPI_MISO      2   // SD DAT0/MISO — hardware-wired
+  #define SD_SPI_MOSI     15   // SD CMD/MOSI — hardware-wired
 #else
   // Generic ESP32 + external SPI SD module
   #define SD_CS_PIN   5
-  // MOSI = GPIO 23, MISO = GPIO 19, CLK = GPIO 18 (defaults)
+  // MOSI = GPIO 23, MISO = GPIO 19, CLK = GPIO 18 (VSPI defaults)
 #endif
 
 // ── SD Card Paths ───────────────────────────────────────────────────
@@ -55,14 +58,25 @@
 #define SD_DMS_FILE     "/db/direct_messages.json"
 
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
-// XBee always uses UART2 (Serial2) so UART0 stays free for Serial Monitor.
-// ESP32-CAM: GPIO 12 and 13 are free in 1-bit SD_MMC mode.
+// XBee uses UART2 (Serial2) so UART0 stays free for Serial Monitor.
+//
+// ESP32-CAM: GPIO 4 and 12 are free when using SPI SD (not SD_MMC).
+//   GPIO 4  = XBee TX (→ DIN)  — also has flash LED, will flicker during TX
+//   GPIO 12 = XBee RX (← DOUT) — was SD_MMC DAT2, now free with SPI SD
+//
+// Generic ESP32: GPIO 13/12 (no SD_MMC conflict).
+//
 // Note: GPIO 12 is a boot-strapping pin.  If the ESP32 fails to boot
 //       with the XBee connected, disconnect XBee DOUT during power-on
 //       or burn the VDD_SDIO efuse to force 3.3 V (one-time, permanent).
 #define XBEE_BAUD     9600 // XBee factory default baud rate
-#define XBEE_TX_PIN     13   // ESP32 TX → XBee DIN  (pin 3)
-#define XBEE_RX_PIN     12   // ESP32 RX ← XBee DOUT (pin 2)
+#ifdef ESP32CAM_SPI_SD
+  #define XBEE_TX_PIN    4   // ESP32 TX → XBee DIN  (pin 3)
+  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2)
+#else
+  #define XBEE_TX_PIN   13   // ESP32 TX → XBee DIN  (pin 3)
+  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2)
+#endif
 
 // ── Auth ────────────────────────────────────────────────────────────
 #define TOKEN_LENGTH      32

@@ -10,11 +10,7 @@
 #include "node_protocol.h"
 
 #include <ArduinoJson.h>
-#ifdef USE_SD_MMC
-  #include <SD_MMC.h>
-#else
-  #include <SD.h>
-#endif
+#include <SD.h>
 #include <time.h>
 #include <sys/time.h>
 

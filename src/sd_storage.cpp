@@ -5,14 +5,9 @@
 #include "sd_storage.h"
 #include "config.h"
 
-#ifdef USE_SD_MMC
-  #include <SD_MMC.h>
-  #define SD_FS SD_MMC
-#else
-  #include <SD.h>
-  #include <SPI.h>
-  #define SD_FS SD
-#endif
+#include <SD.h>
+#include <SPI.h>
+#define SD_FS SD
 
 #include <ArduinoJson.h>
 #include <time.h>
@@ -49,19 +44,22 @@ static void seedFileIfMissing(const char *path) {
 bool initSDCard() {
     Serial.println("[SD] Initialising SD card …");
 
-#ifdef USE_SD_MMC
-    // ESP32-CAM: use 1-bit SD_MMC mode (GPIO 2=DATA0, 14=CLK, 15=CMD)
-    // Disable the on-board flash LED (GPIO 4) to avoid SD bus conflicts
-    pinMode(ESP32CAM_FLASH_PIN, OUTPUT);
-    digitalWrite(ESP32CAM_FLASH_PIN, LOW);
-
-    if (!SD_MMC.begin("/sdcard", true)) {   // true = 1-bit mode
-        Serial.println("[SD] SD_MMC mount failed!");
+#ifdef ESP32CAM_SPI_SD
+    // ESP32-CAM: use SPI mode to access the built-in SD card slot.
+    // This avoids the SD_MMC peripheral which permanently claims
+    // GPIO 12/13 via IOMUX, preventing UART2 (XBee) from using them.
+    // SPI pins: CLK=14, MISO=2, MOSI=15, CS=13 (all hardware-wired).
+    // Static so the SPI bus object persists after this function returns
+    // (SD library holds a reference to it).
+    static SPIClass spiSD(HSPI);
+    spiSD.begin(SD_SPI_CLK, SD_SPI_MISO, SD_SPI_MOSI, SD_CS_PIN);
+    if (!SD.begin(SD_CS_PIN, spiSD)) {
+        Serial.println("[SD] SPI SD mount failed!");
         return false;
     }
-    Serial.println("[SD] SD_MMC 1-bit mode — mounted OK");
+    Serial.println("[SD] SPI mode (HSPI) — mounted OK");
 #else
-    // Generic ESP32: SPI mode with configurable CS pin
+    // Generic ESP32: SPI mode with configurable CS pin (VSPI defaults)
     if (!SD.begin(SD_CS_PIN)) {
         Serial.println("[SD] Mount failed!");
         return false;

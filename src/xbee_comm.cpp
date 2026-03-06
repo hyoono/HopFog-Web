@@ -5,8 +5,11 @@
  * JSON payloads are wrapped in 0x10 Transmit Request frames for
  * sending, and extracted from 0x90 Receive Packet frames on receive.
  *
- * Always uses UART2 (Serial2) on GPIO 13/12 so that UART0 (Serial)
- * remains available for Serial Monitor debug output.
+ * ESP32-CAM: uses UART2 on GPIO 4 (TX) and GPIO 12 (RX).
+ *   These pins are free because the SD card uses SPI mode (not SD_MMC).
+ * Generic ESP32: uses UART2 on GPIO 13 (TX) and GPIO 12 (RX).
+ *
+ * UART0 stays free for Serial Monitor debug output on both boards.
  *
  * Includes a ring-buffer event log that is exposed via /api/xbee/rx-log
  * so the web admin testing page can show a live "serial monitor".
@@ -15,7 +18,6 @@
 #include "xbee_comm.h"
 #include "config.h"
 #include <driver/uart.h>   // for uart_set_pin() explicit pin claim
-#include <driver/gpio.h>   // for gpio_reset_pin() to detach from SD_MMC IOMUX
 
 // ── Internal state ──────────────────────────────────────────────────
 static HardwareSerial& xbeeSerial = Serial2;
@@ -69,19 +71,9 @@ static uint8_t  rxChecksum  = 0;
 // ── Public API ──────────────────────────────────────────────────────
 
 void xbeeInit() {
-    // On ESP32-CAM, SD_MMC.begin() configures GPIO 12/13 via IOMUX as
-    // HS2_DATA2/DATA3, even in 1-bit mode.  IOMUX takes priority over
-    // the GPIO matrix that UART2 uses.  gpio_reset_pin() switches the
-    // pin back to GPIO function so UART2 can claim it.
-#ifdef USE_SD_MMC
-    gpio_reset_pin(GPIO_NUM_12);   // detach from HS2_DATA2 IOMUX
-    gpio_reset_pin(GPIO_NUM_13);   // detach from HS2_DATA3 IOMUX
-    Serial.println("[XBee] Reset GPIO 12/13 from SD_MMC IOMUX to GPIO function");
-#endif
-
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
 
-    // Belt-and-suspenders: explicitly route UART2 signals to these pins
+    // Explicitly route UART2 signals to our chosen GPIO pins
     uart_set_pin(UART_NUM_2, XBEE_TX_PIN, XBEE_RX_PIN,
                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
