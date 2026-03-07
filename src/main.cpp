@@ -69,6 +69,19 @@ static void startAP() {
 }
 
 // ── Setup ───────────────────────────────────────────────────────────
+//
+// INIT ORDER — matches the working test project (XBEE_COMM_TEST.md):
+//
+//   1. Flash LED off
+//   2. Suppress ESP-IDF log output (UART0 is XBee)
+//   3. SD card  ← must be BEFORE xbeeInit() so UART0 gets the "last word"
+//   4. Auth
+//   5. WiFi AP
+//   6. xbeeInit() + callback  ← AFTER SD/WiFi, so Serial.begin(9600)
+//                                reconfigures UART0 after any SPI/WiFi side effects
+//   7. DNS + Web server
+//   8. delay(2000)  ← give XBee time to form/join network
+//
 void setup() {
     // Disable ESP32-CAM flash LED immediately (GPIO 4 = flash LED transistor)
     pinMode(4, OUTPUT);
@@ -90,37 +103,30 @@ void setup() {
     dbgprintln("   HopFog-Web  ESP32 Firmware");
     dbgprintln("========================================");
 
-    // 1. XBee S2C (ZigBee) — init FIRST, before SD/WiFi/web server
-    //    so UART0 is configured at 9600 baud immediately and the XBee
-    //    can start receiving valid frames as soon as a node sends one.
-    xbeeInit();
-
-    // 2. SD card
+    // 1. SD card — init BEFORE xbeeInit() so that SPI bus setup
+    //    completes before we configure UART0.  The SPI library's
+    //    spiStartBus() and gpio_matrix routing may have side effects
+    //    on the UART peripheral.  By initialising SD first, the
+    //    subsequent Serial.begin(9600) in xbeeInit() reconfigures
+    //    UART0 cleanly after any SPI changes.
     if (!initSDCard()) {
         dbgprintln("[FATAL] SD card init failed – halting.");
         while (true) { delay(1000); }
     }
 
-    // 3. Auth subsystem
+    // 2. Auth subsystem
     authInit();
 
-    // 4. WiFi access point
+    // 3. WiFi access point
     startAP();
 
-    // 5. Captive-portal DNS — resolve ALL domains to the AP IP
-    dnsServer.setTTL(300);
-    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
-    dbgprintf("[DNS] Captive portal active — http://%s → %s\n",
-              CUSTOM_DOMAIN, WiFi.softAPIP().toString().c_str());
+    // 4. XBee S2C (ZigBee) — init AFTER SD card and WiFi so that
+    //    Serial.begin(9600) has the "last word" on UART0 configuration.
+    //    The working test project also sets up WiFi before the main loop.
+    xbeeInit();
 
-    // 6. Web server (static files + API)
-    setupWebServer(server);
-    registerApiRoutes(server);
-    server.begin();
-    dbgprintf("[HTTP] Server listening on port %d\n", HTTP_PORT);
-    dbgprintf("[HTTP] Open http://%s in your browser\n", CUSTOM_DOMAIN);
-
-    // 7. Node protocol handler + XBee receive callback
+    // 5. Node protocol handler + XBee receive callback
+    //    Set callback immediately after xbeeInit() (matches test project).
     nodeProtocolInit();
     xbeeSetReceiveCallback([](const char* line, size_t len) {
         // Try to handle as JSON node command first
@@ -129,6 +135,25 @@ void setup() {
             dbgprintf("[XBee] RX (%d bytes): %s\n", (int)len, line);
         }
     });
+
+    // 6. Captive-portal DNS — resolve ALL domains to the AP IP
+    dnsServer.setTTL(300);
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+    dbgprintf("[DNS] Captive portal active — http://%s → %s\n",
+              CUSTOM_DOMAIN, WiFi.softAPIP().toString().c_str());
+
+    // 7. Web server (static files + API)
+    setupWebServer(server);
+    registerApiRoutes(server);
+    server.begin();
+    dbgprintf("[HTTP] Server listening on port %d\n", HTTP_PORT);
+    dbgprintf("[HTTP] Open http://%s in your browser\n", CUSTOM_DOMAIN);
+
+    // 8. Wait for XBee network to stabilise.
+    //    The working test project has delay(3000) here.
+    //    The coordinator XBee needs 2-4 seconds to form the network;
+    //    the router XBee needs time to discover and join it.
+    delay(2000);
 }
 
 // ── Loop ────────────────────────────────────────────────────────────

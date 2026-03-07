@@ -36,6 +36,7 @@ static unsigned long   rxFramesParsed    = 0;
 static unsigned long   txStatusOk        = 0;
 static unsigned long   txStatusFail      = 0;
 static unsigned long   selfEchoCount     = 0;
+static unsigned long   loopCallCount     = 0;
 
 // Raw byte sniffer — captures first N bytes for hex dump debugging
 #define RAW_SNIFF_SIZE 64
@@ -77,7 +78,12 @@ static uint8_t  rxChecksum  = 0;
 
 void xbeeInit() {
 #ifdef XBEE_USES_UART0
-    // UART0 on native GPIO 1/3 — just set baud rate, IOMUX handles routing
+    // Fully reset UART0 before reconfiguring.
+    // The SD card SPI init (spiSD.begin) and WiFi driver may have
+    // affected UART0 state.  Calling end() then begin() ensures a
+    // clean start — matching the working test project behaviour.
+    xbeeSerial.end();
+    delay(10);   // let UART hardware settle
     xbeeSerial.begin(XBEE_BAUD);
 #else
     // Generic ESP32: use UART2 with explicit pin assignment
@@ -151,6 +157,7 @@ void xbeeSetReceiveCallback(XBeeReceiveCB cb) {
 }
 
 void xbeeProcessIncoming() {
+    loopCallCount++;
     while (xbeeSerial.available()) {
         uint8_t b = xbeeSerial.read();
         totalRxBytes++;
@@ -293,6 +300,7 @@ void xbeeGetDiagnostics(JsonObject& diag) {
     diag["tx_status_ok"]       = txStatusOk;
     diag["tx_status_fail"]     = txStatusFail;
     diag["self_echo_count"]    = selfEchoCount;
+    diag["loop_calls"]         = loopCallCount;
     diag["uptime_ms"]          = millis();
 
     // Pin configuration

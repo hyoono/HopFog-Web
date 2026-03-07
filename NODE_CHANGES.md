@@ -814,3 +814,136 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
 ---
 
 *End of Change #4*
+
+---
+
+## Change #5: Fix Init Order — xbeeInit() AFTER SD Card (Critical)
+
+**Date:** 2026-03-07
+**Priority:** CRITICAL — fixes XBee RX not receiving any bytes
+**Branch:** `copilot/setup-and-xbee-driver`
+**Depends on:** Changes #1, #3, #4
+
+### Problem
+
+The XBee test project (XBEE_COMM_TEST.md, no SD card) communicates
+perfectly.  The full node project (with SD card) gets 0 RX bytes.
+Same ESP32-CAM, same XBee, same wiring.  The ONLY major hardware
+difference is the SD card SPI initialization.
+
+Analysis shows the SPI bus initialization (`spiSD.begin(14,2,15,13)`)
+may affect UART0 state when called AFTER `Serial.begin(9600)`.  Even
+though they use different pins, the SPI peripheral setup involves
+APB bus configuration and interrupt controller changes that can have
+side effects on UART0.
+
+### Solution
+
+1. Move `initSDCard()` to BEFORE `xbeeInit()` so UART0 gets the "last word"
+2. Add `Serial.end()` before `Serial.begin(9600)` to fully reset UART0
+3. Add `delay(2000)` after WiFi for XBee network stabilization
+4. Set XBee callback immediately after `xbeeInit()`
+
+### File Changes
+
+#### 1. `src/main.cpp` — New init order
+
+Replace the entire `setup()` function with:
+
+```cpp
+void setup() {
+    // Disable ESP32-CAM flash LED
+    pinMode(FLASH_LED_PIN, OUTPUT);
+    digitalWrite(FLASH_LED_PIN, LOW);
+
+#ifdef XBEE_USES_UART0
+    esp_log_level_set("*", ESP_LOG_NONE);
+#else
+    Serial.begin(115200);
+    delay(500);
+#endif
+
+    // 1. SD card FIRST — before xbeeInit() so SPI init completes
+    //    before we configure UART0
+    if (!initSDCard()) {
+        dbgprintln("[FATAL] SD card init failed – halting.");
+        while (true) delay(1000);
+    }
+
+    // 2. WiFi access point
+    dbgprintf("[WiFi] Starting AP \"%s\"\n", AP_SSID);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONN);
+    delay(100);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    dbgprintf("[WiFi] AP running — IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+    // 3. XBee — init AFTER SD and WiFi so Serial.begin(9600) has the
+    //    "last word" on UART0 configuration
+    xbeeInit();
+
+    // 4. Node client + XBee callback (immediately after xbeeInit)
+    nodeClientInit();
+    xbeeSetReceiveCallback([](const char* payload, size_t len) {
+        if (!nodeClientHandleCommand(payload, len)) {
+            dbgprintf("[XBee] Unhandled: %.80s\n", payload);
+        }
+    });
+
+    // 5. DNS captive portal
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+    dbgprintf("[DNS] Captive portal running\n");
+
+    // 6. Web server
+    setupWebServer(server);
+    server.begin();
+    dbgprintln("[Web] Server started on port 80");
+
+    // 7. Wait for XBee network to stabilise (coordinator needs 2-4s
+    //    to form network, router needs time to join)
+    delay(2000);
+
+    dbgprintln("[Node] Setup complete — starting REGISTER cycle");
+}
+```
+
+#### 2. `src/xbee_comm.cpp` — Reset UART0 before init
+
+Replace `xbeeInit()` with:
+
+```cpp
+void xbeeInit() {
+    // Fully reset UART0 before reconfiguring.
+    // The SD card SPI init and WiFi driver may have affected UART0 state.
+    // Calling end() then begin() ensures a clean start.
+    xbeeSerial.end();
+    delay(10);
+    xbeeSerial.begin(XBEE_BAUD);
+
+    dbgprintf("[XBee] UART0 started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
+              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+}
+```
+
+### Verification Checklist
+
+- [ ] Apply changes to `src/main.cpp` and `src/xbee_comm.cpp`
+- [ ] Build: `pio run` — 0 errors, 0 warnings
+- [ ] Flash to ESP32-CAM
+- [ ] Open WiFi `HopFog-Node-01` → `http://192.168.4.1/status`
+- [ ] On admin's testing page, check XBee serial monitor for RX bytes > 0
+
+### Debugging: If RX is still 0
+
+If after these changes the admin's diagnostics still show `rx_bytes: 0`:
+
+1. **Check `loop_calls`** in diagnostics — if it's 0, `loop()` isn't running (firmware stuck in setup)
+2. **Swap XBee modules** — try the coordinator XBee on the node and vice versa
+3. **Check XBee LED** — the XBee's ASSOC LED should blink (network joined). Solid = not joined.
+4. **Verify XCTU config** — both modules must have AP=1, same PAN ID (ID), BD=3 (9600)
+5. **Verify wiring** — ESP32 GPIO 1 (TX) → XBee DIN (pin 3), ESP32 GPIO 3 (RX) ← XBee DOUT (pin 2)
+6. **Test with XCTU** — disconnect ESP32, connect coordinator XBee to USB adapter, use XCTU console to send a test frame. If the router XBee receives it, the XBee network is working.
+
+---
+
+*End of Change #5*
