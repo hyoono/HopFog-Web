@@ -11,16 +11,14 @@
  *   BD  = 3 (9600 baud)
  *   ID  = same PAN ID on all modules
  *
- * Uses UART2 (Serial2) so that UART0 (Serial) stays free for
- * Serial Monitor debug output.
- *
- * ESP32-CAM wiring (SPI SD mode — GPIO 4 and 12 are free):
- *   ESP32 GPIO  4 (TX) → XBee DIN   (pin 3)
+ * ESP32-CAM:  Uses UART1 (Serial1) to avoid PSRAM GPIO 16/17 conflict.
+ *   ESP32 GPIO  3 (TX) → XBee DIN   (pin 3)
  *   ESP32 GPIO 12 (RX) ← XBee DOUT  (pin 2)
  *   ESP32 3.3 V         → XBee VCC   (pin 1)
  *   ESP32 GND            → XBee GND   (pin 10)
+ *   (GPIO 4 set LOW to disable flash LED — do NOT connect to XBee)
  *
- * Generic ESP32 wiring:
+ * Generic ESP32:  Uses UART2 (Serial2).
  *   ESP32 GPIO 13 (TX) → XBee DIN   (pin 3)
  *   ESP32 GPIO 12 (RX) ← XBee DOUT  (pin 2)
  */

@@ -69,6 +69,10 @@ static void startAP() {
 
 // ── Setup ───────────────────────────────────────────────────────────
 void setup() {
+    // Disable ESP32-CAM flash LED immediately (GPIO 4 = flash LED transistor)
+    pinMode(4, OUTPUT);
+    digitalWrite(4, LOW);
+
     Serial.begin(115200);
     delay(500);
     Serial.println("\n========================================");

@@ -58,21 +58,26 @@
 #define SD_DMS_FILE     "/db/direct_messages.json"
 
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
-// XBee uses UART2 (Serial2) so UART0 stays free for Serial Monitor.
 //
-// ESP32-CAM: GPIO 4 and 12 are free when using SPI SD (not SD_MMC).
-//   GPIO 4  = XBee TX (→ DIN)  — also has flash LED, will flicker during TX
-//   GPIO 12 = XBee RX (← DOUT) — was SD_MMC DAT2, now free with SPI SD
+// ESP32-CAM:  Uses UART1 (Serial1) to avoid PSRAM conflicts.
+//   GPIO  3 = XBee TX (→ DIN)  — repurposed from U0RXD (Serial input
+//             is sacrificed; Serial.println() output on GPIO 1 still works)
+//   GPIO 12 = XBee RX (← DOUT) — free with SPI SD (not SD_MMC)
+//   GPIO  4 = set LOW at boot to disable flash LED (not used for XBee)
 //
-// Generic ESP32: GPIO 13/12 (no SD_MMC conflict).
+//   IMPORTANT: Disconnect the USB-to-serial adapter before running
+//              with XBee.  GPIO 3 is shared between programming
+//              and XBee TX — having both connected causes bus contention.
+//
+// Generic ESP32:  Uses UART2 (Serial2), GPIO 13/12.
 //
 // Note: GPIO 12 is a boot-strapping pin.  If the ESP32 fails to boot
 //       with the XBee connected, disconnect XBee DOUT during power-on
 //       or burn the VDD_SDIO efuse to force 3.3 V (one-time, permanent).
 #define XBEE_BAUD     9600 // XBee factory default baud rate
 #ifdef ESP32CAM_SPI_SD
-  #define XBEE_TX_PIN    4   // ESP32 TX → XBee DIN  (pin 3)
-  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2)
+  #define XBEE_TX_PIN    3   // ESP32 TX → XBee DIN  (pin 3 on XBee)
+  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2 on XBee)
 #else
   #define XBEE_TX_PIN   13   // ESP32 TX → XBee DIN  (pin 3)
   #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2)

@@ -61,7 +61,7 @@ Use the **S2C Pro as Coordinator** (admin/ESP32 side) for maximum range, and **r
 | Item | Purpose |
 |------|---------|
 | **ESP32-CAM** (or any ESP32) | Runs HopFog firmware with XBee attached via UART |
-| **XBee S2C module #1** (Pro or regular) | Connected to the ESP32 admin (wired to UART2) |
+| **XBee S2C module #1** (Pro or regular) | Connected to the ESP32 admin (wired to UART1/2) |
 | **XBee S2C module #2** (Pro or regular) | Connected to your PC via an XBee USB explorer/adapter |
 | **XBee USB Explorer** | Sparkfun XBee Explorer, Digi XBIB-U-DEV, or similar USB adapter |
 | **XCTU** | Digi's free configuration & testing software |
@@ -76,7 +76,7 @@ Use the **S2C Pro as Coordinator** (admin/ESP32 side) for maximum range, and **r
 
 ---
 
-## Step 2: Configure XBee Module #2 (PC Side)
+## Step 2: Configure XBee Module #2 (PC/XCTU Test Side)
 
 Plug XBee #2 into the USB explorer, connect to your PC, then in XCTU:
 
@@ -88,7 +88,8 @@ Plug XBee #2 into the USB explorer, connect to your PC, then in XCTU:
 | Parameter | Setting | Description |
 |-----------|---------|-------------|
 | **ID** (PAN ID) | `1234` | Must match on all XBees |
-| **CE** (Coordinator Enable) | `Coordinator [1]` | This XBee is the coordinator |
+| **CE** (Coordinator Enable) | `Join Network [0]` | Router — simulates a node for testing |
+| **JV** (Channel Verification) | `Enabled [1]` | Join the coordinator's network automatically |
 | **AP** (API Enable) | `API enabled [1]` | API mode 1 — binary framed packets |
 | **BD** (Baud Rate) | `9600 [3]` | Must match `XBEE_BAUD` in config.h |
 
@@ -98,7 +99,7 @@ Plug XBee #2 into the USB explorer, connect to your PC, then in XCTU:
 
 ---
 
-## Step 3: Configure XBee Module #1 (ESP32 Side)
+## Step 3: Configure XBee Module #1 (ESP32 Admin Side)
 
 Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 
@@ -108,36 +109,42 @@ Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 | Parameter | Setting | Description |
 |-----------|---------|-------------|
 | **ID** (PAN ID) | `1234` | Same PAN ID as module #2 |
-| **CE** (Coordinator Enable) | `Join Network [0]` | This one is a router |
+| **CE** (Coordinator Enable) | `Coordinator [1]` | Admin is ALWAYS the coordinator |
 | **AP** (API Enable) | `API enabled [1]` | API mode 1 — binary framed packets |
 | **BD** (Baud Rate) | `9600 [3]` | Matches config.h |
 
 3. Click **"Write"** to save
 4. Unplug XBee #1 from the USB explorer and wire it to the ESP32
 
-> **Node XBees:** Configure the same way (AP=1, same PAN ID, CE=0).
+> **Node XBees:** Configure the same as Module #2 (AP=1, same PAN ID, CE=0, JV=1).
 
 ---
 
 ## Step 4: Wire XBee #1 to ESP32
 
-UART0 (Serial Monitor) stays free for debug output on all boards.
+UART0 (Serial Monitor output on GPIO 1) stays free for debug printing on all boards.
 
 ### ESP32-CAM (SPI SD mode)
 
-When using SPI-based SD card access (recommended), **GPIO 4 and 12 are free**:
+When using SPI-based SD card access (recommended), **GPIO 3 and 12 are free for XBee**:
 
 ```
-ESP32 GPIO  4 (TX) ──→ XBee DIN  (pin 3)
+ESP32 GPIO  3 (TX) ──→ XBee DIN  (pin 3)
 ESP32 GPIO 12 (RX) ←── XBee DOUT (pin 2)
 ESP32 3.3V         ──→ XBee VCC  (pin 1)
 ESP32 GND          ──→ XBee GND  (pin 10)
 ```
 
-> **Note:** GPIO 4 has the on-board flash LED connected via a MOSFET (active-high).
-> UART idle state is HIGH, so the LED stays ON when XBee is idle and
-> flickers during transmissions. This is cosmetic only — it does not
-> affect signal quality. You can desolder the LED if it bothers you.
+> **GPIO 3 is U0RXD** (Serial Monitor input). Using it for XBee TX means
+> you lose the ability to send serial commands to the ESP32, but
+> `Serial.println()` debug output on GPIO 1 (U0TXD) still works.
+>
+> **IMPORTANT:** Disconnect the USB-to-serial programming adapter before
+> running with XBee connected. GPIO 3 is shared between programming and
+> XBee TX — having both connected causes bus contention.
+>
+> **Flash LED (GPIO 4):** The firmware sets GPIO 4 LOW at boot to disable
+> the bright flash LED. Do NOT connect GPIO 4 to the XBee.
 
 ### Generic ESP32 (SPI SD module)
 
@@ -191,7 +198,7 @@ pio device monitor -b 115200
 You should see in the serial output:
 
 ```
-[XBee] UART2 started (API mode 1) — TX=GPIO13  RX=GPIO12  baud=9600
+[XBee] UART1 started (API mode 1) — TX=GPIO3  RX=GPIO12  baud=9600
 ```
 
 ---

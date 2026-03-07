@@ -338,3 +338,168 @@ If it shows `SD_MMC` or `TX=GPIO13`, the old code is still being used.
 ---
 
 *End of Change #1*
+
+---
+
+## Change #2: Fix Flash LED + Switch to UART1 + Move XBee TX (Critical)
+
+**Date:** 2026-03-07
+**Priority:** CRITICAL — fixes flash LED always on, and switches to UART1 to avoid PSRAM conflict
+**Branch:** `copilot/setup-and-xbee-driver`
+**Depends on:** Change #1 (SPI SD must be applied first)
+
+### Problems
+
+1. **Flash LED always ON:** GPIO 4 is the ESP32-CAM flash LED pin. Using it as UART TX causes the bright white LED to be permanently ON (UART idle = HIGH = LED on). Cannot be disabled in software while UART owns the pin.
+
+2. **XBee RX still not working:** UART2's default pins (GPIO 16/17) are used by PSRAM on ESP32-CAM. Even though we remap to custom pins, the UART2 peripheral initialization may conflict. Switching to UART1 avoids this entirely.
+
+3. **Coordinator clarification:** YES, the Coordinator XBee (CE=1) goes on the admin ESP32-CAM. That is correct. Nodes use Router XBees (CE=0, JV=1).
+
+### Solution
+
+Three changes that work together:
+
+1. **Move XBee TX from GPIO 4 → GPIO 3** (repurpose U0RXD)
+   - GPIO 3 was Serial Monitor RX (input). We sacrifice Serial input.
+   - `Serial.println()` output on GPIO 1 (U0TXD) still works!
+   - No flash LED issue on GPIO 3.
+
+2. **Switch from UART2 (Serial2) to UART1 (Serial1)**
+   - UART2 defaults to GPIO 16/17 (PSRAM pins on ESP32-CAM)
+   - UART1 defaults to GPIO 9/10 (flash chip, but we remap immediately)
+   - Avoids any PSRAM-related peripheral conflict.
+
+3. **Set GPIO 4 LOW at boot to disable flash LED**
+   - `pinMode(4, OUTPUT); digitalWrite(4, LOW);` at the very start of `setup()`
+
+4. **Add `gpio_reset_pin()` for both TX and RX pins before UART init**
+   - Ensures clean GPIO state by detaching from any previous peripheral
+
+### Files to Modify
+
+#### 1. `include/config.h` — Change XBee TX pin
+
+Find the XBee pin section and change XBEE_TX_PIN from 4 to 3:
+
+```cpp
+// BEFORE:
+#ifdef ESP32CAM_SPI_SD
+  #define XBEE_TX_PIN    4   // ESP32 TX → XBee DIN
+  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT
+#endif
+
+// AFTER:
+#ifdef ESP32CAM_SPI_SD
+  #define XBEE_TX_PIN    3   // ESP32 TX → XBee DIN  (repurposed from U0RXD)
+  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT
+#endif
+```
+
+#### 2. `src/xbee_comm.cpp` — Switch to UART1 and add gpio_reset_pin
+
+**Add include at top:**
+```cpp
+#include <driver/gpio.h>   // for gpio_reset_pin()
+```
+
+**Replace the HardwareSerial declaration with:**
+```cpp
+// ESP32-CAM: use UART1 — UART2 defaults to GPIO 16/17 which are PSRAM pins
+// Generic ESP32: use UART2 (no PSRAM conflict)
+#ifdef ESP32CAM_SPI_SD
+  static HardwareSerial& xbeeSerial = Serial1;
+  #define XBEE_UART_NUM UART_NUM_1
+#else
+  static HardwareSerial& xbeeSerial = Serial2;
+  #define XBEE_UART_NUM UART_NUM_2
+#endif
+```
+
+**Replace the xbeeInit() function with:**
+```cpp
+void xbeeInit() {
+    // Reset GPIO pins to ensure clean state — detaches from any
+    // previous peripheral (SPI, SD_MMC, UART0) before claiming for XBee
+    gpio_reset_pin((gpio_num_t)XBEE_TX_PIN);
+    gpio_reset_pin((gpio_num_t)XBEE_RX_PIN);
+
+    xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
+
+    // Explicitly route UART signals to our chosen GPIO pins
+    uart_set_pin(XBEE_UART_NUM, XBEE_TX_PIN, XBEE_RX_PIN,
+                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+    Serial.printf("[XBee] UART%d started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
+                  (XBEE_UART_NUM == UART_NUM_1) ? 1 : 2,
+                  XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+}
+```
+
+**Replace ALL references to `UART_NUM_2` with `XBEE_UART_NUM`** (e.g., in uart_set_pin calls).
+
+#### 3. `src/main.cpp` — Disable flash LED
+
+**Add at the very start of `setup()`, before Serial.begin():**
+```cpp
+void setup() {
+    // Disable ESP32-CAM flash LED immediately (GPIO 4 = flash LED transistor)
+    pinMode(4, OUTPUT);
+    digitalWrite(4, LOW);
+
+    Serial.begin(115200);
+    // ... rest of setup ...
+```
+
+### Physical Wiring Change
+
+**Move the wire from GPIO 4 to GPIO 3:**
+
+```
+BEFORE:                          AFTER:
+ESP32 GPIO 4 → XBee DIN         ESP32 GPIO 3 → XBee DIN
+ESP32 GPIO 12 ← XBee DOUT       ESP32 GPIO 12 ← XBee DOUT  (unchanged)
+```
+
+**IMPORTANT:** Disconnect the USB-to-serial programming adapter before running
+with XBee connected. GPIO 3 is shared between programming and XBee TX — having
+both connected causes bus contention and could damage components.
+
+### XBee Module Configuration Reminder
+
+Make sure your XBee modules are configured correctly in XCTU:
+
+| Module | CE | AP | BD | ID | JV |
+|--------|----|----|----|----|----|
+| **Admin (Coordinator)** | `1` | `1` (API mode) | `3` (9600) | `1234` | — |
+| **Node (Router)** | `0` | `1` (API mode) | `3` (9600) | `1234` | `1` |
+| **XCTU Test (Router)** | `0` | `1` (API mode) | `3` (9600) | `1234` | `1` |
+
+### Verification
+
+After flashing, the Serial Monitor should show:
+```
+[XBee] UART1 started (API mode 1) — TX=GPIO3  RX=GPIO12  baud=9600
+```
+
+The flash LED should be **OFF**.
+
+If you run the XBee diagnostics from the admin testing page:
+- TX Direction should show bytes sent (if you click Send Test)
+- RX Direction should show bytes received when the XCTU Router sends data
+
+### Checklist
+
+- [ ] `config.h`: XBEE_TX_PIN = 3 (was 4)
+- [ ] `xbee_comm.cpp`: Add `#include <driver/gpio.h>`
+- [ ] `xbee_comm.cpp`: Use `Serial1` + `UART_NUM_1` (not Serial2/UART_NUM_2)
+- [ ] `xbee_comm.cpp`: Add `gpio_reset_pin()` for both pins in xbeeInit()
+- [ ] `xbee_comm.cpp`: Replace all `UART_NUM_2` with `XBEE_UART_NUM`
+- [ ] `main.cpp`: Add `pinMode(4, OUTPUT); digitalWrite(4, LOW);` at start of setup()
+- [ ] Rewire: XBee DIN from GPIO 4 → GPIO 3
+- [ ] Disconnect USB-to-serial adapter before running
+- [ ] Build and verify no flash LED, UART1 in log output
+
+---
+
+*End of Change #2*
