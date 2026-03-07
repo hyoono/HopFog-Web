@@ -122,31 +122,25 @@ Remove XBee #1 from the ESP32, plug it into the USB explorer temporarily:
 
 ## Step 4: Wire XBee #1 to ESP32
 
-UART0 (Serial Monitor output on GPIO 1) stays free for debug printing on all boards.
+### ESP32-CAM — Uses UART0 (GPIO 1/3)
 
-### ESP32-CAM (SPI SD mode)
-
-When using SPI-based SD card access (recommended), **GPIO 3 and 12 are free for XBee**:
+The ESP32-CAM uses UART0 on its native IOMUX pins for the most reliable XBee connection. **USB Serial Monitor is NOT available** — all debug output is disabled at compile time.
 
 ```
-ESP32 GPIO  3 (TX) ──→ XBee DIN  (pin 3)
-ESP32 GPIO 12 (RX) ←── XBee DOUT (pin 2)
-ESP32 3.3V         ──→ XBee VCC  (pin 1)
-ESP32 GND          ──→ XBee GND  (pin 10)
+ESP32 GPIO 1 (U0TXD) ──→ XBee DIN  (pin 3)
+ESP32 GPIO 3 (U0RXD) ←── XBee DOUT (pin 2)
+ESP32 3.3V            ──→ XBee VCC  (pin 1)
+ESP32 GND             ──→ XBee GND  (pin 10)
 ```
 
-> **GPIO 3 is U0RXD** (Serial Monitor input). Using it for XBee TX means
-> you lose the ability to send serial commands to the ESP32, but
-> `Serial.println()` debug output on GPIO 1 (U0TXD) still works.
->
-> **IMPORTANT:** Disconnect the USB-to-serial programming adapter before
-> running with XBee connected. GPIO 3 is shared between programming and
-> XBee TX — having both connected causes bus contention.
+> **IMPORTANT:** Disconnect the XBee before uploading firmware.
+> GPIO 1/3 are shared between USB programming and XBee — having both
+> connected simultaneously causes bus contention.
 >
 > **Flash LED (GPIO 4):** The firmware sets GPIO 4 LOW at boot to disable
 > the bright flash LED. Do NOT connect GPIO 4 to the XBee.
 
-### Generic ESP32 (SPI SD module)
+### Generic ESP32 — Uses UART2 (GPIO 13/12)
 
 ```
 ESP32 GPIO 13 (TX) ──→ XBee DIN  (pin 3)
@@ -154,6 +148,8 @@ ESP32 GPIO 12 (RX) ←── XBee DOUT (pin 2)
 ESP32 3.3V         ──→ XBee VCC  (pin 1)
 ESP32 GND          ──→ XBee GND  (pin 10)
 ```
+
+USB Serial Monitor on UART0 remains available for debug output.
 
 > **Important:** XBee S2C runs on 3.3V. Do NOT connect to 5V.
 

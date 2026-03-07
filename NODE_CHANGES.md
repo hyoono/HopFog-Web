@@ -503,3 +503,141 @@ If you run the XBee diagnostics from the admin testing page:
 ---
 
 *End of Change #2*
+
+---
+
+## Change #3: Use UART0 (GPIO 1/3) for XBee — Most Reliable Option
+
+**Date:** 2026-03-07
+**Priority:** CRITICAL — replaces Changes #1 and #2 GPIO assignments
+**Branch:** `copilot/setup-and-xbee-driver`
+
+### Context
+
+After extensive testing with GPIO 12, 13, 3, 4 — all had conflicts with SD_MMC IOMUX, PSRAM, or the flash LED. **GPIO 1 (U0TXD) and GPIO 3 (U0RXD) are the only pins that reliably work** on ESP32-CAM because they are natively IOMUX-routed to UART0 — no GPIO matrix remapping needed, no conflicts with any other peripheral.
+
+**Trade-off:** USB Serial Monitor is not available. All debug output is disabled at compile time. The XBee serial monitor on the web admin testing page (`/admin/messaging/testing`) replaces the USB Serial Monitor for debugging.
+
+### What to change
+
+#### 1. `config.h` — XBee pin definitions
+
+Change the XBee pin assignments to GPIO 1/3:
+
+```cpp
+// XBee S2C (ZigBee)
+// ESP32-CAM: Uses UART0 (Serial) on native IOMUX pins.
+//   GPIO 1 = U0TXD → XBee DIN  (pin 3 on XBee module)
+//   GPIO 3 = U0RXD ← XBee DOUT (pin 2 on XBee module)
+//   IOMUX native — no GPIO matrix remapping, no conflicts.
+//   USB Serial Monitor is NOT available.
+#define XBEE_BAUD     9600
+#define XBEE_TX_PIN    1   // U0TXD → XBee DIN (IOMUX native)
+#define XBEE_RX_PIN    3   // U0RXD ← XBee DOUT (IOMUX native)
+#define XBEE_USES_UART0 1  // UART0 is XBee — serial debug disabled
+```
+
+#### 2. `config.h` — Debug macros
+
+Add these macros (used instead of `Serial.printf/println` everywhere):
+
+```cpp
+// Debug output macros — disabled when UART0 is used for XBee
+#ifdef XBEE_USES_UART0
+  #define dbgprintf(...)     do {} while(0)
+  #define dbgprintln(x)      do {} while(0)
+#else
+  #define dbgprintf(...)     Serial.printf(__VA_ARGS__)
+  #define dbgprintln(x)      Serial.println(x)
+#endif
+```
+
+#### 3. `xbee_comm.cpp` — Use UART0 (Serial)
+
+Replace the xbeeSerial reference and xbeeInit:
+
+```cpp
+// Use UART0 (Serial) — native IOMUX, most reliable
+static HardwareSerial& xbeeSerial = Serial;
+
+void xbeeInit() {
+    // UART0 on native GPIO 1/3 — just set baud rate, IOMUX handles routing
+    xbeeSerial.begin(XBEE_BAUD);
+
+    dbgprintf("[XBee] UART0 started (API mode 1) — TX=GPIO%d RX=GPIO%d baud=%d\n",
+              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+}
+```
+
+**Remove:**
+- `#include <driver/uart.h>` — not needed (no uart_set_pin)
+- `#include <driver/gpio.h>` — not needed (no gpio_reset_pin)
+- `gpio_reset_pin()` calls — not needed (IOMUX native)
+- `uart_set_pin()` calls — not needed (IOMUX native)
+
+#### 4. `main.cpp` — Don't init Serial for debug
+
+```cpp
+void setup() {
+    // Disable flash LED
+    pinMode(4, OUTPUT);
+    digitalWrite(4, LOW);
+
+    // Do NOT call Serial.begin() — UART0 is used by xbeeInit() at 9600 baud
+
+    // 1. SD card
+    if (!initSDCard()) {
+        while (true) { delay(1000); }
+    }
+
+    // ... rest of setup ...
+
+    // XBee init — this calls Serial.begin(9600) internally
+    xbeeInit();
+}
+```
+
+#### 5. ALL source files — Replace Serial.printf/println
+
+Search-and-replace across ALL `.cpp` files:
+
+```
+Serial.printf(   →   dbgprintf(
+Serial.println(  →   dbgprintln(
+```
+
+Files that need this: `main.cpp`, `xbee_comm.cpp`, `sd_storage.cpp`, `node_client.cpp`, `web_server.cpp`, and any others that use Serial.
+
+Also add `#include "config.h"` to any file that doesn't already have it (for the macros).
+
+#### 6. Wiring
+
+```
+ESP32 GPIO 1 (U0TXD) ──→ XBee DIN  (pin 3)
+ESP32 GPIO 3 (U0RXD) ←── XBee DOUT (pin 2)
+ESP32 3.3V            ──→ XBee VCC  (pin 1)
+ESP32 GND             ──→ XBee GND  (pin 10)
+```
+
+**IMPORTANT:** Disconnect the XBee before uploading firmware. GPIO 1/3 are the USB programming pins.
+
+### Why this works
+
+1. **IOMUX native** — GPIO 1/3 are hardwired to UART0 via IOMUX (not GPIO matrix). IOMUX has highest hardware priority.
+2. **No pin conflicts** — SD_MMC doesn't touch GPIO 1/3. PSRAM doesn't use them. No peripheral claims them.
+3. **Proven** — UART0 is the most tested and reliable UART peripheral on ESP32.
+
+### Checklist
+
+- [ ] Update `config.h`: XBEE_TX_PIN=1, XBEE_RX_PIN=3, XBEE_USES_UART0=1, add dbg macros
+- [ ] Update XBee driver: use `Serial` (UART0), remove gpio_reset_pin/uart_set_pin
+- [ ] Remove `Serial.begin(115200)` from setup (or guard with `#ifndef XBEE_USES_UART0`)
+- [ ] Replace ALL `Serial.printf()` → `dbgprintf()`, `Serial.println()` → `dbgprintln()` in all files
+- [ ] Add `#include "config.h"` to files that need dbgprintf/dbgprintln
+- [ ] Rewire: GPIO 1 → XBee DIN, GPIO 3 ← XBee DOUT
+- [ ] Build and verify 0 errors/warnings
+- [ ] Test: admin serial monitor on web dashboard should show TX/RX activity
+
+---
+
+*End of Change #3*

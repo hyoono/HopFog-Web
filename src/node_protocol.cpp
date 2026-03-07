@@ -13,7 +13,7 @@
  */
 
 #include "node_protocol.h"
-#include "config.h"
+#include "config.h"    // for dbgprintf/dbgprintln macros
 #include "xbee_comm.h"
 #include "sd_storage.h"
 
@@ -54,7 +54,7 @@ static void sendJsonCommand(JsonDocument& doc) {
 static void handleRegister(const char* nodeId, JsonObject params) {
     NodeInfo* n = registerNode(nodeId);
     if (!n) {
-        Serial.println("[NODE] Registry full, cannot register");
+        dbgprintln("[NODE] Registry full, cannot register");
         return;
     }
     strncpy(n->device_name,
@@ -71,7 +71,7 @@ static void handleRegister(const char* nodeId, JsonObject params) {
     ack["cmd"] = "REGISTER_ACK";
     ack["node_id"] = nodeId;
     sendJsonCommand(ack);
-    Serial.printf("[NODE] Registered %s (%s)\n", nodeId, n->ip_address);
+    dbgprintf("[NODE] Registered %s (%s)\n", nodeId, n->ip_address);
 }
 
 static void handleHeartbeat(const char* nodeId, JsonObject params) {
@@ -163,7 +163,7 @@ static void handleSyncRequest(const char* nodeId) {
     sync["messages"] = JsonArray();
 
     sendJsonCommand(sync);
-    Serial.printf("[NODE] Sent SYNC_DATA to %s\n", nodeId);
+    dbgprintf("[NODE] Sent SYNC_DATA to %s\n", nodeId);
 }
 
 static void handleSosAlert(const char* nodeId, JsonObject params) {
@@ -205,7 +205,7 @@ static void handleSosAlert(const char* nodeId, JsonObject params) {
     sos["created_at"] = (long)time(nullptr);
 
     writeJsonArray(SD_RES_MSG_FILE, doc);
-    Serial.printf("[NODE] SOS alert from user %d via %s\n", userId, nodeId);
+    dbgprintf("[NODE] SOS alert from user %d via %s\n", userId, nodeId);
 
     // Also send SOS via XBee in JSON format (for node protocol)
     String sosXbeePayload = "SOS_ALERT|" + username + "|SOS via " + String(nodeId);
@@ -233,7 +233,7 @@ static void handleChangePassword(JsonObject params) {
         if ((u["id"] | 0) == userId) {
             u["password_hash"] = newPw;  // ESP32: stored as-is (no bcrypt on MCU)
             writeJsonArray(SD_USERS_FILE, doc);
-            Serial.printf("[NODE] Password changed for user %d\n", userId);
+            dbgprintf("[NODE] Password changed for user %d\n", userId);
             return;
         }
     }
@@ -293,7 +293,7 @@ static void handleRelayChatMsg(const char* nodeId, JsonObject params) {
     msg["sent_at"] = (long)time(nullptr);
 
     writeJsonArray(SD_DMS_FILE, doc);
-    Serial.printf("[NODE] Chat msg from node %s: conv=%d sender=%d\n",
+    dbgprintf("[NODE] Chat msg from node %s: conv=%d sender=%d\n",
                   nodeId, convId, senderId);
 }
 
@@ -302,7 +302,7 @@ static void handleStatsResponse(const char* nodeId, JsonObject params) {
     if (!n) return;
     n->free_heap = params["free_heap"] | 0;
     n->uptime = params["uptime"] | 0;
-    Serial.printf("[NODE] Stats from %s: heap=%d uptime=%d\n",
+    dbgprintf("[NODE] Stats from %s: heap=%d uptime=%d\n",
                   nodeId, n->free_heap, n->uptime);
 }
 
@@ -325,7 +325,7 @@ bool nodeProtocolHandleLine(const char* line, size_t len) {
     const char* nodeId = doc["node_id"] | "unknown";
     JsonObject params = doc["params"].as<JsonObject>();
 
-    Serial.printf("[NODE] CMD=%s from %s\n", cmd, nodeId);
+    dbgprintf("[NODE] CMD=%s from %s\n", cmd, nodeId);
 
     if (strcmp(cmd, "REGISTER") == 0) {
         handleRegister(nodeId, params);
@@ -342,14 +342,14 @@ bool nodeProtocolHandleLine(const char* line, size_t len) {
     } else if (strcmp(cmd, "RELAY_CHAT_MSG") == 0) {
         handleRelayChatMsg(nodeId, params);
     } else if (strcmp(cmd, "RELAY_MSG") == 0) {
-        Serial.printf("[NODE] Relay msg from %s: %s -> %s\n",
+        dbgprintf("[NODE] Relay msg from %s: %s -> %s\n",
                       nodeId,
                       (const char*)(params["from"] | "?"),
                       (const char*)(params["to"] | "?"));
     } else if (strcmp(cmd, "STATS_RESPONSE") == 0) {
         handleStatsResponse(nodeId, params);
     } else {
-        Serial.printf("[NODE] Unknown command: %s\n", cmd);
+        dbgprintf("[NODE] Unknown command: %s\n", cmd);
         return false;
     }
     return true;

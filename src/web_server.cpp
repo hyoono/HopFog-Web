@@ -230,5 +230,5 @@ void setupWebServer(AsyncWebServer &server) {
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-    Serial.println("[HTTP] Static file routes registered");
+    dbgprintln("[HTTP] Static file routes registered");
 }

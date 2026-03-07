@@ -25,7 +25,7 @@ void authInit() {
     for (int i = 0; i < MAX_ACTIVE_TOKENS; i++) {
         sessions[i].used = false;
     }
-    Serial.println("[Auth] Initialised");
+    dbgprintln("[Auth] Initialised");
 }
 
 // ── Password hashing ───────────────────────────────────────────────

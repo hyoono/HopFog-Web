@@ -59,28 +59,42 @@
 
 // ── XBee S2C (ZigBee) ──────────────────────────────────────────────
 //
-// ESP32-CAM:  Uses UART1 (Serial1) to avoid PSRAM conflicts.
-//   GPIO  3 = XBee TX (→ DIN)  — repurposed from U0RXD (Serial input
-//             is sacrificed; Serial.println() output on GPIO 1 still works)
-//   GPIO 12 = XBee RX (← DOUT) — free with SPI SD (not SD_MMC)
-//   GPIO  4 = set LOW at boot to disable flash LED (not used for XBee)
+// ESP32-CAM:  Uses UART0 (Serial) on the native U0TXD/U0RXD pins.
+//   GPIO 1 = U0TXD → XBee DIN  (pin 3 on XBee module)
+//   GPIO 3 = U0RXD ← XBee DOUT (pin 2 on XBee module)
 //
-//   IMPORTANT: Disconnect the USB-to-serial adapter before running
-//              with XBee.  GPIO 3 is shared between programming
-//              and XBee TX — having both connected causes bus contention.
+//   These are the IOMUX-native UART0 pins — no GPIO matrix remapping
+//   is needed and there are no conflicts with SD card, PSRAM, or flash LED.
+//
+//   TRADE-OFF: USB Serial Monitor is NOT available.  All debug output
+//              is disabled at compile time (dbgprintf/dbgprintln macros).
+//              Disconnect the XBee before uploading new firmware.
 //
 // Generic ESP32:  Uses UART2 (Serial2), GPIO 13/12.
+//   USB Serial Monitor remains available for debug output.
 //
-// Note: GPIO 12 is a boot-strapping pin.  If the ESP32 fails to boot
-//       with the XBee connected, disconnect XBee DOUT during power-on
-//       or burn the VDD_SDIO efuse to force 3.3 V (one-time, permanent).
+// Note: GPIO 12 (generic ESP32 only) is a boot-strapping pin.
+//       If ESP32 fails to boot with XBee connected, disconnect DOUT
+//       during power-on or burn the VDD_SDIO efuse (one-time, permanent).
 #define XBEE_BAUD     9600 // XBee factory default baud rate
 #ifdef ESP32CAM_SPI_SD
-  #define XBEE_TX_PIN    3   // ESP32 TX → XBee DIN  (pin 3 on XBee)
-  #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2 on XBee)
+  #define XBEE_TX_PIN    1   // U0TXD → XBee DIN  (IOMUX native, no remap)
+  #define XBEE_RX_PIN    3   // U0RXD ← XBee DOUT (IOMUX native, no remap)
+  #define XBEE_USES_UART0 1  // UART0 is XBee — USB Serial Monitor disabled
 #else
   #define XBEE_TX_PIN   13   // ESP32 TX → XBee DIN  (pin 3)
   #define XBEE_RX_PIN   12   // ESP32 RX ← XBee DOUT (pin 2)
+#endif
+
+// ── Debug output macros ─────────────────────────────────────────────
+// On ESP32-CAM, UART0 is used for XBee — debug prints are disabled.
+// On generic ESP32, UART0 is free for USB Serial Monitor.
+#ifdef XBEE_USES_UART0
+  #define dbgprintf(...)     do {} while(0)
+  #define dbgprintln(x)      do {} while(0)
+#else
+  #define dbgprintf(...)     Serial.printf(__VA_ARGS__)
+  #define dbgprintln(x)      Serial.println(x)
 #endif
 
 // ── Auth ────────────────────────────────────────────────────────────

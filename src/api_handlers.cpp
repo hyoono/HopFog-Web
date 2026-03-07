@@ -1242,7 +1242,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         tv.tv_sec  = (time_t)epoch;
         tv.tv_usec = 0;
         settimeofday(&tv, NULL);
-        Serial.printf("[Time] Clock set to %lu (from browser)\n", epoch);
+        dbgprintf("[Time] Clock set to %lu (from browser)\n", epoch);
         JsonDocument resp;
         resp["success"] = true;
         resp["epoch"]   = epoch;
@@ -1718,5 +1718,5 @@ void registerApiRoutes(AsyncWebServer &server) {
         request->send(200, "application/json", out);
     });
 
-    Serial.println("[HTTP] API routes registered");
+    dbgprintln("[HTTP] API routes registered");
 }

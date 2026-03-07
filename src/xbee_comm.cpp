@@ -5,11 +5,11 @@
  * JSON payloads are wrapped in 0x10 Transmit Request frames for
  * sending, and extracted from 0x90 Receive Packet frames on receive.
  *
- * ESP32-CAM: uses UART2 on GPIO 4 (TX) and GPIO 12 (RX).
- *   These pins are free because the SD card uses SPI mode (not SD_MMC).
- * Generic ESP32: uses UART2 on GPIO 13 (TX) and GPIO 12 (RX).
- *
- * UART0 stays free for Serial Monitor debug output on both boards.
+ * ESP32-CAM: uses UART0 (Serial) on GPIO 1 (TX) and GPIO 3 (RX).
+ *   These are the native U0TXD/U0RXD IOMUX pins — the most reliable
+ *   option with zero pin conflicts.  USB Serial Monitor is not available.
+ * Generic ESP32: uses UART2 (Serial2) on GPIO 13 (TX) and GPIO 12 (RX).
+ *   UART0 stays free for Serial Monitor debug output.
  *
  * Includes a ring-buffer event log that is exposed via /api/xbee/rx-log
  * so the web admin testing page can show a live "serial monitor".
@@ -17,18 +17,14 @@
 
 #include "xbee_comm.h"
 #include "config.h"
-#include <driver/uart.h>   // for uart_set_pin() explicit pin claim
-#include <driver/gpio.h>   // for gpio_reset_pin()
 
 // ── Internal state ──────────────────────────────────────────────────
-// ESP32-CAM: use UART1 — UART2 defaults to GPIO 16/17 which are PSRAM pins
-// Generic ESP32: use UART2 (no PSRAM conflict)
-#ifdef ESP32CAM_SPI_SD
-  static HardwareSerial& xbeeSerial = Serial1;
-  #define XBEE_UART_NUM UART_NUM_1
+// ESP32-CAM: use UART0 (Serial) on native GPIO 1/3 — IOMUX, no remapping
+// Generic ESP32: use UART2 (Serial2) on GPIO 13/12
+#ifdef XBEE_USES_UART0
+  static HardwareSerial& xbeeSerial = Serial;
 #else
   static HardwareSerial& xbeeSerial = Serial2;
-  #define XBEE_UART_NUM UART_NUM_2
 #endif
 static XBeeReceiveCB   rxCallback = nullptr;
 static uint8_t         frameIdCounter = 0;
@@ -80,20 +76,16 @@ static uint8_t  rxChecksum  = 0;
 // ── Public API ──────────────────────────────────────────────────────
 
 void xbeeInit() {
-    // Reset GPIO pins to ensure clean state — detaches from any
-    // previous peripheral (SPI, SD_MMC, UART0) before claiming for XBee
-    gpio_reset_pin((gpio_num_t)XBEE_TX_PIN);
-    gpio_reset_pin((gpio_num_t)XBEE_RX_PIN);
-
+#ifdef XBEE_USES_UART0
+    // UART0 on native GPIO 1/3 — just set baud rate, IOMUX handles routing
+    xbeeSerial.begin(XBEE_BAUD);
+#else
+    // Generic ESP32: use UART2 with explicit pin assignment
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
+#endif
 
-    // Explicitly route UART signals to our chosen GPIO pins
-    uart_set_pin(XBEE_UART_NUM, XBEE_TX_PIN, XBEE_RX_PIN,
-                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-
-    Serial.printf("[XBee] UART%d started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
-                  (XBEE_UART_NUM == UART_NUM_1) ? 1 : 2,
-                  XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+    dbgprintf("[XBee] UART started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
+              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
     logEvent('S', 0, 0, "XBee init: TX=GPIO%d RX=GPIO%d baud=%d",
              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
 }
@@ -139,7 +131,7 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
              (int)len, payload, len > 170 ? "..." : "");
     logEvent('T', 0x10, fid, "%s", preview);
 
-    Serial.printf("[XBee] TX frame ID=%d (%d bytes payload)\n", fid, (int)len);
+    dbgprintf("[XBee] TX frame ID=%d (%d bytes payload)\n", fid, (int)len);
     return fid;
 }
 
@@ -237,8 +229,8 @@ void xbeeProcessIncoming() {
                         logEvent('E', 0x8B, fid,
                                  "TX FAILED delivery=0x%02X retries=%d",
                                  delivery, retries);
-                        Serial.printf("[XBee] TX status: frame %d delivery FAILED (0x%02X)\n",
-                                      fid, delivery);
+                        dbgprintf("[XBee] TX status: frame %d delivery FAILED (0x%02X)\n",
+                                 fid, delivery);
                     }
                 } else if (frameType == XBEE_TX_REQUEST) {
                     // Self-echo: we're receiving our own transmitted 0x10 frame.
@@ -256,7 +248,7 @@ void xbeeProcessIncoming() {
             } else {
                 logEvent('E', 0, 0, "Checksum error (expected 0xFF, got 0x%02X)",
                          rxChecksum);
-                Serial.println("[XBee] RX frame checksum error — dropped");
+                dbgprintln("[XBee] RX frame checksum error — dropped");
             }
             rxState = WAIT_DELIM;
             break;

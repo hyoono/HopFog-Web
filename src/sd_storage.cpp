@@ -3,7 +3,7 @@
  */
 
 #include "sd_storage.h"
-#include "config.h"
+#include "config.h"    // for dbgprintf/dbgprintln macros
 
 #include <SD.h>
 #include <SPI.h>
@@ -24,7 +24,7 @@ static unsigned long currentTimestamp() {
 static void ensureDir(const char *dir) {
     if (!SD_FS.exists(dir)) {
         SD_FS.mkdir(dir);
-        Serial.printf("[SD] Created directory: %s\n", dir);
+        dbgprintf("[SD] Created directory: %s\n", dir);
     }
 }
 
@@ -34,7 +34,7 @@ static void seedFileIfMissing(const char *path) {
         if (f) {
             f.print("[]");
             f.close();
-            Serial.printf("[SD] Seeded empty JSON array: %s\n", path);
+            dbgprintf("[SD] Seeded empty JSON array: %s\n", path);
         }
     }
 }
@@ -42,7 +42,7 @@ static void seedFileIfMissing(const char *path) {
 // ── Init ────────────────────────────────────────────────────────────
 
 bool initSDCard() {
-    Serial.println("[SD] Initialising SD card …");
+    dbgprintln("[SD] Initialising SD card …");
 
 #ifdef ESP32CAM_SPI_SD
     // ESP32-CAM: use SPI mode to access the built-in SD card slot.
@@ -54,21 +54,21 @@ bool initSDCard() {
     static SPIClass spiSD(HSPI);
     spiSD.begin(SD_SPI_CLK, SD_SPI_MISO, SD_SPI_MOSI, SD_CS_PIN);
     if (!SD.begin(SD_CS_PIN, spiSD)) {
-        Serial.println("[SD] SPI SD mount failed!");
+        dbgprintln("[SD] SPI SD mount failed!");
         return false;
     }
-    Serial.println("[SD] SPI mode (HSPI) — mounted OK");
+    dbgprintln("[SD] SPI mode (HSPI) — mounted OK");
 #else
     // Generic ESP32: SPI mode with configurable CS pin (VSPI defaults)
     if (!SD.begin(SD_CS_PIN)) {
-        Serial.println("[SD] Mount failed!");
+        dbgprintln("[SD] Mount failed!");
         return false;
     }
 #endif
 
     uint64_t totalBytes = SD_FS.totalBytes();
     uint64_t usedBytes  = SD_FS.usedBytes();
-    Serial.printf("[SD] Mounted — Total: %llu MB, Used: %llu MB\n",
+    dbgprintf("[SD] Mounted — Total: %llu MB, Used: %llu MB\n",
                   totalBytes / (1024 * 1024), usedBytes / (1024 * 1024));
 
     // Ensure directory structure
@@ -94,13 +94,13 @@ bool initSDCard() {
 bool readJsonArray(const char *path, JsonDocument &doc) {
     File f = SD_FS.open(path, FILE_READ);
     if (!f) {
-        Serial.printf("[SD] Cannot open %s for reading\n", path);
+        dbgprintf("[SD] Cannot open %s for reading\n", path);
         return false;
     }
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) {
-        Serial.printf("[SD] JSON parse error in %s: %s\n", path, err.c_str());
+        dbgprintf("[SD] JSON parse error in %s: %s\n", path, err.c_str());
         return false;
     }
     return true;
@@ -109,7 +109,7 @@ bool readJsonArray(const char *path, JsonDocument &doc) {
 bool writeJsonArray(const char *path, const JsonDocument &doc) {
     File f = SD_FS.open(path, FILE_WRITE);
     if (!f) {
-        Serial.printf("[SD] Cannot open %s for writing\n", path);
+        dbgprintf("[SD] Cannot open %s for writing\n", path);
         return false;
     }
     serializeJson(doc, f);
@@ -195,7 +195,7 @@ int createUser(const char *username, const char *email,
     user["created_at"]     = currentTimestamp();
 
     writeJsonArray(SD_USERS_FILE, doc);
-    Serial.printf("[SD] Created user id=%d username=%s\n", id, username);
+    dbgprintf("[SD] Created user id=%d username=%s\n", id, username);
     return id;
 }
 
@@ -558,7 +558,7 @@ int findOrCreateConversation(int user1Id, int user2Id, bool isSos) {
     c["created_at"] = currentTimestamp();
 
     writeJsonArray(SD_CONVOS_FILE, doc);
-    Serial.printf("[SD] Created conversation id=%d between users %d and %d\n", id, user1Id, user2Id);
+    dbgprintf("[SD] Created conversation id=%d between users %d and %d\n", id, user1Id, user2Id);
     return id;
 }
 
