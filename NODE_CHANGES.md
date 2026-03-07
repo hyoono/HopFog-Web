@@ -641,3 +641,176 @@ ESP32 GND             ──→ XBee GND  (pin 10)
 ---
 
 *End of Change #3*
+
+---
+
+## Change #4: Fix CORE_DEBUG_LEVEL + Atomic Frame Writes (Critical — XBee TX fix)
+
+**Date:** 2026-03-07
+**Priority:** CRITICAL — without this, XBee communication does not work AT ALL
+**Branch:** `copilot/setup-and-xbee-driver`
+
+### Root Cause
+
+The test project (XBEE_COMM_TEST.md) works perfectly. The admin and node projects don't.
+The critical difference:
+
+- **Test project:** `-DCORE_DEBUG_LEVEL=0` (no ESP-IDF logging)
+- **Node project:** `-DCORE_DEBUG_LEVEL=3` (INFO-level logging → text output on UART0)
+
+With `CORE_DEBUG_LEVEL=3`, the ESP-IDF WiFi driver, SPI driver, AsyncTCP, and other
+internal components emit log messages via `esp_log_write()` which outputs directly to
+**UART0** — the SAME UART used for XBee communication.
+
+When `xbeeSendBroadcast()` uses multiple `Serial.write()` calls to build an API frame,
+ESP-IDF log messages from Core 0 (WiFi/AsyncTCP) interleave with the frame bytes being
+written on Core 1 (Arduino loop). The XBee receives corrupted frames and discards them.
+
+Example of corruption:
+```
+Expected: 7E 00 1E 10 01 00 00 ... (clean API frame)
+Actual:   7E 00 1E 10 49 20 28 77 69 66 69 ... (frame bytes mixed with "I (wifi...")
+```
+
+### Three Fixes (all required)
+
+**Fix 1: CORE_DEBUG_LEVEL=0** — Compile out all log output
+
+In `platformio.ini`, change:
+```ini
+build_flags =
+    -DCORE_DEBUG_LEVEL=0          ; <── was 3, MUST be 0
+    -DBOARD_HAS_PSRAM=1
+    -DESP32CAM_SPI_SD=1
+    -DASYNCWEBSERVER_REGEX
+```
+
+**Fix 2: Runtime log suppression** — Catch any remaining ESP-IDF internal logs
+
+In `src/main.cpp`, add `#include <esp_log.h>` at the top, then at the very start of
+`setup()`, add:
+
+```cpp
+#ifdef XBEE_USES_UART0
+    esp_log_level_set("*", ESP_LOG_NONE);
+#endif
+```
+
+Full setup() should be:
+```cpp
+void setup() {
+    // Disable flash LED
+    pinMode(FLASH_LED_PIN, OUTPUT);
+    digitalWrite(FLASH_LED_PIN, LOW);
+
+#ifdef XBEE_USES_UART0
+    // CRITICAL: suppress ALL serial log output on UART0
+    // UART0 is shared between XBee and ESP-IDF log system.
+    // Any log output corrupts XBee API frames.
+    esp_log_level_set("*", ESP_LOG_NONE);
+#else
+    Serial.begin(115200);
+    delay(500);
+#endif
+
+    // 1. XBee — init FIRST, before SD/WiFi/web server
+    xbeeInit();
+
+    // 2. SD card
+    if (!initSDCard()) {
+        dbgprintln("[FATAL] SD card init failed – halting.");
+        while (true) delay(1000);
+    }
+
+    // 3. WiFi access point
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONN);
+    delay(100);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    // 4. DNS captive portal
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+    // 5. Web server
+    setupWebServer(server);
+    server.begin();
+
+    // 6. Node client + XBee callback
+    nodeClientInit();
+    xbeeSetReceiveCallback([](const char* payload, size_t len) {
+        if (!nodeClientHandleCommand(payload, len)) {
+            dbgprintf("[XBee] Unhandled: %.80s\n", payload);
+        }
+    });
+}
+```
+
+**Fix 3: Atomic frame writes** — Build entire API frame in one buffer
+
+In `src/xbee_comm.cpp`, replace the `xbeeSendBroadcast()` function. Instead of 6
+separate `Serial.write()` calls, build the complete frame in a single buffer and write
+it with ONE call:
+
+```cpp
+uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
+    if (len == 0 || len > XBEE_MAX_FRAME - 18) return 0;
+
+    uint16_t frameDataLen = 14 + len;
+    if (++frameIdCounter == 0) frameIdCounter = 1;
+    uint8_t fid = frameIdCounter;
+
+    uint8_t hdr[14] = {
+        XBEE_TX_REQUEST, fid,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0xFF, 0xFF,
+        0xFF, 0xFE,
+        0x00, 0x00
+    };
+
+    uint8_t cksum = 0;
+    for (int i = 0; i < 14; i++) cksum += hdr[i];
+    for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
+    cksum = 0xFF - cksum;
+
+    // Build complete frame in a single buffer to prevent interleaving
+    size_t totalLen = 1 + 2 + 14 + len + 1;
+    uint8_t frameBuf[XBEE_MAX_FRAME];
+    size_t pos = 0;
+    frameBuf[pos++] = XBEE_START_DELIM;
+    frameBuf[pos++] = (uint8_t)(frameDataLen >> 8);
+    frameBuf[pos++] = (uint8_t)(frameDataLen & 0xFF);
+    memcpy(&frameBuf[pos], hdr, 14);
+    pos += 14;
+    memcpy(&frameBuf[pos], payload, len);
+    pos += len;
+    frameBuf[pos++] = cksum;
+
+    // Single atomic write — prevents interleaving with ESP-IDF log output
+    xbeeSerial.write(frameBuf, totalLen);
+    xbeeSerial.flush();
+
+    dbgprintf("[XBee] TX frame ID=%d (%d bytes)\n", fid, (int)len);
+    return fid;
+}
+```
+
+### Why all 3 fixes are needed
+
+| Fix | What it prevents |
+|-----|-----------------|
+| CORE_DEBUG_LEVEL=0 | Compiles out Arduino `log_e()`, `log_w()`, `log_i()` calls |
+| esp_log_level_set() | Catches ESP-IDF internal logs (WiFi stack, lwIP, etc.) |
+| Atomic frame write | Defense-in-depth: even if some output leaks, frames aren't corrupted |
+
+### Verification Checklist
+
+- [ ] Change `-DCORE_DEBUG_LEVEL=3` to `-DCORE_DEBUG_LEVEL=0` in `platformio.ini`
+- [ ] Add `#include <esp_log.h>` to `src/main.cpp`
+- [ ] Add `esp_log_level_set("*", ESP_LOG_NONE)` at start of `setup()`
+- [ ] Move `xbeeInit()` to before SD/WiFi init
+- [ ] Replace multi-write `xbeeSendBroadcast()` with atomic single-buffer write
+- [ ] Build and verify 0 errors/warnings
+
+---
+
+*End of Change #4*

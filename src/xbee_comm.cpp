@@ -91,9 +91,9 @@ void xbeeInit() {
 }
 
 uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
-    if (len == 0 || len > XBEE_MAX_FRAME - 14) {
+    if (len == 0 || len > XBEE_MAX_FRAME - 18) {
         logEvent('E', 0x10, 0, "TX rejected: payload %d bytes (max %d)",
-                 (int)len, XBEE_MAX_FRAME - 14);
+                 (int)len, XBEE_MAX_FRAME - 18);
         return 0;
     }
 
@@ -115,15 +115,26 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
     cksum = 0xFF - cksum;
 
-    xbeeSerial.write(XBEE_START_DELIM);
-    xbeeSerial.write((uint8_t)(frameDataLen >> 8));
-    xbeeSerial.write((uint8_t)(frameDataLen & 0xFF));
-    xbeeSerial.write(hdr, 14);
-    xbeeSerial.write((const uint8_t*)payload, len);
-    xbeeSerial.write(cksum);
+    // Build the complete frame in a single buffer to prevent
+    // interleaving with any other UART0 output (ESP-IDF logs, etc.).
+    // Total frame: 1 (delim) + 2 (len) + 14 (hdr) + payload + 1 (cksum)
+    size_t totalLen = 1 + 2 + 14 + len + 1;
+    uint8_t frameBuf[XBEE_MAX_FRAME];
+    size_t pos = 0;
+    frameBuf[pos++] = XBEE_START_DELIM;
+    frameBuf[pos++] = (uint8_t)(frameDataLen >> 8);
+    frameBuf[pos++] = (uint8_t)(frameDataLen & 0xFF);
+    memcpy(&frameBuf[pos], hdr, 14);
+    pos += 14;
+    memcpy(&frameBuf[pos], payload, len);
+    pos += len;
+    frameBuf[pos++] = cksum;
+
+    // Single atomic write — prevents interleaving
+    xbeeSerial.write(frameBuf, totalLen);
     xbeeSerial.flush();
 
-    totalTxBytes += 3 + 14 + len + 1; // delim + lenHi/Lo + hdr + payload + checksum
+    totalTxBytes += totalLen;
 
     // Log a truncated preview of the payload (max ~170 chars to fit log entry)
     char preview[XBEE_LOG_MSG_MAX];

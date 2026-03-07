@@ -19,6 +19,7 @@
 #include <esp_wifi.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
+#include <esp_log.h>
 
 #include "config.h"
 #include "sd_storage.h"
@@ -73,8 +74,15 @@ void setup() {
     pinMode(4, OUTPUT);
     digitalWrite(4, LOW);
 
-#ifndef XBEE_USES_UART0
-    // Only init Serial for debug output if UART0 is NOT used for XBee
+#ifdef XBEE_USES_UART0
+    // ── CRITICAL: suppress ALL serial log output on UART0 ───────────
+    // UART0 is shared between XBee and the ESP-IDF log system.
+    // Any log output (WiFi, SPI, AsyncTCP) corrupts XBee API frames.
+    // CORE_DEBUG_LEVEL=0 (platformio.ini) compiles out Arduino log_*() calls.
+    // This runtime call catches any remaining ESP-IDF internal logs.
+    esp_log_level_set("*", ESP_LOG_NONE);
+#else
+    // Generic ESP32: UART0 is free for debug output
     Serial.begin(115200);
     delay(500);
 #endif
@@ -82,33 +90,37 @@ void setup() {
     dbgprintln("   HopFog-Web  ESP32 Firmware");
     dbgprintln("========================================");
 
-    // 1. SD card
+    // 1. XBee S2C (ZigBee) — init FIRST, before SD/WiFi/web server
+    //    so UART0 is configured at 9600 baud immediately and the XBee
+    //    can start receiving valid frames as soon as a node sends one.
+    xbeeInit();
+
+    // 2. SD card
     if (!initSDCard()) {
         dbgprintln("[FATAL] SD card init failed – halting.");
         while (true) { delay(1000); }
     }
 
-    // 2. Auth subsystem
+    // 3. Auth subsystem
     authInit();
 
-    // 3. WiFi access point
+    // 4. WiFi access point
     startAP();
 
-    // 4. Captive-portal DNS — resolve ALL domains to the AP IP
+    // 5. Captive-portal DNS — resolve ALL domains to the AP IP
     dnsServer.setTTL(300);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
     dbgprintf("[DNS] Captive portal active — http://%s → %s\n",
               CUSTOM_DOMAIN, WiFi.softAPIP().toString().c_str());
 
-    // 5. Web server (static files + API)
+    // 6. Web server (static files + API)
     setupWebServer(server);
     registerApiRoutes(server);
     server.begin();
     dbgprintf("[HTTP] Server listening on port %d\n", HTTP_PORT);
     dbgprintf("[HTTP] Open http://%s in your browser\n", CUSTOM_DOMAIN);
 
-    // 6. XBee S2C (ZigBee) communication + node protocol
-    xbeeInit();
+    // 7. Node protocol handler + XBee receive callback
     nodeProtocolInit();
     xbeeSetReceiveCallback([](const char* line, size_t len) {
         // Try to handle as JSON node command first
