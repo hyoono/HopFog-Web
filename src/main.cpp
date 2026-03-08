@@ -69,16 +69,18 @@ static void startAP() {
 
 // ── Setup ───────────────────────────────────────────────────────────
 //
-// INIT ORDER — matches the working test project (XBEE_COMM_TEST.md):
+//  INIT ORDER — designed to isolate SPI/WiFi from UART0:
 //
 //   1. Flash LED off
-//   2. xbeeInit() + callback  ← FIRST, before anything else
-//   3. SD card
-//   4. Auth
-//   5. WiFi AP
-//   6. DNS + Web server
-//   7. Flush UART RX  ← NEW: clear any garbage from SD/WiFi init
-//   8. delay(3000)    ← XBee network stabilisation
+//   2. SD card (SPI — before UART0 is configured at 9600)
+//   3. Auth
+//   4. delay(2000) — let bootloader UART0 traffic settle
+//   5. xbeeInit() — Serial.begin(9600)
+//   6. xbeeQueryConfig() — AT probe (proves UART works)
+//   7. Node protocol + callback
+//   8. WiFi AP
+//   9. DNS + Web server
+//  10. delay(3000) — XBee network stabilisation
 //
 void setup() {
     // Disable ESP32-CAM flash LED (GPIO 4 = flash LED transistor)
@@ -94,10 +96,31 @@ void setup() {
     dbgprintln("   HopFog-Web  ESP32 Firmware");
     dbgprintln("========================================");
 
-    // 1. XBee — init FIRST (matches working test project)
+    // 1. SD card — init SPI BEFORE configuring UART0 for XBee.
+    //    This ensures any SPI GPIO matrix changes happen while UART0
+    //    is still at bootloader baud rate (115200), not at XBee baud.
+    if (!initSDCard()) {
+        dbgprintln("[FATAL] SD card init failed – halting.");
+        while (true) { delay(1000); }
+    }
+
+    // 2. Auth
+    authInit();
+
+    // 3. Wait for bootloader UART0 output and XBee boot-up to finish.
+    //    The ESP32 bootloader outputs text at 115200 baud on GPIO1.
+    //    The XBee module takes ~1.5s to boot and join a network.
+    //    This delay matches the test project's blinkLed(3, 300) = 1.8s.
+    delay(2000);
+
+    // 4. XBee — Serial.begin(9600) AFTER all SPI/peripheral init
     xbeeInit();
 
-    // 2. Node protocol + callback (immediately after xbeeInit)
+    // 5. AT command probe — query XBee module config
+    //    If this gets responses, UART TX+RX are both proven working.
+    xbeeQueryConfig();
+
+    // 6. Node protocol + callback
     nodeProtocolInit();
     xbeeSetReceiveCallback([](const char* line, size_t len) {
         if (!nodeProtocolHandleLine(line, len)) {
@@ -105,19 +128,10 @@ void setup() {
         }
     });
 
-    // 3. SD card
-    if (!initSDCard()) {
-        dbgprintln("[FATAL] SD card init failed – halting.");
-        while (true) { delay(1000); }
-    }
-
-    // 4. Auth
-    authInit();
-
-    // 5. WiFi AP
+    // 7. WiFi AP
     startAP();
 
-    // 6. DNS captive portal + Web server
+    // 8. DNS captive portal + Web server
     dnsServer.setTTL(300);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
     dbgprintf("[DNS] Captive portal → %s\n", WiFi.softAPIP().toString().c_str());
@@ -127,13 +141,7 @@ void setup() {
     server.begin();
     dbgprintf("[HTTP] Server on port %d — http://%s\n", HTTP_PORT, CUSTOM_DOMAIN);
 
-    // 7. Flush UART RX buffer — SD card SPI init and WiFi driver startup
-    //    may have produced garbage on UART0 that would confuse the XBee
-    //    frame parser.  The test project has no SD card so it never hits
-    //    this problem.
-    xbeeFlushRx();
-
-    // 8. Wait for XBee network (matches test project's delay(3000))
+    // 9. Wait for XBee ZigBee network to form/join (3 seconds)
     delay(3000);
 }
 

@@ -1344,3 +1344,251 @@ After applying these changes:
 ---
 
 *End of Change #7*
+
+---
+
+# Change #8 — AT Command Config Probe + Init Order Fix
+
+**Date:** 2026-03-08
+**Priority:** CRITICAL — supersedes all previous XBee init order changes (#5, #6, #7)
+
+## Problem
+
+Despite 7 rounds of changes, the admin and node still show 0 RX bytes. The XBee
+serial monitor shows nothing received. The test project (no SD card) works but
+the full projects don't.
+
+## Root Cause Theory
+
+The SD card SPI initialization (`spiSD.begin(14,2,15,13)`) runs AFTER
+`Serial.begin(9600)`. The SPI GPIO matrix configuration may have side effects
+on UART0 state. By initializing SD card BEFORE configuring UART0 for XBee,
+we ensure UART0 gets a clean "last word" on GPIO 1/3 configuration.
+
+## Solution: Two Key Changes
+
+### 1. Init order: SD card BEFORE xbeeInit()
+
+Old order (broken):
+```
+xbeeInit() → SD card → WiFi → xbeeFlushRx → delay(3000)
+```
+
+New order (fixed):
+```
+SD card → auth → delay(2000) → xbeeInit() → xbeeQueryConfig() → WiFi → delay(3000)
+```
+
+The 2-second delay before xbeeInit() matches the test project's 1.8s blink delay,
+allowing bootloader UART0 output and XBee boot-up to finish.
+
+### 2. AT Command Config Probe
+
+After xbeeInit(), we send AT Command frames (0x08) to query the XBee module's
+AP, ID, CE, and MY parameters. If we get AT Command Response frames (0x88) back,
+it **proves** that UART TX and RX both work.
+
+This is the definitive diagnostic — no more guessing.
+
+## Files to Change
+
+### `include/xbee_comm.h` — Add XBeeConfig + xbeeQueryConfig
+
+Replace your entire `xbee_comm.h` with:
+
+```cpp
+#ifndef XBEE_COMM_H
+#define XBEE_COMM_H
+
+#include <Arduino.h>
+
+#define XBEE_START_DELIM   0x7E
+#define XBEE_TX_REQUEST    0x10
+#define XBEE_TX_STATUS     0x8B
+#define XBEE_MODEM_STATUS  0x8A
+#define XBEE_RX_PACKET     0x90
+#define XBEE_AT_COMMAND    0x08
+#define XBEE_AT_RESPONSE   0x88
+#define XBEE_MAX_FRAME     512
+
+struct XBeeConfig {
+    bool    valid;            // true if at least one AT response received
+    int     ap_mode;          // AP parameter (1 = API mode 1)
+    int     coordinator;      // CE parameter (1 = coordinator, 0 = router)
+    uint16_t pan_id;          // ID parameter
+    uint16_t my_addr;         // MY parameter
+    int     responses;        // how many AT responses received (expect 4)
+};
+
+struct XBeeStats {
+    uint32_t totalRxBytes;
+    uint32_t totalTxBytes;
+    uint32_t rxFramesParsed;
+    uint32_t rxDataFrames;
+    uint32_t txFramesSent;
+    uint32_t txStatusOK;
+    uint32_t txStatusFail;
+    uint32_t checksumErrors;
+    uint32_t frameTimeouts;
+    uint32_t modemStatusCount;
+    uint8_t  lastModemStatus;
+};
+
+typedef void (*XBeeReceiveCB)(const char* payload, size_t len);
+
+void            xbeeInit();
+uint8_t         xbeeSendBroadcast(const char* payload, size_t len);
+void            xbeeProcessIncoming();
+void            xbeeSetReceiveCallback(XBeeReceiveCB cb);
+void            xbeeQueryConfig();
+const XBeeConfig& xbeeGetConfig();
+const XBeeStats& xbeeGetStats();
+
+#endif // XBEE_COMM_H
+```
+
+### `src/xbee_comm.cpp` — Add AT command support
+
+Add these sections to your xbee_comm.cpp:
+
+**1. Add `#include` and static config variable at the top:**
+```cpp
+static XBeeConfig xbeeConfig = {};
+```
+
+**2. In `xbeeInit()`, add after `memset(&stats, 0, sizeof(stats)):`**
+```cpp
+    memset(&xbeeConfig, 0, sizeof(xbeeConfig));
+    xbeeConfig.ap_mode = -1;
+    xbeeConfig.coordinator = -1;
+```
+
+**3. Add the `sendATQuery` function (before `handleCompleteFrame`):**
+```cpp
+static void sendATQuery(uint8_t fid, char at1, char at2) {
+    uint8_t frame[8];
+    frame[0] = XBEE_START_DELIM;
+    frame[1] = 0x00;
+    frame[2] = 0x04;
+    frame[3] = XBEE_AT_COMMAND;
+    frame[4] = fid;
+    frame[5] = (uint8_t)at1;
+    frame[6] = (uint8_t)at2;
+    frame[7] = 0xFF - ((frame[3] + frame[4] + frame[5] + frame[6]) & 0xFF);
+    xbeeSerial.write(frame, 8);
+    xbeeSerial.flush();
+    stats.totalTxBytes += 8;
+}
+```
+
+**4. Add 0x88 AT Command Response handling in `handleCompleteFrame()`:**
+```cpp
+    case XBEE_AT_RESPONSE:
+        if (rxFrameLen >= 5) {
+            char at[3] = { (char)rxFrame[2], (char)rxFrame[3], '\0' };
+            uint8_t status = rxFrame[4];
+            if (status == 0x00) {
+                xbeeConfig.responses++;
+                xbeeConfig.valid = true;
+                if (at[0] == 'A' && at[1] == 'P' && rxFrameLen >= 6)
+                    xbeeConfig.ap_mode = rxFrame[5];
+                else if (at[0] == 'I' && at[1] == 'D' && rxFrameLen >= 6) {
+                    if (rxFrameLen >= 7) xbeeConfig.pan_id = ((uint16_t)rxFrame[5] << 8) | rxFrame[6];
+                    else xbeeConfig.pan_id = rxFrame[5];
+                }
+                else if (at[0] == 'C' && at[1] == 'E' && rxFrameLen >= 6)
+                    xbeeConfig.coordinator = rxFrame[5];
+                else if (at[0] == 'M' && at[1] == 'Y' && rxFrameLen >= 6) {
+                    if (rxFrameLen >= 7) xbeeConfig.my_addr = ((uint16_t)rxFrame[5] << 8) | rxFrame[6];
+                    else xbeeConfig.my_addr = rxFrame[5];
+                }
+                dbgprintf("[XBee] AT %s = OK\n", at);
+            }
+        }
+        break;
+```
+
+**5. Add `xbeeQueryConfig()` function:**
+```cpp
+void xbeeQueryConfig() {
+    sendATQuery(0xF1, 'A', 'P');
+    delay(100); xbeeProcessIncoming();
+    sendATQuery(0xF2, 'I', 'D');
+    delay(100); xbeeProcessIncoming();
+    sendATQuery(0xF3, 'C', 'E');
+    delay(100); xbeeProcessIncoming();
+    sendATQuery(0xF4, 'M', 'Y');
+    delay(100); xbeeProcessIncoming();
+    dbgprintf("[XBee] Config probe: %d/4 responses\n", xbeeConfig.responses);
+}
+
+const XBeeConfig& xbeeGetConfig() { return xbeeConfig; }
+```
+
+### `src/main.cpp` — New init order
+
+Change your `setup()` function to use this order:
+
+```cpp
+void setup() {
+    pinMode(FLASH_LED_PIN, OUTPUT);
+    digitalWrite(FLASH_LED_PIN, LOW);
+
+#ifndef XBEE_USES_UART0
+    Serial.begin(115200);
+    delay(500);
+#endif
+
+    // 1. SD card FIRST (while UART0 is still at bootloader 115200 baud)
+    if (!initSDCard()) {
+        while (true) delay(1000);
+    }
+
+    // 2. Wait for bootloader UART0 output and XBee boot-up to finish
+    delay(2000);
+
+    // 3. XBee — Serial.begin(9600) AFTER all SPI is done
+    xbeeInit();
+
+    // 4. AT command probe
+    xbeeQueryConfig();
+
+    // 5. Node client + callback
+    nodeClientInit();
+    xbeeSetReceiveCallback([](const char* payload, size_t len) {
+        if (!nodeClientHandleCommand(payload, len)) {
+            dbgprintf("[XBee] Unhandled: %.80s\n", payload);
+        }
+    });
+
+    // 6. WiFi AP
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONN);
+    delay(100);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    // 7. DNS + Web server
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+    setupWebServer(server);
+    server.begin();
+
+    // 8. Wait for XBee network
+    delay(3000);
+}
+```
+
+## How to Verify
+
+1. Flash the firmware
+2. Connect to WiFi AP, open the admin/node testing page
+3. Check the XBee Serial Monitor — it should show:
+   - "AT AP = 1" (API mode)
+   - "AT CE = 0" (Router) or "AT CE = 1" (Coordinator)
+   - "AT ID = 0xXXXX" (PAN ID)
+   - "AT MY = 0xXXXX" (16-bit address)
+4. If AT responses are received → UART TX and RX both work
+5. If NO AT responses → XBee module is not responding (check wiring + power)
+
+---
+
+*End of Change #8*

@@ -1,14 +1,5 @@
 /*
- * xbee_comm.h — XBee S2C API Mode 1 driver (rebuilt from scratch).
- *
- * Based on the working XBEE_COMM_TEST project that was proven to
- * communicate between two ESP32-CAM boards over XBee ZigBee.
- *
- * XBee configuration:
- *   AP = 1 (API mode without escapes)
- *   CE = 1 (Coordinator) on admin,  CE = 0 (Router) on nodes
- *   BD = 3 (9600 baud)
- *   ID = same PAN ID on all modules
+ * xbee_comm.h — XBee S2C API Mode 1 driver.
  *
  * ESP32-CAM wiring:
  *   GPIO 1 (U0TXD) → XBee DIN  (pin 3)
@@ -30,6 +21,8 @@
 #define XBEE_TX_STATUS     0x8B
 #define XBEE_MODEM_STATUS  0x8A
 #define XBEE_RX_PACKET     0x90
+#define XBEE_AT_COMMAND    0x08
+#define XBEE_AT_RESPONSE   0x88
 #define XBEE_MAX_FRAME     512
 
 // ── Event log ───────────────────────────────────────────────────────
@@ -44,6 +37,16 @@ struct XBeeLogEntry {
     char msg[XBEE_LOG_MSG_MAX];
 };
 
+// ── XBee module configuration (queried via AT commands) ─────────────
+struct XBeeConfig {
+    bool    valid;            // true if at least one AT response received
+    int     ap_mode;          // AP parameter (1 = API mode 1, 0 = transparent)
+    int     coordinator;      // CE parameter (1 = coordinator, 0 = router)
+    uint16_t pan_id;          // ID parameter (PAN ID)
+    uint16_t my_addr;         // MY parameter (16-bit network address)
+    int     responses;        // how many AT responses received (expect 4)
+};
+
 // ── Callback for received RF data ───────────────────────────────────
 typedef void (*XBeeReceiveCB)(const char* payload, size_t len);
 
@@ -53,8 +56,12 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len);
 void xbeeProcessIncoming();
 void xbeeSetReceiveCallback(XBeeReceiveCB cb);
 
-/// Flush any pending RX bytes (call after SD/WiFi init to clear garbage).
-void xbeeFlushRx();
+/// Query XBee module config via AT Command frames (AP, ID, CE, MY).
+/// Call AFTER xbeeInit(). Takes ~500ms. Results available via xbeeGetConfig().
+void xbeeQueryConfig();
+
+/// Get cached XBee config from last xbeeQueryConfig() call.
+const XBeeConfig& xbeeGetConfig();
 
 // ── Web API (for admin testing page) ────────────────────────────────
 void xbeeGetLog(JsonArray& arr);

@@ -1,14 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════
-//  xbee_comm.cpp — XBee S2C API Mode 1 driver (rebuilt from scratch)
+//  xbee_comm.cpp — XBee S2C API Mode 1 driver
 //
-//  Based on the working XBEE_COMM_TEST project that was proven to
-//  communicate between two ESP32-CAM boards.
-//
-//  Key design decisions (matching the working test project):
-//    - Serial.begin(9600) only — no Serial.end(), no pin args
-//    - 6 separate Serial.write() calls for TX (identical to test project)
-//    - Same RX state machine with frame timeout
-//    - Flush bootloader garbage after init
+//  Key feature: AT Command probe (xbeeQueryConfig) that queries the
+//  XBee module's AP, ID, CE, MY parameters via API frames.  If we get
+//  a response, UART TX + RX are both proven working.
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "xbee_comm.h"
@@ -41,6 +36,9 @@ static unsigned long frameTimeouts   = 0;
 static unsigned long modemStatusCnt  = 0;
 static uint8_t       lastModemStatus = 0;
 
+// ── XBee module configuration (populated by xbeeQueryConfig) ────────
+static XBeeConfig xbeeConfig = {};
+
 // ── Event log ring buffer ───────────────────────────────────────────
 static XBeeLogEntry logRing[XBEE_LOG_SIZE];
 static int logHead  = 0;
@@ -70,8 +68,6 @@ static uint8_t   rxFrame[XBEE_MAX_FRAME];
 static uint8_t   rxChecksum   = 0;
 static uint32_t  rxFrameStart = 0;
 
-// Abandon an incomplete frame if no new byte arrives within 1 second.
-// XBee at 9600 baud ≈ 1.04 ms/byte; a 512-byte frame ≈ 530 ms.
 static const uint32_t FRAME_TIMEOUT_MS = 1000;
 
 // ═════════════════════════════════════════════════════════════════════
@@ -79,17 +75,13 @@ static const uint32_t FRAME_TIMEOUT_MS = 1000;
 // ═════════════════════════════════════════════════════════════════════
 
 void xbeeInit() {
-    // Match the working test project exactly:
-    //   xbeeSerial.begin(XBEE_BAUD);
-    // No Serial.end(), no delay before, no explicit pin args for UART0.
 #ifdef XBEE_USES_UART0
     xbeeSerial.begin(XBEE_BAUD);
 #else
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
 #endif
 
-    // Flush bootloader garbage (bootloader runs at 115200 baud, XBee at 9600).
-    // Wait until no new bytes arrive for 100 ms.
+    // Flush bootloader garbage (115200→9600 baud change produces noise).
     {
         uint32_t lastByte = millis();
         while (millis() - lastByte < 100) {
@@ -100,6 +92,10 @@ void xbeeInit() {
         }
     }
 
+    memset(&xbeeConfig, 0, sizeof(xbeeConfig));
+    xbeeConfig.ap_mode = -1;
+    xbeeConfig.coordinator = -1;
+
     logEvent('S', 0, 0, "XBee init: TX=GPIO%d RX=GPIO%d baud=%d",
              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
     dbgprintf("[XBee] UART ready — TX=GPIO%d RX=GPIO%d baud=%d\n",
@@ -109,10 +105,6 @@ void xbeeInit() {
 // ═════════════════════════════════════════════════════════════════════
 //  xbeeSendBroadcast — build and send a 0x10 Transmit Request frame
 // ═════════════════════════════════════════════════════════════════════
-//
-//  Uses the same 6 separate Serial.write() calls as the working test
-//  project.  The previous "atomic buffer" approach was not proven to
-//  work and may have different timing characteristics.
 
 uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     if (len == 0 || len > XBEE_MAX_FRAME - 18) return 0;
@@ -121,13 +113,10 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     if (++frameIdCounter == 0) frameIdCounter = 1;
     uint8_t fid = frameIdCounter;
 
-    // 14-byte header: frame type + ID + 64-bit broadcast addr + options
     uint8_t hdr[14] = {
         XBEE_TX_REQUEST, fid,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,  // dest: broadcast
-        0xFF, 0xFE,                                        // 16-bit: 0xFFFE
-        0x00,                                              // broadcast radius
-        0x00                                               // options
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+        0xFF, 0xFE, 0x00, 0x00
     };
 
     uint8_t cksum = 0;
@@ -135,7 +124,6 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
     cksum = 0xFF - cksum;
 
-    // ── 6 separate writes — matches the working test project ────────
     xbeeSerial.write(XBEE_START_DELIM);
     xbeeSerial.write((uint8_t)(frameDataLen >> 8));
     xbeeSerial.write((uint8_t)(frameDataLen & 0xFF));
@@ -161,13 +149,23 @@ void xbeeSetReceiveCallback(XBeeReceiveCB cb) {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  xbeeFlushRx — discard any pending bytes on the serial port
+//  sendATQuery — send an AT Command frame (0x08) to query a parameter
 // ═════════════════════════════════════════════════════════════════════
 
-void xbeeFlushRx() {
-    rxState = WAIT_DELIM;
-    while (xbeeSerial.available()) xbeeSerial.read();
-    logEvent('S', 0, 0, "RX buffer flushed");
+static void sendATQuery(uint8_t fid, char at1, char at2) {
+    uint8_t frame[8];
+    frame[0] = XBEE_START_DELIM;
+    frame[1] = 0x00;  // length MSB
+    frame[2] = 0x04;  // length LSB (type + fid + at1 + at2 = 4)
+    frame[3] = XBEE_AT_COMMAND;
+    frame[4] = fid;
+    frame[5] = (uint8_t)at1;
+    frame[6] = (uint8_t)at2;
+    frame[7] = 0xFF - ((frame[3] + frame[4] + frame[5] + frame[6]) & 0xFF);
+
+    xbeeSerial.write(frame, 8);
+    xbeeSerial.flush();
+    totalTxBytes += 8;
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -187,7 +185,6 @@ static void handleCompleteFrame() {
             const char* rfData = (const char*)&rxFrame[12];
             size_t rfLen = rxFrameLen - 12;
 
-            // Strip trailing CR/LF
             while (rfLen > 0 && (rfData[rfLen - 1] == '\n' || rfData[rfLen - 1] == '\r'))
                 rfLen--;
 
@@ -216,7 +213,6 @@ static void handleCompleteFrame() {
             } else {
                 txStatusFail++;
                 logEvent('E', 0x8B, fid, "TX FAIL 0x%02X", delivery);
-                dbgprintf("[XBee] TX FAIL 0x%02X (id=%d)\n", delivery, fid);
             }
         }
         break;
@@ -237,14 +233,54 @@ static void handleCompleteFrame() {
                 case 0x11: desc = "Config changed (re-applying)"; break;
             }
             logEvent('S', 0x8A, 0, "Modem: %s (0x%02X)", desc, rxFrame[1]);
-            dbgprintf("[XBee] Modem status: 0x%02X (%s)\n", rxFrame[1], desc);
+        }
+        break;
+
+    // ── 0x88  AT Command Response ───────────────────────────────
+    case XBEE_AT_RESPONSE:
+        if (rxFrameLen >= 5) {
+            char at[3] = { (char)rxFrame[2], (char)rxFrame[3], '\0' };
+            uint8_t status = rxFrame[4];
+            if (status == 0x00) {
+                xbeeConfig.responses++;
+                xbeeConfig.valid = true;
+
+                // AP and CE are 1-byte values.
+                // ID and MY are 1-byte if value < 0x100, 2-byte otherwise.
+                if (at[0] == 'A' && at[1] == 'P' && rxFrameLen >= 6) {
+                    xbeeConfig.ap_mode = rxFrame[5];
+                    logEvent('S', 0x88, rxFrame[1], "AT AP = %d", rxFrame[5]);
+                }
+                else if (at[0] == 'I' && at[1] == 'D' && rxFrameLen >= 6) {
+                    xbeeConfig.pan_id = (rxFrameLen >= 7)
+                        ? ((uint16_t)rxFrame[5] << 8) | rxFrame[6]
+                        : rxFrame[5];
+                    logEvent('S', 0x88, rxFrame[1], "AT ID = 0x%04X", xbeeConfig.pan_id);
+                }
+                else if (at[0] == 'C' && at[1] == 'E' && rxFrameLen >= 6) {
+                    xbeeConfig.coordinator = rxFrame[5];
+                    logEvent('S', 0x88, rxFrame[1], "AT CE = %d (%s)",
+                             rxFrame[5], rxFrame[5] ? "Coordinator" : "Router");
+                }
+                else if (at[0] == 'M' && at[1] == 'Y' && rxFrameLen >= 6) {
+                    xbeeConfig.my_addr = (rxFrameLen >= 7)
+                        ? ((uint16_t)rxFrame[5] << 8) | rxFrame[6]
+                        : rxFrame[5];
+                    logEvent('S', 0x88, rxFrame[1], "AT MY = 0x%04X", xbeeConfig.my_addr);
+                }
+                else {
+                    logEvent('S', 0x88, rxFrame[1], "AT %s OK", at);
+                }
+            } else {
+                logEvent('E', 0x88, rxFrame[1], "AT %s FAIL status=0x%02X", at, status);
+            }
         }
         break;
 
     // ── 0x10  Self-echo (our own TX looping back) ───────────────
     case XBEE_TX_REQUEST:
         selfEchoCount++;
-        break;  // silently ignore
+        break;
 
     default:
         logEvent('R', ft, 0, "Unknown frame 0x%02X len=%d", ft, rxFrameLen);
@@ -257,7 +293,6 @@ static void handleCompleteFrame() {
 // ═════════════════════════════════════════════════════════════════════
 
 void xbeeProcessIncoming() {
-    // Frame timeout: abandon incomplete frames if stalled
     if (rxState != WAIT_DELIM) {
         if (millis() - rxFrameStart > FRAME_TIMEOUT_MS) {
             frameTimeouts++;
@@ -318,6 +353,56 @@ void xbeeProcessIncoming() {
 }
 
 // ═════════════════════════════════════════════════════════════════════
+//  xbeeQueryConfig — query XBee module via AT Command frames
+// ═════════════════════════════════════════════════════════════════════
+//
+//  Sends AT queries for AP, ID, CE, MY.  Each query is 8 bytes and the
+//  response takes ~10-50ms.  Total time: ~500ms.
+//
+//  If ANY response is received, it proves:
+//    ✅ UART TX (ESP32 → XBee DIN) works
+//    ✅ UART RX (XBee DOUT → ESP32) works
+//    ✅ XBee module is powered and responsive
+//
+//  The results are cached and available via xbeeGetConfig().
+
+void xbeeQueryConfig() {
+    logEvent('S', 0, 0, "Querying XBee module config (AT AP, ID, CE, MY)...");
+
+    // Query AP (API mode) — frame ID 0xF1
+    sendATQuery(0xF1, 'A', 'P');
+    delay(100);
+    xbeeProcessIncoming();
+
+    // Query ID (PAN ID) — frame ID 0xF2
+    sendATQuery(0xF2, 'I', 'D');
+    delay(100);
+    xbeeProcessIncoming();
+
+    // Query CE (Coordinator Enable) — frame ID 0xF3
+    sendATQuery(0xF3, 'C', 'E');
+    delay(100);
+    xbeeProcessIncoming();
+
+    // Query MY (16-bit address) — frame ID 0xF4
+    sendATQuery(0xF4, 'M', 'Y');
+    delay(100);
+    xbeeProcessIncoming();
+
+    if (xbeeConfig.valid) {
+        logEvent('S', 0, 0, "XBee probe OK: %d/4 responses. AP=%d CE=%d ID=0x%04X MY=0x%04X",
+                 xbeeConfig.responses, xbeeConfig.ap_mode, xbeeConfig.coordinator,
+                 xbeeConfig.pan_id, xbeeConfig.my_addr);
+    } else {
+        logEvent('E', 0, 0, "XBee probe FAILED: 0 responses. Check wiring and XBee power.");
+    }
+}
+
+const XBeeConfig& xbeeGetConfig() {
+    return xbeeConfig;
+}
+
+// ═════════════════════════════════════════════════════════════════════
 //  Web API functions (for admin testing page)
 // ═════════════════════════════════════════════════════════════════════
 
@@ -355,21 +440,48 @@ void xbeeGetDiagnostics(JsonObject& diag) {
     diag["rx_pin"]           = XBEE_RX_PIN;
     diag["baud"]             = XBEE_BAUD;
 
+    // XBee module config from AT query
+    JsonObject cfg = diag["xbee_config"].to<JsonObject>();
+    cfg["probe_ok"]    = xbeeConfig.valid;
+    cfg["responses"]   = xbeeConfig.responses;
+    cfg["ap_mode"]     = xbeeConfig.ap_mode;
+    cfg["coordinator"] = xbeeConfig.coordinator;
+    cfg["pan_id"]      = xbeeConfig.pan_id;
+    cfg["my_addr"]     = xbeeConfig.my_addr;
+
+    // Pan ID as hex string for display
+    char panHex[8];
+    snprintf(panHex, sizeof(panHex), "0x%04X", xbeeConfig.pan_id);
+    cfg["pan_id_hex"] = panHex;
+
+    char myHex[8];
+    snprintf(myHex, sizeof(myHex), "0x%04X", xbeeConfig.my_addr);
+    cfg["my_addr_hex"] = myHex;
+
     // Assessment
-    if (rxDataFrames > 0) {
-        diag["assessment"] = "FULLY WORKING — receiving 0x90 data frames from remote XBee.";
+    if (!xbeeConfig.valid) {
+        diag["assessment"] = "XBEE NOT RESPONDING — AT command probe got 0 replies. "
+                             "Check: (1) XBee powered? (2) GPIO1→DIN, GPIO3←DOUT wired? "
+                             "(3) XBee in AP=1 mode?";
+    } else if (xbeeConfig.ap_mode != 1) {
+        char buf[120];
+        snprintf(buf, sizeof(buf),
+                 "WRONG MODE — XBee AP=%d (need AP=1). "
+                 "Open XCTU, set AP=1 (API mode without escapes), Write.",
+                 xbeeConfig.ap_mode);
+        diag["assessment"] = buf;
+    } else if (rxDataFrames > 0) {
+        diag["assessment"] = "FULLY WORKING — XBee AP=1, receiving data from remote node.";
     } else if (txStatusOk > 0 && totalRxBytes > 0) {
-        diag["assessment"] = "PARTIAL — TX OK, RX bytes seen but no 0x90 data frames yet.";
-    } else if (txStatusOk > 0) {
-        diag["assessment"] = "TX ONLY — XBee acknowledges frames but no RX data. "
-                             "Check remote XBee power, same PAN ID, and sending.";
+        diag["assessment"] = "UART OK, TX OK — waiting for remote node to send data. "
+                             "Check node is powered and has same PAN ID.";
+    } else if (txStatusFail > 0) {
+        diag["assessment"] = "TX FAIL — XBee sends but delivery fails. "
+                             "No remote device found. Check PAN IDs match.";
     } else if (totalRxBytes > 0) {
-        diag["assessment"] = "RX BYTES but no valid frames. Check XBee AP=1 (API mode).";
-    } else if (totalTxBytes > 0) {
-        diag["assessment"] = "SENT bytes but no TX status and no RX. "
-                             "Check XBee AP=1 and TX→DIN wiring.";
+        diag["assessment"] = "UART RX OK but no parsed frames yet. Waiting...";
     } else {
-        diag["assessment"] = "NO COMMUNICATION — check wiring, XBee power, and AP=1.";
+        diag["assessment"] = "UART OK (AT probe passed) but no data yet. Waiting for TX/RX...";
     }
 }
 
