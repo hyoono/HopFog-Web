@@ -69,8 +69,7 @@ static void startAP() {
 
 // ── Setup ───────────────────────────────────────────────────────────
 //
-// INIT ORDER — matches the working test project (XBEE_COMM_TEST.md)
-// exactly.  The test project is the only configuration proven to work:
+// INIT ORDER — matches the working test project (XBEE_COMM_TEST.md):
 //
 //   1. Flash LED off
 //   2. xbeeInit() + callback  ← FIRST, before anything else
@@ -78,16 +77,11 @@ static void startAP() {
 //   4. Auth
 //   5. WiFi AP
 //   6. DNS + Web server
-//   7. delay(3000)  ← give XBee time to form/join network
-//
-// KEY DIFFERENCES from previous broken versions:
-//   • Serial.end() is NOT called before Serial.begin() (caused bad UART state)
-//   • esp_log_level_set() is NOT called (CORE_DEBUG_LEVEL=0 is sufficient)
-//   • xbeeInit() runs BEFORE SD/WiFi (not after)
-//   • delay(3000) matches the test project (not 2000)
+//   7. Flush UART RX  ← NEW: clear any garbage from SD/WiFi init
+//   8. delay(3000)    ← XBee network stabilisation
 //
 void setup() {
-    // Disable ESP32-CAM flash LED immediately (GPIO 4 = flash LED transistor)
+    // Disable ESP32-CAM flash LED (GPIO 4 = flash LED transistor)
     pinMode(4, OUTPUT);
     digitalWrite(4, LOW);
 
@@ -100,22 +94,13 @@ void setup() {
     dbgprintln("   HopFog-Web  ESP32 Firmware");
     dbgprintln("========================================");
 
-    // 1. XBee S2C (ZigBee) — init FIRST, before anything else.
-    //    The working test project calls Serial.begin(9600) as the very
-    //    first thing.  SD card SPI init and WiFi may have side effects
-    //    on UART0 if called before Serial.begin().
-    //    NOTE: Do NOT call esp_log_level_set() — CORE_DEBUG_LEVEL=0
-    //    (set in platformio.ini) compiles out all ESP-IDF log calls.
-    //    The test project does not call esp_log_level_set() either.
+    // 1. XBee — init FIRST (matches working test project)
     xbeeInit();
 
-    // 2. Node protocol handler + XBee receive callback
-    //    Set callback immediately after xbeeInit() (matches test project).
+    // 2. Node protocol + callback (immediately after xbeeInit)
     nodeProtocolInit();
     xbeeSetReceiveCallback([](const char* line, size_t len) {
-        // Try to handle as JSON node command first
         if (!nodeProtocolHandleLine(line, len)) {
-            // Not a JSON command — log as raw data
             dbgprintf("[XBee] RX (%d bytes): %s\n", (int)len, line);
         }
     });
@@ -126,29 +111,29 @@ void setup() {
         while (true) { delay(1000); }
     }
 
-    // 4. Auth subsystem
+    // 4. Auth
     authInit();
 
-    // 5. WiFi access point
+    // 5. WiFi AP
     startAP();
 
-    // 6. Captive-portal DNS — resolve ALL domains to the AP IP
+    // 6. DNS captive portal + Web server
     dnsServer.setTTL(300);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
-    dbgprintf("[DNS] Captive portal active — http://%s → %s\n",
-              CUSTOM_DOMAIN, WiFi.softAPIP().toString().c_str());
+    dbgprintf("[DNS] Captive portal → %s\n", WiFi.softAPIP().toString().c_str());
 
-    // 7. Web server (static files + API)
     setupWebServer(server);
     registerApiRoutes(server);
     server.begin();
-    dbgprintf("[HTTP] Server listening on port %d\n", HTTP_PORT);
-    dbgprintf("[HTTP] Open http://%s in your browser\n", CUSTOM_DOMAIN);
+    dbgprintf("[HTTP] Server on port %d — http://%s\n", HTTP_PORT, CUSTOM_DOMAIN);
 
-    // 8. Wait for XBee network to stabilise.
-    //    The working test project has delay(3000) here.
-    //    The coordinator XBee needs 2-4 seconds to form the network;
-    //    the router XBee needs time to discover and join it.
+    // 7. Flush UART RX buffer — SD card SPI init and WiFi driver startup
+    //    may have produced garbage on UART0 that would confuse the XBee
+    //    frame parser.  The test project has no SD card so it never hits
+    //    this problem.
+    xbeeFlushRx();
+
+    // 8. Wait for XBee network (matches test project's delay(3000))
     delay(3000);
 }
 

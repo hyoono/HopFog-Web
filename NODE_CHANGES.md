@@ -1075,3 +1075,272 @@ After applying this change, the admin web dashboard (Testing page → XBee Seria
 ---
 
 *End of Change #6*
+
+---
+
+## Change #7: Rebuild XBee Driver from Scratch (REPLACE ALL PREVIOUS CHANGES)
+
+**Date:** 2026-03-08
+**Priority:** CRITICAL — replaces all previous XBee changes
+**Branch:** `copilot/setup-and-xbee-driver`
+
+### Context
+
+The XBEE_COMM_TEST project (a minimal ESP32-CAM + XBee test project with no SD card)
+works perfectly — both devices communicate. The full admin and node projects do not.
+After extensive troubleshooting, the XBee driver has been rebuilt from scratch based
+on the working test project. This change replaces all previous XBee-related changes
+(#1 through #6).
+
+### What Changed (Admin Side — Already Applied)
+
+1. **Complete rewrite of `xbee_comm.cpp`** — matches working test project exactly:
+   - `Serial.begin(9600)` with bootloader garbage flush
+   - 6 separate `Serial.write()` calls for TX (matches test project)
+   - Frame timeout (1000ms) to abandon stalled frames
+   - 0x8A Modem Status handling (network join/leave notifications)
+   - Simplified state machine names (LEN_HI, LEN_LO, FRAME_DATA, CHECKSUM)
+
+2. **Added `xbeeFlushRx()`** — called after SD/WiFi init to clear UART garbage
+
+3. **Updated init order in `main.cpp`**:
+   ```
+   1. Flash LED off
+   2. xbeeInit() + callback
+   3. SD card init
+   4. Auth
+   5. WiFi AP
+   6. DNS + Web server
+   7. xbeeFlushRx()      ← NEW: flush garbage from SD/WiFi init
+   8. delay(3000)
+   ```
+
+### What You Need to Do (Node Side)
+
+**Replace `src/xbee_comm.cpp` entirely** with this code:
+
+```cpp
+// xbee_comm.cpp — XBee S2C API Mode 1 driver (rebuilt from scratch)
+//
+// Based on the working XBEE_COMM_TEST project.
+// Uses UART0 (Serial) on native IOMUX pins GPIO 1 (TX) / GPIO 3 (RX).
+
+#include "xbee_comm.h"
+#include "config.h"
+#include <stdarg.h>
+
+static HardwareSerial& xbeeSerial = Serial;
+static XBeeReceiveCB rxCallback = nullptr;
+static uint8_t frameIdCounter = 0;
+
+// Diagnostic counters
+static XBeeStats stats = {};
+
+// Frame receive state machine
+enum RxState { WAIT_DELIM, LEN_HI, LEN_LO, FRAME_DATA, CHECKSUM };
+static RxState   rxState      = WAIT_DELIM;
+static uint16_t  rxFrameLen   = 0;
+static uint16_t  rxIdx        = 0;
+static uint8_t   rxFrame[XBEE_MAX_FRAME];
+static uint8_t   rxChecksum   = 0;
+static uint32_t  rxFrameStart = 0;
+static const uint32_t FRAME_TIMEOUT_MS = 1000;
+
+void xbeeInit() {
+    xbeeSerial.begin(XBEE_BAUD);
+
+    // Flush bootloader garbage (bootloader runs at 115200, XBee at 9600)
+    {
+        uint32_t lastByte = millis();
+        while (millis() - lastByte < 100) {
+            if (xbeeSerial.available()) {
+                xbeeSerial.read();
+                lastByte = millis();
+            }
+        }
+    }
+
+    memset(&stats, 0, sizeof(stats));
+    dbgprintf("[XBee] UART0 ready — baud=%d TX=GPIO%d RX=GPIO%d\n",
+              XBEE_BAUD, XBEE_TX_PIN, XBEE_RX_PIN);
+}
+
+uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
+    if (len == 0 || len > XBEE_MAX_FRAME - 18) return 0;
+
+    if (++frameIdCounter == 0) frameIdCounter = 1;
+    uint8_t fid = frameIdCounter;
+    uint16_t frameDataLen = 14 + len;
+
+    uint8_t hdr[14] = {
+        XBEE_TX_REQUEST, fid,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+        0xFF, 0xFE, 0x00, 0x00
+    };
+
+    uint8_t cksum = 0;
+    for (int i = 0; i < 14; i++) cksum += hdr[i];
+    for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
+    cksum = 0xFF - cksum;
+
+    // 6 separate writes — matches the working test project
+    xbeeSerial.write(XBEE_START_DELIM);
+    xbeeSerial.write((uint8_t)(frameDataLen >> 8));
+    xbeeSerial.write((uint8_t)(frameDataLen & 0xFF));
+    xbeeSerial.write(hdr, 14);
+    xbeeSerial.write((const uint8_t*)payload, len);
+    xbeeSerial.write(cksum);
+    xbeeSerial.flush();
+
+    stats.totalTxBytes += 3 + 14 + len + 1;
+    stats.txFramesSent++;
+    dbgprintf("[XBee] TX id=%d len=%d\n", fid, (int)len);
+    return fid;
+}
+
+void xbeeSetReceiveCallback(XBeeReceiveCB cb) { rxCallback = cb; }
+const XBeeStats& xbeeGetStats() { return stats; }
+
+void xbeeFlushRx() {
+    rxState = WAIT_DELIM;
+    while (xbeeSerial.available()) xbeeSerial.read();
+}
+
+static void handleCompleteFrame() {
+    stats.rxFramesParsed++;
+    uint8_t ft = rxFrame[0];
+
+    switch (ft) {
+    case XBEE_RX_PACKET:
+        if (rxFrameLen < 13) break;
+        {
+            const char* rfData = (const char*)&rxFrame[12];
+            size_t rfLen = rxFrameLen - 12;
+            while (rfLen > 0 && (rfData[rfLen-1]=='\n'||rfData[rfLen-1]=='\r')) rfLen--;
+            if (rfLen > 0) {
+                rxFrame[12 + rfLen] = '\0';
+                stats.rxDataFrames++;
+                dbgprintf("[XBee] RX 0x90 (%d B): %.80s\n", (int)rfLen, rfData);
+                if (rxCallback) rxCallback(rfData, rfLen);
+            }
+        }
+        break;
+    case XBEE_TX_STATUS:
+        if (rxFrameLen < 7) break;
+        if (rxFrame[5] == 0x00) { stats.txStatusOK++; }
+        else { stats.txStatusFail++; dbgprintf("[XBee] TX FAIL 0x%02X\n", rxFrame[5]); }
+        break;
+    case XBEE_MODEM_STATUS:
+        if (rxFrameLen >= 2) {
+            stats.modemStatusCount++;
+            stats.lastModemStatus = rxFrame[1];
+            dbgprintf("[XBee] Modem status: 0x%02X\n", rxFrame[1]);
+        }
+        break;
+    case XBEE_TX_REQUEST:
+        break;  // self-echo, ignore silently
+    default:
+        dbgprintf("[XBee] Unknown frame 0x%02X\n", ft);
+        break;
+    }
+}
+
+void xbeeProcessIncoming() {
+    if (rxState != WAIT_DELIM && millis() - rxFrameStart > FRAME_TIMEOUT_MS) {
+        stats.frameTimeouts++;
+        rxState = WAIT_DELIM;
+    }
+    while (xbeeSerial.available()) {
+        uint8_t b = xbeeSerial.read();
+        stats.totalRxBytes++;
+        switch (rxState) {
+        case WAIT_DELIM:
+            if (b == XBEE_START_DELIM) { rxState = LEN_HI; rxFrameStart = millis(); }
+            break;
+        case LEN_HI:
+            rxFrameLen = (uint16_t)b << 8; rxState = LEN_LO; break;
+        case LEN_LO:
+            rxFrameLen |= b;
+            if (rxFrameLen == 0 || rxFrameLen >= XBEE_MAX_FRAME) { rxState = WAIT_DELIM; }
+            else { rxIdx = 0; rxChecksum = 0; rxState = FRAME_DATA; }
+            break;
+        case FRAME_DATA:
+            rxFrame[rxIdx++] = b; rxChecksum += b;
+            if (rxIdx >= rxFrameLen) rxState = CHECKSUM;
+            break;
+        case CHECKSUM:
+            rxChecksum += b;
+            if (rxChecksum == 0xFF) handleCompleteFrame();
+            else stats.checksumErrors++;
+            rxState = WAIT_DELIM;
+            break;
+        }
+    }
+}
+```
+
+**Replace `include/xbee_comm.h` entirely** with this code:
+
+```cpp
+#ifndef XBEE_COMM_H
+#define XBEE_COMM_H
+
+#include <Arduino.h>
+
+#define XBEE_START_DELIM   0x7E
+#define XBEE_TX_REQUEST    0x10
+#define XBEE_TX_STATUS     0x8B
+#define XBEE_MODEM_STATUS  0x8A
+#define XBEE_RX_PACKET     0x90
+#define XBEE_MAX_FRAME     512
+
+struct XBeeStats {
+    uint32_t totalRxBytes;
+    uint32_t totalTxBytes;
+    uint32_t rxFramesParsed;
+    uint32_t rxDataFrames;
+    uint32_t txFramesSent;
+    uint32_t txStatusOK;
+    uint32_t txStatusFail;
+    uint32_t checksumErrors;
+    uint32_t frameTimeouts;
+    uint32_t modemStatusCount;
+    uint8_t  lastModemStatus;
+};
+
+typedef void (*XBeeReceiveCB)(const char* payload, size_t len);
+
+void            xbeeInit();
+uint8_t         xbeeSendBroadcast(const char* payload, size_t len);
+void            xbeeProcessIncoming();
+void            xbeeSetReceiveCallback(XBeeReceiveCB cb);
+void            xbeeFlushRx();
+const XBeeStats& xbeeGetStats();
+
+#endif // XBEE_COMM_H
+```
+
+**Update `src/main.cpp` setup()** — add `xbeeFlushRx()` after SD/WiFi init:
+
+In your setup() function, add this line AFTER all initialization (SD, WiFi, web server)
+and BEFORE the final `delay(3000)`:
+
+```cpp
+    // Flush UART RX garbage from SD/WiFi init
+    xbeeFlushRx();
+```
+
+### Verification
+
+After applying these changes:
+1. Build: `pio run` should succeed with 0 errors, 0 warnings
+2. Flash both devices
+3. Power both on — within 30 seconds:
+   - Node should send REGISTER → admin sends REGISTER_ACK
+   - Node should send SYNC_REQUEST → admin sends SYNC_DATA
+   - Node enters RUNNING state and sends HEARTBEAT every 30s
+4. Check admin web dashboard (Testing page) — should show RX bytes > 0
+
+---
+
+*End of Change #7*

@@ -1,55 +1,50 @@
-/*
- * xbee_comm.cpp — Digi XBee S2C (ZigBee) serial driver.
- *
- * Uses API mode 1 (AP=1) with binary-framed packets.
- * JSON payloads are wrapped in 0x10 Transmit Request frames for
- * sending, and extracted from 0x90 Receive Packet frames on receive.
- *
- * ESP32-CAM: uses UART0 (Serial) on GPIO 1 (TX) and GPIO 3 (RX).
- *   These are the native U0TXD/U0RXD IOMUX pins — the most reliable
- *   option with zero pin conflicts.  USB Serial Monitor is not available.
- * Generic ESP32: uses UART2 (Serial2) on GPIO 13 (TX) and GPIO 12 (RX).
- *   UART0 stays free for Serial Monitor debug output.
- *
- * Includes a ring-buffer event log that is exposed via /api/xbee/rx-log
- * so the web admin testing page can show a live "serial monitor".
- */
+// ═══════════════════════════════════════════════════════════════════════
+//  xbee_comm.cpp — XBee S2C API Mode 1 driver (rebuilt from scratch)
+//
+//  Based on the working XBEE_COMM_TEST project that was proven to
+//  communicate between two ESP32-CAM boards.
+//
+//  Key design decisions (matching the working test project):
+//    - Serial.begin(9600) only — no Serial.end(), no pin args
+//    - 6 separate Serial.write() calls for TX (identical to test project)
+//    - Same RX state machine with frame timeout
+//    - Flush bootloader garbage after init
+// ═══════════════════════════════════════════════════════════════════════
 
 #include "xbee_comm.h"
 #include "config.h"
+#include <stdarg.h>
 
-// ── Internal state ──────────────────────────────────────────────────
-// ESP32-CAM: use UART0 (Serial) on native GPIO 1/3 — IOMUX, no remapping
-// Generic ESP32: use UART2 (Serial2) on GPIO 13/12
+// ── UART handle ─────────────────────────────────────────────────────
 #ifdef XBEE_USES_UART0
   static HardwareSerial& xbeeSerial = Serial;
 #else
   static HardwareSerial& xbeeSerial = Serial2;
 #endif
-static XBeeReceiveCB   rxCallback = nullptr;
-static uint8_t         frameIdCounter = 0;
 
-// Diagnostic counters
-static unsigned long   totalRxBytes      = 0;
-static unsigned long   totalTxBytes      = 0;
-static unsigned long   rxFramesParsed    = 0;
-static unsigned long   txStatusOk        = 0;
-static unsigned long   txStatusFail      = 0;
-static unsigned long   selfEchoCount     = 0;
-static unsigned long   loopCallCount     = 0;
+// ── Callback ────────────────────────────────────────────────────────
+static XBeeReceiveCB rxCallback = nullptr;
 
-// Raw byte sniffer — captures first N bytes for hex dump debugging
-#define RAW_SNIFF_SIZE 64
-static uint8_t  rawSniffBuf[RAW_SNIFF_SIZE];
-static int      rawSniffCount = 0;
+// ── TX frame ID counter (1–255, wraps) ──────────────────────────────
+static uint8_t frameIdCounter = 0;
 
-// Maximum API frame payload we'll accept (0x90 overhead + RF data)
-#define XBEE_MAX_FRAME  512
+// ── Diagnostic counters ─────────────────────────────────────────────
+static unsigned long totalRxBytes    = 0;
+static unsigned long totalTxBytes    = 0;
+static unsigned long txStatusOk      = 0;
+static unsigned long txStatusFail    = 0;
+static unsigned long rxFramesParsed  = 0;
+static unsigned long rxDataFrames    = 0;
+static unsigned long selfEchoCount   = 0;
+static unsigned long checksumErrors  = 0;
+static unsigned long frameTimeouts   = 0;
+static unsigned long modemStatusCnt  = 0;
+static uint8_t       lastModemStatus = 0;
 
 // ── Event log ring buffer ───────────────────────────────────────────
 static XBeeLogEntry logRing[XBEE_LOG_SIZE];
-static int logHead = 0;   // next write index
-static int logCount = 0;  // entries stored
+static int logHead  = 0;
+static int logCount = 0;
 
 static void logEvent(char dir, uint8_t ftype, uint8_t fid, const char* fmt, ...) {
     XBeeLogEntry& e = logRing[logHead];
@@ -66,52 +61,73 @@ static void logEvent(char dir, uint8_t ftype, uint8_t fid, const char* fmt, ...)
 }
 
 // ── Frame receive state machine ─────────────────────────────────────
-enum RxState { WAIT_DELIM, GOT_LEN_HI, GOT_LEN_LO, READING_DATA, GOT_CHECKSUM };
+enum RxState { WAIT_DELIM, LEN_HI, LEN_LO, FRAME_DATA, CHECKSUM };
 
-static RxState rxState  = WAIT_DELIM;
-static uint16_t rxFrameLen  = 0;
-static uint16_t rxIdx       = 0;
-static uint8_t  rxFrame[XBEE_MAX_FRAME];
-static uint8_t  rxChecksum  = 0;
+static RxState   rxState      = WAIT_DELIM;
+static uint16_t  rxFrameLen   = 0;
+static uint16_t  rxIdx        = 0;
+static uint8_t   rxFrame[XBEE_MAX_FRAME];
+static uint8_t   rxChecksum   = 0;
+static uint32_t  rxFrameStart = 0;
 
-// ── Public API ──────────────────────────────────────────────────────
+// Abandon an incomplete frame if no new byte arrives within 1 second.
+// XBee at 9600 baud ≈ 1.04 ms/byte; a 512-byte frame ≈ 530 ms.
+static const uint32_t FRAME_TIMEOUT_MS = 1000;
+
+// ═════════════════════════════════════════════════════════════════════
+//  xbeeInit — configure UART for XBee at 9600 baud
+// ═════════════════════════════════════════════════════════════════════
 
 void xbeeInit() {
+    // Match the working test project exactly:
+    //   xbeeSerial.begin(XBEE_BAUD);
+    // No Serial.end(), no delay before, no explicit pin args for UART0.
 #ifdef XBEE_USES_UART0
-    // UART0 on native GPIO 1/3 — just call begin(), no end() first.
-    // Calling Serial.end() on an uninitialised Serial can leave the
-    // UART peripheral in a bad state (tested: the working XBEE_COMM_TEST
-    // project does NOT call end()).
     xbeeSerial.begin(XBEE_BAUD);
 #else
-    // Generic ESP32: use UART2 with explicit pin assignment
     xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
 #endif
 
-    dbgprintf("[XBee] UART started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
-              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
-    logEvent('S', 0, 0, "XBee init: TX=GPIO%d RX=GPIO%d baud=%d",
-             XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
-}
-
-uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
-    if (len == 0 || len > XBEE_MAX_FRAME - 18) {
-        logEvent('E', 0x10, 0, "TX rejected: payload %d bytes (max %d)",
-                 (int)len, XBEE_MAX_FRAME - 18);
-        return 0;
+    // Flush bootloader garbage (bootloader runs at 115200 baud, XBee at 9600).
+    // Wait until no new bytes arrive for 100 ms.
+    {
+        uint32_t lastByte = millis();
+        while (millis() - lastByte < 100) {
+            if (xbeeSerial.available()) {
+                xbeeSerial.read();
+                lastByte = millis();
+            }
+        }
     }
 
-    uint16_t frameDataLen = 14 + len;
+    logEvent('S', 0, 0, "XBee init: TX=GPIO%d RX=GPIO%d baud=%d",
+             XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+    dbgprintf("[XBee] UART ready — TX=GPIO%d RX=GPIO%d baud=%d\n",
+              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+}
 
+// ═════════════════════════════════════════════════════════════════════
+//  xbeeSendBroadcast — build and send a 0x10 Transmit Request frame
+// ═════════════════════════════════════════════════════════════════════
+//
+//  Uses the same 6 separate Serial.write() calls as the working test
+//  project.  The previous "atomic buffer" approach was not proven to
+//  work and may have different timing characteristics.
+
+uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
+    if (len == 0 || len > XBEE_MAX_FRAME - 18) return 0;
+
+    uint16_t frameDataLen = 14 + len;
     if (++frameIdCounter == 0) frameIdCounter = 1;
     uint8_t fid = frameIdCounter;
 
+    // 14-byte header: frame type + ID + 64-bit broadcast addr + options
     uint8_t hdr[14] = {
         XBEE_TX_REQUEST, fid,
-        0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0xFF, 0xFF,
-        0xFF, 0xFE,
-        0x00, 0x00
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,  // dest: broadcast
+        0xFF, 0xFE,                                        // 16-bit: 0xFFFE
+        0x00,                                              // broadcast radius
+        0x00                                               // options
     };
 
     uint8_t cksum = 0;
@@ -119,152 +135,181 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
     cksum = 0xFF - cksum;
 
-    // Build the complete frame in a single buffer to prevent
-    // interleaving with any other UART0 output (ESP-IDF logs, etc.).
-    // Total frame: 1 (delim) + 2 (len) + 14 (hdr) + payload + 1 (cksum)
-    size_t totalLen = 1 + 2 + 14 + len + 1;
-    uint8_t frameBuf[XBEE_MAX_FRAME];
-    size_t pos = 0;
-    frameBuf[pos++] = XBEE_START_DELIM;
-    frameBuf[pos++] = (uint8_t)(frameDataLen >> 8);
-    frameBuf[pos++] = (uint8_t)(frameDataLen & 0xFF);
-    memcpy(&frameBuf[pos], hdr, 14);
-    pos += 14;
-    memcpy(&frameBuf[pos], payload, len);
-    pos += len;
-    frameBuf[pos++] = cksum;
-
-    // Single atomic write — prevents interleaving
-    xbeeSerial.write(frameBuf, totalLen);
+    // ── 6 separate writes — matches the working test project ────────
+    xbeeSerial.write(XBEE_START_DELIM);
+    xbeeSerial.write((uint8_t)(frameDataLen >> 8));
+    xbeeSerial.write((uint8_t)(frameDataLen & 0xFF));
+    xbeeSerial.write(hdr, 14);
+    xbeeSerial.write((const uint8_t*)payload, len);
+    xbeeSerial.write(cksum);
     xbeeSerial.flush();
 
-    totalTxBytes += totalLen;
+    totalTxBytes += 3 + 14 + len + 1;
 
-    // Log a truncated preview of the payload (max ~170 chars to fit log entry)
-    char preview[XBEE_LOG_MSG_MAX];
-    snprintf(preview, sizeof(preview), "(%d B) %.170s%s",
+    logEvent('T', 0x10, fid, "(%d B) %.170s%s",
              (int)len, payload, len > 170 ? "..." : "");
-    logEvent('T', 0x10, fid, "%s", preview);
-
-    dbgprintf("[XBee] TX frame ID=%d (%d bytes payload)\n", fid, (int)len);
+    dbgprintf("[XBee] TX id=%d len=%d\n", fid, (int)len);
     return fid;
 }
+
+// ═════════════════════════════════════════════════════════════════════
+//  xbeeSetReceiveCallback
+// ═════════════════════════════════════════════════════════════════════
 
 void xbeeSetReceiveCallback(XBeeReceiveCB cb) {
     rxCallback = cb;
 }
 
+// ═════════════════════════════════════════════════════════════════════
+//  xbeeFlushRx — discard any pending bytes on the serial port
+// ═════════════════════════════════════════════════════════════════════
+
+void xbeeFlushRx() {
+    rxState = WAIT_DELIM;
+    while (xbeeSerial.available()) xbeeSerial.read();
+    logEvent('S', 0, 0, "RX buffer flushed");
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  handleCompleteFrame — dispatch a validated API frame
+// ═════════════════════════════════════════════════════════════════════
+
+static void handleCompleteFrame() {
+    rxFramesParsed++;
+    uint8_t ft = rxFrame[0];
+
+    switch (ft) {
+
+    // ── 0x90  Receive Packet (RF data from remote XBee) ─────────
+    case XBEE_RX_PACKET:
+        if (rxFrameLen < 13) break;
+        {
+            const char* rfData = (const char*)&rxFrame[12];
+            size_t rfLen = rxFrameLen - 12;
+
+            // Strip trailing CR/LF
+            while (rfLen > 0 && (rfData[rfLen - 1] == '\n' || rfData[rfLen - 1] == '\r'))
+                rfLen--;
+
+            if (rfLen > 0 && rfLen < XBEE_MAX_FRAME - 12) {
+                rxFrame[12 + rfLen] = '\0';
+                rxDataFrames++;
+
+                logEvent('R', 0x90, 0, "(%d B) %.170s%s",
+                         (int)rfLen, rfData, rfLen > 170 ? "..." : "");
+                dbgprintf("[XBee] RX 0x90 (%d B): %.80s\n", (int)rfLen, rfData);
+
+                if (rxCallback) rxCallback(rfData, rfLen);
+            }
+        }
+        break;
+
+    // ── 0x8B  Transmit Status ───────────────────────────────────
+    case XBEE_TX_STATUS:
+        if (rxFrameLen < 7) break;
+        {
+            uint8_t fid = rxFrame[1];
+            uint8_t delivery = rxFrame[5];
+            if (delivery == 0x00) {
+                txStatusOk++;
+                logEvent('S', 0x8B, fid, "TX OK");
+            } else {
+                txStatusFail++;
+                logEvent('E', 0x8B, fid, "TX FAIL 0x%02X", delivery);
+                dbgprintf("[XBee] TX FAIL 0x%02X (id=%d)\n", delivery, fid);
+            }
+        }
+        break;
+
+    // ── 0x8A  Modem Status ──────────────────────────────────────
+    case XBEE_MODEM_STATUS:
+        if (rxFrameLen >= 2) {
+            modemStatusCnt++;
+            lastModemStatus = rxFrame[1];
+            const char* desc = "unknown";
+            switch (rxFrame[1]) {
+                case 0x00: desc = "Hardware reset"; break;
+                case 0x01: desc = "Watchdog reset"; break;
+                case 0x02: desc = "Joined network"; break;
+                case 0x03: desc = "Disassociated"; break;
+                case 0x06: desc = "Coordinator started"; break;
+                case 0x0D: desc = "Network key updated"; break;
+                case 0x11: desc = "Config changed (re-applying)"; break;
+            }
+            logEvent('S', 0x8A, 0, "Modem: %s (0x%02X)", desc, rxFrame[1]);
+            dbgprintf("[XBee] Modem status: 0x%02X (%s)\n", rxFrame[1], desc);
+        }
+        break;
+
+    // ── 0x10  Self-echo (our own TX looping back) ───────────────
+    case XBEE_TX_REQUEST:
+        selfEchoCount++;
+        break;  // silently ignore
+
+    default:
+        logEvent('R', ft, 0, "Unknown frame 0x%02X len=%d", ft, rxFrameLen);
+        break;
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+//  xbeeProcessIncoming — call from loop(), feeds bytes into the parser
+// ═════════════════════════════════════════════════════════════════════
+
 void xbeeProcessIncoming() {
-    loopCallCount++;
+    // Frame timeout: abandon incomplete frames if stalled
+    if (rxState != WAIT_DELIM) {
+        if (millis() - rxFrameStart > FRAME_TIMEOUT_MS) {
+            frameTimeouts++;
+            logEvent('E', 0, 0, "Frame timeout (state=%d, %d/%d bytes)",
+                     rxState, rxIdx, rxFrameLen);
+            rxState = WAIT_DELIM;
+        }
+    }
+
     while (xbeeSerial.available()) {
         uint8_t b = xbeeSerial.read();
         totalRxBytes++;
 
-        // Capture first N raw bytes for hex dump (diagnostic tool)
-        if (rawSniffCount < RAW_SNIFF_SIZE) {
-            rawSniffBuf[rawSniffCount++] = b;
-        }
-
         switch (rxState) {
+
         case WAIT_DELIM:
             if (b == XBEE_START_DELIM) {
-                rxState = GOT_LEN_HI;
+                rxState = LEN_HI;
+                rxFrameStart = millis();
             }
             break;
 
-        case GOT_LEN_HI:
+        case LEN_HI:
             rxFrameLen = (uint16_t)b << 8;
-            rxState = GOT_LEN_LO;
+            rxState = LEN_LO;
             break;
 
-        case GOT_LEN_LO:
+        case LEN_LO:
             rxFrameLen |= b;
-            rxIdx = 0;
-            rxChecksum = 0;
             if (rxFrameLen == 0 || rxFrameLen >= XBEE_MAX_FRAME) {
-                logEvent('E', 0, 0, "Invalid frame length %d — reset", rxFrameLen);
+                logEvent('E', 0, 0, "Bad frame len %d — reset", rxFrameLen);
                 rxState = WAIT_DELIM;
             } else {
-                rxState = READING_DATA;
+                rxIdx = 0;
+                rxChecksum = 0;
+                rxState = FRAME_DATA;
             }
             break;
 
-        case READING_DATA:
+        case FRAME_DATA:
             rxFrame[rxIdx++] = b;
             rxChecksum += b;
-            if (rxIdx >= rxFrameLen) {
-                rxState = GOT_CHECKSUM;
-            }
+            if (rxIdx >= rxFrameLen) rxState = CHECKSUM;
             break;
 
-        case GOT_CHECKSUM:
+        case CHECKSUM:
             rxChecksum += b;
             if (rxChecksum == 0xFF) {
-                uint8_t frameType = rxFrame[0];
-
-                if (frameType == XBEE_RX_PACKET && rxFrameLen >= 13) {
-                    rxFramesParsed++;
-                    // Extract 64-bit source address for logging
-                    char srcAddr[18];
-                    snprintf(srcAddr, sizeof(srcAddr),
-                             "%02X%02X%02X%02X%02X%02X%02X%02X",
-                             rxFrame[1], rxFrame[2], rxFrame[3], rxFrame[4],
-                             rxFrame[5], rxFrame[6], rxFrame[7], rxFrame[8]);
-
-                    const char* rfData = (const char*)&rxFrame[12];
-                    size_t rfLen = rxFrameLen - 12;
-
-                    while (rfLen > 0 && (rfData[rfLen - 1] == '\n' || rfData[rfLen - 1] == '\r')) {
-                        rfLen--;
-                    }
-
-                    if (rfLen > 0 && rfLen < XBEE_MAX_FRAME - 12) {
-                        rxFrame[12 + rfLen] = '\0';
-
-                        // Log a truncated preview (max ~170 chars to fit log entry)
-                        char preview[XBEE_LOG_MSG_MAX];
-                        snprintf(preview, sizeof(preview),
-                                 "from %s (%d B) %.170s%s",
-                                 srcAddr, (int)rfLen, rfData,
-                                 rfLen > 170 ? "..." : "");
-                        logEvent('R', 0x90, 0, "%s", preview);
-
-                        if (rxCallback) {
-                            rxCallback(rfData, rfLen);
-                        }
-                    }
-                } else if (frameType == XBEE_TX_STATUS && rxFrameLen >= 7) {
-                    uint8_t fid = rxFrame[1];
-                    uint8_t delivery = rxFrame[5];
-                    uint8_t retries = rxFrame[4];
-                    if (delivery == 0) {
-                        txStatusOk++;
-                        logEvent('S', 0x8B, fid, "TX OK (retries=%d)", retries);
-                    } else {
-                        txStatusFail++;
-                        logEvent('E', 0x8B, fid,
-                                 "TX FAILED delivery=0x%02X retries=%d",
-                                 delivery, retries);
-                        dbgprintf("[XBee] TX status: frame %d delivery FAILED (0x%02X)\n",
-                                 fid, delivery);
-                    }
-                } else if (frameType == XBEE_TX_REQUEST) {
-                    // Self-echo: we're receiving our own transmitted 0x10 frame.
-                    // This happens when TX→RX are bridged (breadboard short,
-                    // or XBee echo).  Safe to ignore — real node data arrives
-                    // as 0x90 RX Packet frames.
-                    selfEchoCount++;
-                    logEvent('S', 0x10, rxFrame[1],
-                             "Self-echo ignored (%d B) — TX/RX may be bridged",
-                             (int)rxFrameLen);
-                } else {
-                    logEvent('R', frameType, 0, "Unknown frame type 0x%02X len=%d",
-                             frameType, rxFrameLen);
-                }
+                handleCompleteFrame();
             } else {
-                logEvent('E', 0, 0, "Checksum error (expected 0xFF, got 0x%02X)",
-                         rxChecksum);
-                dbgprintln("[XBee] RX frame checksum error — dropped");
+                checksumErrors++;
+                logEvent('E', 0, 0, "Checksum error 0x%02X", rxChecksum);
             }
             rxState = WAIT_DELIM;
             break;
@@ -272,17 +317,20 @@ void xbeeProcessIncoming() {
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════
+//  Web API functions (for admin testing page)
+// ═════════════════════════════════════════════════════════════════════
+
 void xbeeGetLog(JsonArray& arr) {
-    // Output newest first
     for (int i = 0; i < logCount; i++) {
         int idx = (logHead - 1 - i + XBEE_LOG_SIZE) % XBEE_LOG_SIZE;
         const XBeeLogEntry& e = logRing[idx];
         JsonObject o = arr.add<JsonObject>();
-        o["ts"] = e.ts;
-        o["dir"] = String(e.direction);
+        o["ts"]         = e.ts;
+        o["dir"]        = String(e.direction);
         o["frame_type"] = e.frameType;
-        o["frame_id"] = e.frameId;
-        o["msg"] = e.msg;
+        o["frame_id"]   = e.frameId;
+        o["msg"]        = e.msg;
     }
 }
 
@@ -291,91 +339,48 @@ unsigned long xbeeGetRxByteCount() {
 }
 
 void xbeeGetDiagnostics(JsonObject& diag) {
-    // Counters
-    diag["tx_bytes"]           = totalTxBytes;
-    diag["rx_bytes"]           = totalRxBytes;
-    diag["rx_frames_parsed"]   = rxFramesParsed;
-    diag["tx_status_ok"]       = txStatusOk;
-    diag["tx_status_fail"]     = txStatusFail;
-    diag["self_echo_count"]    = selfEchoCount;
-    diag["loop_calls"]         = loopCallCount;
-    diag["uptime_ms"]          = millis();
+    diag["tx_bytes"]         = totalTxBytes;
+    diag["rx_bytes"]         = totalRxBytes;
+    diag["rx_frames_parsed"] = rxFramesParsed;
+    diag["rx_data_frames"]   = rxDataFrames;
+    diag["tx_status_ok"]     = txStatusOk;
+    diag["tx_status_fail"]   = txStatusFail;
+    diag["self_echo_count"]  = selfEchoCount;
+    diag["checksum_errors"]  = checksumErrors;
+    diag["frame_timeouts"]   = frameTimeouts;
+    diag["modem_status_cnt"] = modemStatusCnt;
+    diag["last_modem_status"] = lastModemStatus;
+    diag["uptime_ms"]        = millis();
+    diag["tx_pin"]           = XBEE_TX_PIN;
+    diag["rx_pin"]           = XBEE_RX_PIN;
+    diag["baud"]             = XBEE_BAUD;
 
-    // Pin configuration
-    diag["tx_pin"]    = XBEE_TX_PIN;
-    diag["rx_pin"]    = XBEE_RX_PIN;
-    diag["baud"]      = XBEE_BAUD;
-
-    // GPIO state readback (logic level on the pin RIGHT NOW)
-    diag["gpio_rx_state"] = digitalRead(XBEE_RX_PIN);
-    diag["gpio_tx_state"] = digitalRead(XBEE_TX_PIN);
-
-    // Raw byte hex dump (first N bytes received)
-    if (rawSniffCount > 0) {
-        char hexStr[RAW_SNIFF_SIZE * 3 + 1];
-        hexStr[0] = '\0';
-        for (int i = 0; i < rawSniffCount && i < RAW_SNIFF_SIZE; i++) {
-            char tmp[4];
-            snprintf(tmp, sizeof(tmp), "%02X ", rawSniffBuf[i]);
-            strcat(hexStr, tmp);
-        }
-        diag["raw_hex_dump"] = hexStr;
-        diag["raw_sniff_count"] = rawSniffCount;
+    // Assessment
+    if (rxDataFrames > 0) {
+        diag["assessment"] = "FULLY WORKING — receiving 0x90 data frames from remote XBee.";
+    } else if (txStatusOk > 0 && totalRxBytes > 0) {
+        diag["assessment"] = "PARTIAL — TX OK, RX bytes seen but no 0x90 data frames yet.";
+    } else if (txStatusOk > 0) {
+        diag["assessment"] = "TX ONLY — XBee acknowledges frames but no RX data. "
+                             "Check remote XBee power, same PAN ID, and sending.";
+    } else if (totalRxBytes > 0) {
+        diag["assessment"] = "RX BYTES but no valid frames. Check XBee AP=1 (API mode).";
+    } else if (totalTxBytes > 0) {
+        diag["assessment"] = "SENT bytes but no TX status and no RX. "
+                             "Check XBee AP=1 and TX→DIN wiring.";
     } else {
-        diag["raw_hex_dump"] = "(no bytes received)";
-        diag["raw_sniff_count"] = 0;
-    }
-
-    // Connection assessment
-    bool txWorks    = (txStatusOk > 0);
-    bool rxWorks    = (rxFramesParsed > 0);
-    bool anyRx      = (totalRxBytes > 0);
-    bool hasSelfEcho = (selfEchoCount > 0);
-
-    if (txWorks && rxWorks) {
-        diag["assessment"] = "FULLY WORKING — TX and RX both operational. "
-                             "Receiving 0x90 data frames from remote XBee.";
-    } else if (hasSelfEcho && !rxWorks) {
-        diag["assessment"] = "RX WORKING (self-echo detected) — UART RX is functional. "
-                             "Seeing own 0x10 TX frames echoed back (normal on some setups). "
-                             "Waiting for 0x90 frames from a remote XBee (node). "
-                             "Ensure the node is powered and sending REGISTER/HEARTBEAT.";
-    } else if (txWorks && anyRx && !rxWorks) {
-        diag["assessment"] = "PARTIAL — TX OK, receiving bytes but can't parse valid frames. "
-                             "Check remote XBee AP=1 (API mode).";
-    } else if (txWorks && !anyRx) {
-        diag["assessment"] = "TX ONLY — XBee acknowledges our frames but no data received. "
-                             "Check that the remote XBee is powered, same PAN ID, and sending.";
-    } else if (!txWorks && totalTxBytes > 0) {
-        diag["assessment"] = "NO TX STATUS — sent bytes but got no 0x8B acknowledgment. "
-                             "Check XBee AP=1 mode and TX→DIN wiring.";
-    } else {
-        diag["assessment"] = "NO COMMUNICATION — check wiring, XBee power, and AP=1 setting.";
+        diag["assessment"] = "NO COMMUNICATION — check wiring, XBee power, and AP=1.";
     }
 }
 
 bool xbeeRunLoopbackTest(String& result) {
-    // NOTE: This test ONLY works with a physical jumper wire bridging
-    // GPIO TX to GPIO RX.  Disconnect the XBee first!
-    // If the XBee is connected, raw bytes go to DIN and the XBee
-    // discards them (non-API data), so nothing comes back on DOUT.
-    // This does NOT mean RX is broken — use the "Send Test Message"
-    // button instead and check the serial monitor for 0x8B TX Status
-    // or 0x90 RX Packet frames.
-
-    // Temporarily disconnect callback to avoid protocol handling
     XBeeReceiveCB savedCb = rxCallback;
     rxCallback = nullptr;
-
-    // Flush any pending RX data
     while (xbeeSerial.available()) xbeeSerial.read();
 
-    // Write a unique test pattern (NOT a valid API frame — just raw bytes)
     const uint8_t pattern[] = { 0xAA, 0x55, 0xBB, 0x42 };
     xbeeSerial.write(pattern, 4);
     xbeeSerial.flush();
-
-    // Wait for loopback (if TX↔RX are bridged)
     delay(50);
 
     int readBack = 0;
@@ -385,25 +390,18 @@ bool xbeeRunLoopbackTest(String& result) {
         if (b != pattern[readBack]) match = false;
         readBack++;
     }
-
-    // Restore callback
     rxCallback = savedCb;
 
     if (readBack == 4 && match) {
-        result = "PASS — UART loopback working (read back 4/4 bytes matching). "
-                 "Remove the jumper wire and reconnect XBee.";
+        result = "PASS — UART loopback OK (4/4 bytes). Remove jumper, reconnect XBee.";
         return true;
     } else if (readBack > 0) {
-        result = "PARTIAL — read " + String(readBack) + "/4 bytes back (mismatch). "
-                 "UART partially working. Check for loose connections.";
+        result = "PARTIAL — read " + String(readBack) + "/4 bytes (mismatch).";
         return false;
     } else {
-        result = "No data read back. This is NORMAL if the XBee is connected — "
-                 "the XBee discards raw non-API bytes. To test UART hardware, "
-                 "disconnect the XBee and bridge GPIO " + String(XBEE_TX_PIN) +
-                 " to GPIO " + String(XBEE_RX_PIN) + " with a jumper wire. "
-                 "Alternatively, use 'Send Test Message' and check the serial "
-                 "monitor for 0x8B or 0x90 frames — that proves RX works.";
+        result = "No bytes read back. Normal if XBee is connected. "
+                 "To test UART: disconnect XBee, bridge GPIO " + String(XBEE_TX_PIN) +
+                 " → GPIO " + String(XBEE_RX_PIN) + " with a jumper wire.";
         return false;
     }
 }
