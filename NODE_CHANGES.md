@@ -947,3 +947,131 @@ If after these changes the admin's diagnostics still show `rx_bytes: 0`:
 ---
 
 *End of Change #5*
+
+---
+
+## Change #6: Match init sequence to working test project (Critical)
+
+**Date:** 2026-03-08
+**Priority:** CRITICAL — the test project works, admin/node don't
+**Branch:** `copilot/setup-and-xbee-driver`
+
+### Problem
+
+The XBee communication test project (XBEE_COMM_TEST.md) **works perfectly** with the exact same hardware and XBee modules. But both the full admin and node projects show `totalRxBytes == 0` — no bytes received at all.
+
+After comparing every line of code between the working test and the broken projects, three differences were found:
+
+1. **`Serial.end()` before `Serial.begin()`** — The test project calls `Serial.begin(9600)` directly. The admin/node call `Serial.end()` first, which on an uninitialised Serial can leave UART0 in a bad state.
+2. **Init order** — The test project calls `xbeeInit()` as the VERY FIRST thing, before WiFi or anything else. The admin/node call it AFTER SD card and WiFi init.
+3. **`esp_log_level_set()`** — The test project does NOT call this. The admin/node call `esp_log_level_set("*", ESP_LOG_NONE)` before xbeeInit. With `CORE_DEBUG_LEVEL=0` in platformio.ini, this call is unnecessary.
+
+### What to change
+
+#### 1. `src/xbee_comm.cpp` — Remove `Serial.end()`
+
+Replace:
+```cpp
+void xbeeInit() {
+    xbeeSerial.end();
+    delay(10);
+    xbeeSerial.begin(XBEE_BAUD);
+    // ...
+}
+```
+
+With:
+```cpp
+void xbeeInit() {
+    // Just call begin(), no end() first.
+    // The working test project does NOT call Serial.end().
+    // Calling end() on an uninitialised Serial can leave UART0 in a bad state.
+    xbeeSerial.begin(XBEE_BAUD);
+
+    dbgprintf("[XBee] UART0 started (API mode 1) — TX=GPIO%d  RX=GPIO%d  baud=%d\n",
+              XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+}
+```
+
+#### 2. `src/main.cpp` — Reorder setup(), remove esp_log_level_set
+
+Replace the entire `setup()` function with this sequence:
+
+```cpp
+void setup() {
+    // Disable ESP32-CAM flash LED
+    pinMode(FLASH_LED_PIN, OUTPUT);
+    digitalWrite(FLASH_LED_PIN, LOW);
+
+#ifndef XBEE_USES_UART0
+    Serial.begin(115200);
+    delay(500);
+#endif
+
+    // 1. XBee — FIRST, before anything else (matches working test project)
+    //    Do NOT call esp_log_level_set() — CORE_DEBUG_LEVEL=0 is sufficient.
+    xbeeInit();
+
+    // 2. Node client + XBee callback (immediately after xbeeInit)
+    nodeClientInit();
+    xbeeSetReceiveCallback([](const char* payload, size_t len) {
+        if (!nodeClientHandleCommand(payload, len)) {
+            dbgprintf("[XBee] Unhandled: %.80s\n", payload);
+        }
+    });
+
+    // 3. SD card
+    if (!initSDCard()) {
+        dbgprintln("[FATAL] SD card init failed – halting.");
+        while (true) delay(1000);
+    }
+
+    // 4. WiFi access point
+    dbgprintf("[WiFi] Starting AP \"%s\"\n", AP_SSID);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONN);
+    delay(100);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    dbgprintf("[WiFi] AP running — IP: %s\n", WiFi.softAPIP().toString().c_str());
+
+    // 5. DNS captive portal
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+    // 6. Web server
+    setupWebServer(server);
+    server.begin();
+
+    // 7. Wait for XBee network — matches test project delay(3000)
+    delay(3000);
+
+    dbgprintln("[Node] Setup complete — starting REGISTER cycle");
+}
+```
+
+**Key changes:**
+- `xbeeInit()` moved to step 1 (was step 3)
+- Removed `esp_log_level_set("*", ESP_LOG_NONE)` — not needed with CORE_DEBUG_LEVEL=0
+- Removed `#include <esp_log.h>` from the includes
+- Changed `delay(2000)` to `delay(3000)` to match test project
+
+### Why this works
+
+The test project proves that `Serial.begin(9600)` must be called as the very first thing in setup(). By calling it BEFORE SD card SPI init and WiFi:
+
+1. UART0 is properly configured at 9600 baud before any other peripheral can interfere
+2. No `Serial.end()` call means no risk of corrupting an uninitialised UART state
+3. No `esp_log_level_set()` call means no side effects on the ESP-IDF logging infrastructure
+
+The SPI bus init (for SD card) and WiFi driver init happen AFTER UART0 is configured, so they operate on a properly-initialised UART.
+
+### Verification
+
+After applying this change, the admin web dashboard (Testing page → XBee Serial Monitor) should show:
+- `RX bytes > 0` within 10 seconds of both devices being powered on
+- `RX frames parsed > 0` (0x90 Receive Packet frames from the node)
+- `TX status OK > 0` (0x8B acknowledgments from the local XBee)
+- Nodes appearing in `/api/nodes` as registered
+
+---
+
+*End of Change #6*

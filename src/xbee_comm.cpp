@@ -78,12 +78,10 @@ static uint8_t  rxChecksum  = 0;
 
 void xbeeInit() {
 #ifdef XBEE_USES_UART0
-    // Fully reset UART0 before reconfiguring.
-    // The SD card SPI init (spiSD.begin) and WiFi driver may have
-    // affected UART0 state.  Calling end() then begin() ensures a
-    // clean start — matching the working test project behaviour.
-    xbeeSerial.end();
-    delay(10);   // let UART hardware settle
+    // UART0 on native GPIO 1/3 — just call begin(), no end() first.
+    // Calling Serial.end() on an uninitialised Serial can leave the
+    // UART peripheral in a bad state (tested: the working XBEE_COMM_TEST
+    // project does NOT call end()).
     xbeeSerial.begin(XBEE_BAUD);
 #else
     // Generic ESP32: use UART2 with explicit pin assignment
