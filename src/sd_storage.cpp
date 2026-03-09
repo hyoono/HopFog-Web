@@ -3,7 +3,8 @@
  */
 
 #include "sd_storage.h"
-#include "config.h"    // for dbgprintf/dbgprintln macros
+#include "config.h"
+#include "xbee_comm.h"  // for logMsg()
 
 #include <SD.h>
 #include <SPI.h>
@@ -42,29 +43,15 @@ static void seedFileIfMissing(const char *path) {
 // ── Init ────────────────────────────────────────────────────────────
 
 bool initSDCard() {
-    dbgprintln("[SD] Initialising SD card …");
-
-#ifdef ESP32CAM_SPI_SD
-    // ESP32-CAM: use SPI mode to access the built-in SD card slot.
-    // This avoids the SD_MMC peripheral which permanently claims
-    // GPIO 12/13 via IOMUX, preventing UART2 (XBee) from using them.
-    // SPI pins: CLK=14, MISO=2, MOSI=15, CS=13 (all hardware-wired).
-    // Static so the SPI bus object persists after this function returns
-    // (SD library holds a reference to it).
+    // ESP32-CAM: SPI mode on HSPI to access the built-in SD card slot.
+    // Pins: CLK=14, MISO=2, MOSI=15, CS=13 (all hardware-wired).
+    // Static so the SPI bus object persists (SD library holds a reference).
     static SPIClass spiSD(HSPI);
     spiSD.begin(SD_SPI_CLK, SD_SPI_MISO, SD_SPI_MOSI, SD_CS_PIN);
     if (!SD.begin(SD_CS_PIN, spiSD)) {
-        dbgprintln("[SD] SPI SD mount failed!");
+        logMsg('E', "SD card mount failed");
         return false;
     }
-    dbgprintln("[SD] SPI mode (HSPI) — mounted OK");
-#else
-    // Generic ESP32: SPI mode with configurable CS pin (VSPI defaults)
-    if (!SD.begin(SD_CS_PIN)) {
-        dbgprintln("[SD] Mount failed!");
-        return false;
-    }
-#endif
 
     uint64_t totalBytes = SD_FS.totalBytes();
     uint64_t usedBytes  = SD_FS.usedBytes();

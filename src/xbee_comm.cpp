@@ -1,18 +1,15 @@
 /*
- * xbee_comm.cpp — XBee S2C API Mode 1 driver
+ * xbee_comm.cpp — XBee S2C API Mode 1 driver (ESP32-CAM only)
  *
- * IDENTICAL to the working XBEE_COMM_TEST project's xbee_comm.cpp,
- * with web-API diagnostics functions appended for the admin dashboard.
- *
- * Design principle: if the test project doesn't have it, we don't either.
- * No bootloader flush. No AT query. No frame timeout. Just the basics.
+ * Uses UART0 (Serial) on GPIO 1/3 — native IOMUX pins.
+ * Code structure matches the working XBEE_COMM_TEST project exactly.
  */
 
 #include "xbee_comm.h"
 #include "config.h"
 #include <stdarg.h>
 
-// ── Shared diagnostic counters ──────────────────────────────
+// ── Diagnostic counters ─────────────────────────────────────
 unsigned long xbTotalRxBytes   = 0;
 unsigned long xbTotalTxBytes   = 0;
 unsigned long xbTxStatusOk     = 0;
@@ -20,7 +17,7 @@ unsigned long xbTxStatusFail   = 0;
 unsigned long xbRxFramesParsed = 0;
 unsigned long xbSelfEchoCount  = 0;
 
-// ── Shared message log ──────────────────────────────────────
+// ── Message log ─────────────────────────────────────────────
 MsgLogEntry msgLog[MSG_LOG_SIZE];
 int msgLogHead  = 0;
 int msgLogCount = 0;
@@ -38,16 +35,10 @@ void logMsg(char dir, const char* fmt, ...) {
 }
 
 // ── Internal state ──────────────────────────────────────────
-#ifdef XBEE_USES_UART0
-static HardwareSerial& xbeeSerial = Serial;   // UART0 on GPIO 1/3
-#else
-static HardwareSerial& xbeeSerial = Serial2;   // UART2 on GPIO 13/12
-#endif
-
 static XBeeReceiveCB   rxCallback = nullptr;
 static uint8_t         frameIdCounter = 0;
 
-// ── Frame receive state machine ─────────────────────────────
+// ── RX state machine ────────────────────────────────────────
 enum RxState { WAIT_DELIM, GOT_LEN_HI, GOT_LEN_LO, READING_DATA, GOT_CHECKSUM };
 
 static RxState  rxState     = WAIT_DELIM;
@@ -56,16 +47,14 @@ static uint16_t rxIdx       = 0;
 static uint8_t  rxFrame[XBEE_MAX_FRAME];
 static uint8_t  rxChecksum  = 0;
 
-// ── Public API ──────────────────────────────────────────────
+// ── Init ────────────────────────────────────────────────────
 
 void xbeeInit() {
-#ifdef XBEE_USES_UART0
-    xbeeSerial.begin(XBEE_BAUD);
-#else
-    xbeeSerial.begin(XBEE_BAUD, SERIAL_8N1, XBEE_RX_PIN, XBEE_TX_PIN);
-#endif
-    logMsg('S', "XBee init: TX=GPIO%d RX=GPIO%d baud=%d", XBEE_TX_PIN, XBEE_RX_PIN, XBEE_BAUD);
+    Serial.begin(XBEE_BAUD);
+    logMsg('S', "XBee UART0 GPIO1/3 @ %d baud", XBEE_BAUD);
 }
+
+// ── TX ──────────────────────────────────────────────────────
 
 uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     if (len == 0 || len > XBEE_MAX_FRAME - 14) return 0;
@@ -77,8 +66,8 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     uint8_t hdr[14] = {
         XBEE_TX_REQUEST, fid,
         0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0xFF, 0xFF,
-        0xFF, 0xFE, 0x00, 0x00
+        0x00, 0x00, 0xFF, 0xFF,   // broadcast 64-bit addr
+        0xFF, 0xFE, 0x00, 0x00    // broadcast 16-bit addr
     };
 
     uint8_t cksum = 0;
@@ -86,24 +75,28 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
     for (size_t i = 0; i < len; i++) cksum += (uint8_t)payload[i];
     cksum = 0xFF - cksum;
 
-    xbeeSerial.write(XBEE_START_DELIM);
-    xbeeSerial.write((uint8_t)(frameDataLen >> 8));
-    xbeeSerial.write((uint8_t)(frameDataLen & 0xFF));
-    xbeeSerial.write(hdr, 14);
-    xbeeSerial.write((const uint8_t*)payload, len);
-    xbeeSerial.write(cksum);
-    xbeeSerial.flush();
+    Serial.write(XBEE_START_DELIM);
+    Serial.write((uint8_t)(frameDataLen >> 8));
+    Serial.write((uint8_t)(frameDataLen & 0xFF));
+    Serial.write(hdr, 14);
+    Serial.write((const uint8_t*)payload, len);
+    Serial.write(cksum);
+    Serial.flush();
 
     xbTotalTxBytes += 3 + 14 + len + 1;
     logMsg('T', "fid=%d (%d B) %.160s", fid, (int)len, payload);
     return fid;
 }
 
+// ── Callback ────────────────────────────────────────────────
+
 void xbeeSetReceiveCallback(XBeeReceiveCB cb) { rxCallback = cb; }
 
+// ── RX processing ───────────────────────────────────────────
+
 void xbeeProcessIncoming() {
-    while (xbeeSerial.available()) {
-        uint8_t b = xbeeSerial.read();
+    while (Serial.available()) {
+        uint8_t b = Serial.read();
         xbTotalRxBytes++;
 
         switch (rxState) {
@@ -158,7 +151,7 @@ void xbeeProcessIncoming() {
                     logMsg('E', "Unknown frame 0x%02X len=%d", ft, rxFrameLen);
                 }
             } else {
-                logMsg('E', "Checksum error (got 0x%02X)", rxChecksum);
+                logMsg('E', "Checksum error (0x%02X)", rxChecksum);
             }
             rxState = WAIT_DELIM;
             break;
@@ -167,7 +160,7 @@ void xbeeProcessIncoming() {
 }
 
 // ═════════════════════════════════════════════════════════════
-//  Web API functions (for admin testing page)
+//  Web API functions (for admin dashboard)
 // ═════════════════════════════════════════════════════════════
 
 void xbeeGetLog(JsonArray& arr) {
@@ -193,18 +186,16 @@ void xbeeGetDiagnostics(JsonObject& diag) {
     diag["rx_pin"]           = XBEE_RX_PIN;
     diag["baud"]             = XBEE_BAUD;
 
-    // Assessment
-    if (xbRxFramesParsed > 0) {
+    if (xbRxFramesParsed > 0)
         diag["assessment"] = "WORKING — receiving data from remote XBee.";
-    } else if (xbTxStatusOk > 0 && xbTotalRxBytes > 0) {
-        diag["assessment"] = "UART OK, TX OK — waiting for remote device to send data.";
-    } else if (xbTxStatusFail > 0) {
-        diag["assessment"] = "TX FAIL — no remote device found. Check PAN IDs match.";
-    } else if (xbTotalRxBytes > 0) {
-        diag["assessment"] = "UART RX OK — bytes received but no complete frames yet.";
-    } else if (xbTotalTxBytes > 0) {
-        diag["assessment"] = "TX sent but 0 RX bytes. Check wiring: XBee DOUT→GPIO3.";
-    } else {
-        diag["assessment"] = "No communication yet. Check XBee power and wiring.";
-    }
+    else if (xbTxStatusOk > 0)
+        diag["assessment"] = "TX OK — XBee responds. Waiting for remote device.";
+    else if (xbTxStatusFail > 0)
+        diag["assessment"] = "TX FAIL — no remote device. Check PAN IDs match.";
+    else if (xbTotalRxBytes > 0)
+        diag["assessment"] = "RX bytes seen but no complete frames yet.";
+    else if (xbTotalTxBytes > 0)
+        diag["assessment"] = "TX sent, 0 RX. Check wiring: XBee DOUT→GPIO3.";
+    else
+        diag["assessment"] = "No communication. Check XBee power and wiring.";
 }
