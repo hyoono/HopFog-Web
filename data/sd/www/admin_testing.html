@@ -140,6 +140,99 @@
                         </div>
                     </div>
 
+                    <!-- Node Protocol Commands (Manual Triggers) -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white">
+                            <i class="fas fa-gamepad me-1"></i>Node Protocol Commands
+                            <span class="badge bg-light text-dark ms-2">Manual Triggers</span>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted mb-3">
+                                Manually send protocol commands to the node. Use these to test each step of the registration/sync flow independently.
+                                Check the <strong>XBee Serial Monitor</strong> above (enable Auto-Refresh) to see TX/RX activity.
+                            </p>
+
+                            <!-- Target Node ID -->
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Target Node ID</label>
+                                    <input type="text" class="form-control" id="targetNodeId" value="node-01" placeholder="e.g. node-01">
+                                    <div class="form-text">The node_id the node uses in its REGISTER message.</div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Registered Nodes</label>
+                                    <div id="registeredNodes" class="p-2 bg-light border rounded small" style="min-height:38px;">
+                                        <span class="text-muted">Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Protocol Step Buttons -->
+                            <div class="row g-2 mb-3">
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-primary w-100" onclick="sendProtoCmd('PING')">
+                                        <i class="fas fa-table-tennis-paddle-ball me-1"></i>PING
+                                    </button>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-success w-100" onclick="sendProtoCmd('REGISTER_ACK')">
+                                        <i class="fas fa-check-circle me-1"></i>REGISTER_ACK
+                                    </button>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-info w-100" onclick="sendProtoCmd('PONG')">
+                                        <i class="fas fa-reply me-1"></i>PONG
+                                    </button>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-warning w-100" onclick="sendProtoCmd('GET_STATS')">
+                                        <i class="fas fa-chart-bar me-1"></i>GET_STATS
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-secondary w-100" onclick="sendProtoCmd('HEARTBEAT')">
+                                        <i class="fas fa-heartbeat me-1"></i>HEARTBEAT
+                                    </button>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-primary w-100" onclick="triggerSync()">
+                                        <i class="fas fa-sync me-1"></i>Send SYNC_DATA
+                                    </button>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-danger w-100" onclick="sendProtoCmd('BROADCAST_MSG')">
+                                        <i class="fas fa-bullhorn me-1"></i>BROADCAST_MSG
+                                    </button>
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <button class="btn btn-outline-dark w-100" onclick="refreshNodes()">
+                                        <i class="fas fa-users me-1"></i>Refresh Nodes
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Protocol Flow Guide -->
+                            <div class="alert alert-info py-2 mb-0 small">
+                                <strong>Expected flow:</strong>
+                                <ol class="mb-0 ps-3">
+                                    <li>Node sends <code>REGISTER</code> → Admin auto-replies <code>REGISTER_ACK</code> (or click button above)</li>
+                                    <li>Node sends <code>SYNC_REQUEST</code> → Admin auto-replies <code>SYNC_DATA</code> (or click "Send SYNC_DATA")</li>
+                                    <li>Node sends <code>HEARTBEAT</code> every 30s → Admin auto-replies <code>PONG</code></li>
+                                    <li>Admin sends <code>PING</code> every 10s → Node should reply <code>PONG</code></li>
+                                </ol>
+                            </div>
+
+                            <!-- Last command result -->
+                            <div id="protoCmdResult" class="mt-2" style="display:none;">
+                                <div class="alert py-2" id="protoCmdAlert">
+                                    <span id="protoCmdText"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- XBee Communication Test -->
                     <div class="card mb-4">
                         <div class="card-header bg-primary text-white">
@@ -149,7 +242,6 @@
                             <p class="text-muted mb-3">
                                 Send a test message via the XBee S2C ZigBee radio.
                                 Open <strong>XCTU</strong> on a second XBee to see incoming frames.
-                                <a href="https://github.com/hyoono/HopFog-Web/blob/main/XBEE_TESTING.md" target="_blank">View full testing guide →</a>
                             </p>
 
                             <!-- XBee Status -->
@@ -200,45 +292,6 @@
                                     <div id="xbeeResultText"></div>
                                 </div>
                             </div>
-
-                            <!-- Frame Log -->
-                            <div id="xbeeLog" class="mt-3" style="display:none;">
-                                <h6>Sent Frames Log</h6>
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-bordered">
-                                        <thead class="table-light">
-                                            <tr><th>#</th><th>Time</th><th>Frame ID</th><th>Payload</th><th>Status</th></tr>
-                                        </thead>
-                                        <tbody id="xbeeLogBody"></tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Functional Tests Checklist -->
-                    <div class="card mb-4">
-                        <div class="card-header"><i class="fas fa-vial me-1"></i>Functional Tests</div>
-                        <div class="card-body">
-                            <ul class="mb-0">
-                                <li>Create Announcement as Draft</li>
-                                <li>Queue Announcement and verify it appears in Queue Monitor</li>
-                                <li>Create SOS and verify priority ordering</li>
-                                <li>Open Broadcast Detail and verify delivery counters</li>
-                                <li>Mark Sent (Simulation) and verify Tracking updates</li>
-                                <li>Cancel a Broadcast and verify status changes + event log entry</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header"><i class="fas fa-screwdriver-wrench me-1"></i>Integration Tests</div>
-                        <div class="card-body">
-                            <ul class="mb-0">
-                                <li>XBee S2C sends ZigBee broadcast when Mark Sent is clicked</li>
-                                <li>XCTU on receiving XBee shows the API frame with pipe-delimited payload</li>
-                                <li>SOS escalation triggers XBee broadcast to remote node</li>
-                                <li>Retry logic + TTL expiry handling</li>
-                            </ul>
                         </div>
                     </div>
                 </div>
@@ -530,7 +583,120 @@
         document.getElementById('rawSendText').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') { e.preventDefault(); sendRawXBee(); }
         });
+        refreshNodes();
     });
+
+    // ── Node Protocol Command Triggers ──────────────────────────
+    function sendProtoCmd(cmd) {
+        var nodeId = document.getElementById('targetNodeId').value.trim() || 'node-01';
+        var payload;
+
+        switch (cmd) {
+            case 'PING':
+                payload = '{"cmd":"PING","node_id":"admin","ts":' + Math.floor(Date.now()/1000) + '}';
+                break;
+            case 'PONG':
+                payload = '{"cmd":"PONG","node_id":"admin"}';
+                break;
+            case 'REGISTER_ACK':
+                payload = '{"cmd":"REGISTER_ACK","node_id":"' + nodeId + '"}';
+                break;
+            case 'GET_STATS':
+                payload = '{"cmd":"GET_STATS","node_id":"admin"}';
+                break;
+            case 'HEARTBEAT':
+                payload = '{"cmd":"HEARTBEAT","node_id":"admin","params":{"uptime":' + Math.floor(Date.now()/1000) + '}}';
+                break;
+            case 'BROADCAST_MSG':
+                payload = '{"cmd":"BROADCAST_MSG","node_id":"admin","params":{"title":"Test Broadcast","message":"Hello from admin manual trigger","created_at":"' + new Date().toISOString() + '"}}';
+                break;
+            default:
+                payload = '{"cmd":"' + cmd + '","node_id":"admin"}';
+        }
+
+        var resultDiv = document.getElementById('protoCmdResult');
+        var alertDiv = document.getElementById('protoCmdAlert');
+        var textDiv = document.getElementById('protoCmdText');
+
+        var formData = new FormData();
+        formData.append('text', payload);
+
+        fetch('/api/xbee/send-raw', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            resultDiv.style.display = 'block';
+            if (data.success) {
+                alertDiv.className = 'alert alert-success py-2';
+                textDiv.innerHTML = '<strong>' + cmd + ' sent!</strong> Frame ID: ' + data.frame_id +
+                    ' <code class="small">' + escHtml(payload) + '</code>';
+            } else {
+                alertDiv.className = 'alert alert-danger py-2';
+                textDiv.innerHTML = '<strong>Failed:</strong> ' + (data.error || 'Unknown');
+            }
+            setTimeout(refreshLog, 500);
+        })
+        .catch(function(err) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-danger py-2';
+            textDiv.innerHTML = '<strong>Error:</strong> ' + err.message;
+        });
+    }
+
+    function triggerSync() {
+        var nodeId = document.getElementById('targetNodeId').value.trim() || 'node-01';
+        var resultDiv = document.getElementById('protoCmdResult');
+        var alertDiv = document.getElementById('protoCmdAlert');
+        var textDiv = document.getElementById('protoCmdText');
+
+        fetch('/api/nodes/' + encodeURIComponent(nodeId) + '/sync', {
+            method: 'POST',
+            credentials: 'same-origin'
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            resultDiv.style.display = 'block';
+            if (data.success || data.status === 'ok') {
+                alertDiv.className = 'alert alert-success py-2';
+                textDiv.innerHTML = '<strong>SYNC_DATA sent to ' + escHtml(nodeId) + '!</strong>';
+            } else {
+                alertDiv.className = 'alert alert-warning py-2';
+                textDiv.innerHTML = '<strong>Sync response:</strong> ' + JSON.stringify(data);
+            }
+            setTimeout(refreshLog, 500);
+        })
+        .catch(function(err) {
+            resultDiv.style.display = 'block';
+            alertDiv.className = 'alert alert-danger py-2';
+            textDiv.innerHTML = '<strong>Error:</strong> ' + err.message;
+        });
+    }
+
+    function refreshNodes() {
+        fetch('/api/nodes', { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var el = document.getElementById('registeredNodes');
+            if (!data.nodes || data.nodes.length === 0) {
+                el.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>No nodes registered yet</span>';
+            } else {
+                var html = '<strong>' + data.active + '</strong> active / <strong>' + data.total + '</strong> total: ';
+                data.nodes.forEach(function(n) {
+                    var badge = n.status === 'active' ? 'bg-success' : 'bg-secondary';
+                    html += '<span class="badge ' + badge + ' me-1">' + escHtml(n.node_id) +
+                            ' (' + n.seconds_since_heartbeat + 's ago)</span>';
+                });
+                el.innerHTML = html;
+            }
+        })
+        .catch(function() {
+            document.getElementById('registeredNodes').innerHTML =
+                '<span class="text-muted">Could not load nodes</span>';
+        });
+    }
     </script>
 </body>
 </html>

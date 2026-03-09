@@ -168,6 +168,21 @@ Connect phone to "HopFog-Node-01" WiFi, open http://192.168.4.1/status
 - ✅ `rxFramesParsed > 0` — Admin PING received
 - ✅ `state == 3` — STATE_RUNNING (0=unregistered, 1=registered, 2=syncing, 3=running)
 
+### Admin Manual Triggers (NEW)
+
+The admin testing page at `/admin/messaging/testing` now has **manual trigger buttons**:
+- **PING** — sends `{"cmd":"PING","node_id":"admin"}`
+- **REGISTER_ACK** — sends `{"cmd":"REGISTER_ACK","node_id":"<target>"}`
+- **PONG** — sends `{"cmd":"PONG","node_id":"admin"}`
+- **GET_STATS** — sends `{"cmd":"GET_STATS","node_id":"admin"}`
+- **HEARTBEAT** — sends `{"cmd":"HEARTBEAT","node_id":"admin"}`
+- **BROADCAST_MSG** — sends a test broadcast
+- **Send SYNC_DATA** — triggers full data sync to the target node
+
+These buttons let you test each protocol step independently, without relying on the
+automatic registration flow. If clicking REGISTER_ACK on admin and the node picks
+it up and transitions to registered state, it proves the XBee communication works.
+
 ### Diagnostic Decision Tree
 
 ```
@@ -189,6 +204,7 @@ Node totalRxBytes == 0?
 
 Node state == 0 (stuck UNREGISTERED)?
   → Node REGISTER never got REGISTER_ACK from admin.
+  → Try clicking REGISTER_ACK on admin testing page manually.
   → Check admin is receiving frames (rx_frames_parsed > 0).
   → Check PAN IDs match on both XBees.
 ```
