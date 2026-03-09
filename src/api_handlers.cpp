@@ -1134,7 +1134,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
         JsonDocument resp;
-        resp["rx_bytes_total"] = xbTotalRxBytes;
+        resp["rx_bytes_total"] = xbeeGetStats().totalRxBytes;
         resp["uptime_ms"]      = millis();
         // Include diagnostic summary for the serial monitor
         JsonObject diag = resp["diag"].to<JsonObject>();

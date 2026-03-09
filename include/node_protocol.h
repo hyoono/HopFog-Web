@@ -19,6 +19,9 @@
 #define MAX_NODES 10
 #define NODE_STALE_MS 90000  // mark stale after 90 s without heartbeat
 
+// ── Admin periodic timers ──────────────────────────────────────────
+#define ADMIN_PING_INTERVAL_MS  10000  // send PING every 10 seconds
+
 // ── Node info stored in memory ─────────────────────────────────────
 struct NodeInfo {
     char   node_id[32];
@@ -36,6 +39,9 @@ struct NodeInfo {
 
 /// Initialise the node registry (call once in setup).
 void nodeProtocolInit();
+
+/// Call from loop() — handles periodic admin broadcasts (PING).
+void nodeProtocolLoop();
 
 /// Try to parse a payload as a JSON node command and dispatch it.
 /// Called from the XBee receive callback (API mode 1, payload from 0x90 frame).

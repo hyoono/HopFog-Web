@@ -117,10 +117,11 @@ void setup() {
     logMsg('S', "Setup complete. Waiting for XBee traffic...");
 }
 
-// ── Loop (matches test project) ─────────────────────────────────────
+// ── Loop (matches test project + calls nodeProtocolLoop for PING) ────
 void loop() {
     dnsServer.processNextRequest();
     xbeeProcessIncoming();
+    nodeProtocolLoop();
     delay(10);  // Match test project. yield() alone doesn't provide enough
                 // time for the WiFi/TCP stack on Core 0 to process packets.
 }

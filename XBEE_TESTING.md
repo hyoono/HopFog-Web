@@ -1,6 +1,23 @@
-# XBee S2C Testing Guide
+# XBee S2C Testing Guide — 2-Module Setup
 
-How to test XBee S2C (ZigBee) communication between the ESP32 admin and HopFog-Node devices.
+How to connect and test XBee S2C (ZigBee) communication between the
+ESP32-CAM admin (HopFog-Web) and ONE ESP32-CAM node (HopFog-Node).
+
+**Setup:** 2 XBee S2C modules, 2 ESP32-CAMs, NO USB explorer needed for operation.
+
+---
+
+## Quick Reference
+
+| | Admin ESP32-CAM | Node ESP32-CAM |
+|---|---|---|
+| **Firmware** | HopFog-Web | HopFog-Node |
+| **WiFi AP** | HopFog-Network | HopFog-Node-01 |
+| **WiFi Password** | changeme123 | changeme123 |
+| **Dashboard** | http://192.168.4.1 | http://192.168.4.1/status |
+| **XBee Role** | Coordinator (CE=1) | Router (CE=0) |
+| **XBee UART** | UART0 GPIO 1/3 | UART0 GPIO 1/3 |
+| **Baud** | 9600 | 9600 |
 
 ---
 

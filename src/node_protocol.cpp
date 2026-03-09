@@ -308,9 +308,28 @@ static void handleStatsResponse(const char* nodeId, JsonObject params) {
 
 // ── Public API ─────────────────────────────────────────────────────
 
+static unsigned long lastPingMs = 0;
+
 void nodeProtocolInit() {
     nodeCount = 0;
     memset(nodes, 0, sizeof(nodes));
+    lastPingMs = 0;
+}
+
+void nodeProtocolLoop() {
+    unsigned long now = millis();
+
+    // Admin sends periodic PING — this is the KEY CHANGE.
+    // The working test project has BOTH sides actively sending.
+    // Without this, the admin sits silently and never discovers nodes.
+    if (now - lastPingMs >= ADMIN_PING_INTERVAL_MS) {
+        JsonDocument ping;
+        ping["cmd"] = "PING";
+        ping["node_id"] = "admin";
+        ping["ts"] = (long)(millis() / 1000);
+        sendJsonCommand(ping);
+        lastPingMs = now;
+    }
 }
 
 bool nodeProtocolHandleLine(const char* line, size_t len) {
@@ -348,6 +367,15 @@ bool nodeProtocolHandleLine(const char* line, size_t len) {
                       (const char*)(params["to"] | "?"));
     } else if (strcmp(cmd, "STATS_RESPONSE") == 0) {
         handleStatsResponse(nodeId, params);
+    } else if (strcmp(cmd, "PONG") == 0) {
+        // Node responded to our PING — node is alive
+        dbgprintf("[NODE] PONG from %s\n", nodeId);
+    } else if (strcmp(cmd, "PING") == 0) {
+        // Node sent a PING — reply with PONG
+        JsonDocument pong;
+        pong["cmd"] = "PONG";
+        pong["node_id"] = "admin";
+        sendJsonCommand(pong);
     } else {
         dbgprintf("[NODE] Unknown command: %s\n", cmd);
         return false;

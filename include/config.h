@@ -8,7 +8,7 @@
 // ── WiFi Access Point ───────────────────────────────────────────────
 #define AP_SSID     "HopFog-Network"
 #define AP_PASSWORD "changeme123"
-#define AP_CHANNEL  1
+#define AP_CHANNEL  6
 #define AP_MAX_CONN 8
 #define AP_HIDDEN   0
 

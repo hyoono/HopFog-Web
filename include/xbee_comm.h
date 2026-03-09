@@ -8,6 +8,8 @@
  *   GPIO 3 (U0RXD) ← XBee DOUT (pin 2)
  *   3.3V            → XBee VCC  (pin 1)
  *   GND             → XBee GND  (pin 10)
+ *
+ * Aligned with HopFog-Node xbee_comm.h — same struct, same API.
  */
 
 #ifndef XBEE_COMM_H
@@ -25,7 +27,19 @@
 
 #define XBEE_MAX_FRAME     512
 
-// ── Message log ──────────────────────────────────────────────
+// ── Stats (aligned with HopFog-Node) ────────────────────────
+struct XBeeStats {
+    uint32_t totalRxBytes;
+    uint32_t totalTxBytes;
+    uint32_t rxFramesParsed;
+    uint32_t txFramesSent;
+    uint32_t txStatusOK;
+    uint32_t txStatusFail;
+    uint32_t modemStatusCount;
+    uint8_t  lastModemStatus;
+};
+
+// ── Message log (admin-only, for web dashboard) ──────────────
 #define MSG_LOG_SIZE  60
 
 struct MsgLogEntry {
@@ -46,13 +60,9 @@ void xbeeSetReceiveCallback(XBeeReceiveCB cb);
 void xbeeProcessIncoming();
 
 // ── Diagnostics ──────────────────────────────────────────────
-extern unsigned long xbTotalRxBytes;
-extern unsigned long xbTotalTxBytes;
-extern unsigned long xbTxStatusOk;
-extern unsigned long xbTxStatusFail;
-extern unsigned long xbRxFramesParsed;
-extern unsigned long xbSelfEchoCount;
+const XBeeStats& xbeeGetStats();
 
+// ── Message log (admin web dashboard) ────────────────────────
 extern MsgLogEntry msgLog[MSG_LOG_SIZE];
 extern int msgLogHead;
 extern int msgLogCount;
