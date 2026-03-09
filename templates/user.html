@@ -8,10 +8,13 @@
         <li class="breadcrumb-item active">User Management</li>
     </ol>
 
-    <!-- Create Mobile User Button -->
-    <div class="mb-4">
+    <!-- Buttons -->
+    <div class="mb-4 d-flex gap-2">
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
-            <i class="fas fa-user-plus me-2"></i>Create Mobile User
+            <i class="fas fa-mobile-alt me-2"></i>Create Mobile User
+        </button>
+        <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#createAdminModal">
+            <i class="fas fa-user-shield me-2"></i>Create Admin User
         </button>
     </div>
 
@@ -80,15 +83,15 @@
                             </button>
                             {% if user.role != 'admin' %}
                                 {% if user.is_active %}
-                                    <button class="btn btn-sm btn-warning toggle-status-btn" 
-                                            data-user-id="{{ user.id }}" 
+                                    <button class="btn btn-sm btn-warning toggle-status-btn"
+                                            data-user-id="{{ user.id }}"
                                             data-current-status="active"
                                             title="Deactivate User">
                                         <i class="fas fa-user-slash"></i>
                                     </button>
                                 {% else %}
-                                    <button class="btn btn-sm btn-success toggle-status-btn" 
-                                            data-user-id="{{ user.id }}" 
+                                    <button class="btn btn-sm btn-success toggle-status-btn"
+                                            data-user-id="{{ user.id }}"
                                             data-current-status="inactive"
                                             title="Activate User">
                                         <i class="fas fa-user-check"></i>
@@ -118,12 +121,13 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="createUserModalLabel">
-                    <i class="fas fa-user-plus me-2"></i>Create Mobile User
+                    <i class="fas fa-mobile-alt me-2"></i>Create Mobile User
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form id="createUserForm">
                 <div class="modal-body">
+                    <div id="createUserMessage" style="display: none;"></div>
                     <div class="mb-3">
                         <label for="username" class="form-label">Username</label>
                         <input type="text" class="form-control" id="username" name="username" required>
@@ -140,14 +144,56 @@
                         <label for="confirmPassword" class="form-label">Confirm Password</label>
                         <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required minlength="6">
                     </div>
-                    <div class="alert alert-info">
+                    <div class="alert alert-info mb-0">
                         <i class="fas fa-info-circle me-2"></i>
                         This will create a <strong>Mobile</strong> user who can only log in via the mobile app.
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create User</button>
+                    <button type="submit" class="btn btn-primary" id="createUserBtn">
+                        <i class="fas fa-user-plus me-2"></i>Create User
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Create Admin User Modal -->
+<div class="modal fade" id="createAdminModal" tabindex="-1" aria-labelledby="createAdminModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createAdminModalLabel">
+                    <i class="fas fa-user-shield me-2"></i>Create Admin User
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="createAdminForm" method="POST" action="/register">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="adminEmail" class="form-label">Email Address</label>
+                        <input type="email" class="form-control" id="adminEmail" name="email" placeholder="name@example.com" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="adminUsername" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="adminUsername" name="username" placeholder="Username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="adminPassword" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="adminPassword" name="password" placeholder="Create a password" required>
+                    </div>
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        This will create an <strong>Admin</strong> user with full access to the dashboard.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-secondary">
+                        <i class="fas fa-user-shield me-2"></i>Create Admin
+                    </button>
                 </div>
             </form>
         </div>
@@ -168,68 +214,76 @@
     // Create Mobile User Form
     document.getElementById('createUserForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        
+
         const username = document.getElementById('username').value;
         const email = document.getElementById('email').value;
         const password = document.getElementById('password').value;
         const confirmPassword = document.getElementById('confirmPassword').value;
-        
+        const messageDiv = document.getElementById('createUserMessage');
+        const submitBtn = document.getElementById('createUserBtn');
+
         if (password !== confirmPassword) {
-            alert('Passwords do not match!');
+            messageDiv.className = 'alert alert-danger';
+            messageDiv.innerHTML = '<i class="fas fa-exclamation-circle me-2"></i>Passwords do not match!';
+            messageDiv.style.display = 'block';
             return;
         }
-        
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating...';
+
         const formData = new FormData();
         formData.append('username', username);
         formData.append('email', email);
         formData.append('password', password);
-        
+
         fetch('/api/admin/create-mobile-user', {
             method: 'POST',
             body: formData
         })
         .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => { throw err; });
-            }
+            if (!response.ok) return response.json().then(err => { throw err; });
             return response.json();
         })
         .then(data => {
-            alert('Mobile user created successfully!');
-            window.location.reload();
+            messageDiv.className = 'alert alert-success';
+            messageDiv.innerHTML = '<i class="fas fa-check-circle me-2"></i>Mobile user created successfully!';
+            messageDiv.style.display = 'block';
+            document.getElementById('createUserForm').reset();
+            setTimeout(() => { window.location.reload(); }, 1500);
         })
         .catch(error => {
-            alert('Error creating user: ' + (error.detail || error.message || error));
+            messageDiv.className = 'alert alert-danger';
+            messageDiv.innerHTML = '<i class="fas fa-exclamation-circle me-2"></i>' + (error.detail || 'Error creating user.');
+            messageDiv.style.display = 'block';
+        })
+        .finally(() => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-user-plus me-2"></i>Create User';
         });
     });
 
     // View and Toggle Status buttons
     document.addEventListener('click', function(e) {
-        // View User
         if (e.target.closest('.view-user-btn')) {
             const userId = e.target.closest('.view-user-btn').getAttribute('data-user-id');
             alert('View user details for ID: ' + userId);
         }
-        
-        // Toggle User Status (Activate/Deactivate)
+
         if (e.target.closest('.toggle-status-btn')) {
             const btn = e.target.closest('.toggle-status-btn');
             const userId = btn.getAttribute('data-user-id');
             const currentStatus = btn.getAttribute('data-current-status');
-            
+
             const action = currentStatus === 'active' ? 'deactivate' : 'activate';
-            const confirmMsg = currentStatus === 'active' 
-                ? 'Are you sure you want to deactivate this user? They will not be able to log in.'
-                : 'Are you sure you want to activate this user? They will be able to log in again.';
-            
+            const confirmMsg = currentStatus === 'active'
+                ? 'Are you sure you want to deactivate this user?'
+                : 'Are you sure you want to activate this user?';
+
             if (confirm(confirmMsg)) {
-                fetch(`/api/users/${userId}/toggle-status`, {
-                    method: 'PUT',
-                })
+                fetch(`/api/users/${userId}/toggle-status`, { method: 'PUT' })
                 .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(err => { throw err; });
-                    }
+                    if (!response.ok) return response.json().then(err => { throw err; });
                     return response.json();
                 })
                 .then(data => {
