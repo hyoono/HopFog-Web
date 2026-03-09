@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>HopFog - Terms & Conditions</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='images/HopFog-Logo.png') }}">
+    <link href="static/css/styles.css" rel="stylesheet" />
+    <script src="https://use.fontawesome.com/releases/v6.3.0/js/all.js" crossorigin="anonymous"></script>
+    <style>
+        h5 i { color: #222222 !important; }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0 rounded-lg">
+                        <div class="card-header text-white" style="background-color: #222222;">
+                            <div class="d-flex align-items-center">
+                                <img src="{{ url_for('static', path='images/HopFog-Logo.png') }}" alt="HopFog Logo" style="height:35px; margin-right:10px;">
+                                <h4 class="mb-0">Terms & Conditions</h4>
+                            </div>
+                        </div>
+                    <div class="card-body p-4">
+                        <p class="text-muted small">Last updated: March 9, 2026</p>
+                        <hr>
+
+                        <h5><i class="fas fa-handshake me-2"></i>Acceptance of Terms</h5>
+                        <p>By accessing or using the HopFog platform, you agree to be bound by these Terms and Conditions. If you do not agree, you may not use the service.</p>
+
+                        <h5><i class="fas fa-user me-2"></i>User Accounts</h5>
+                        <ul>
+                            <li>Accounts are created and managed by HopFog administrators.</li>
+                            <li>You are responsible for keeping your credentials confidential.</li>
+                            <li>You must not share your account with others.</li>
+                            <li>Accounts may be deactivated at any time by an administrator.</li>
+                        </ul>
+
+                        <h5><i class="fas fa-mobile-alt me-2"></i>Use of the App</h5>
+                        <ul>
+                            <li>The HopFog app is intended for authorized users only.</li>
+                            <li>You agree to use the platform only for lawful and intended purposes.</li>
+                            <li>Misuse of the SOS and Alert system is strictly prohibited.</li>
+                            <li>You must not attempt to disrupt or interfere with the Fog Node network.</li>
+                        </ul>
+
+                        <h5><i class="fas fa-comment-alt me-2"></i>Messaging</h5>
+                        <ul>
+                            <li>All messages sent through HopFog are logged and may be reviewed by administrators.</li>
+                            <li>Do not send harmful, offensive, or illegal content.</li>
+                            <li>SOS alerts should only be used in genuine emergency situations.</li>
+                        </ul>
+
+                        <h5><i class="fas fa-exclamation-triangle me-2"></i>Disclaimer</h5>
+                        <p>HopFog is provided "as is" without warranties of any kind. We do not guarantee uninterrupted service, especially in areas with limited Fog Node coverage. The platform should not be used as the sole means of emergency communication.</p>
+
+                        <h5><i class="fas fa-ban me-2"></i>Termination</h5>
+                        <p>We reserve the right to deactivate or terminate any account that violates these terms without prior notice.</p>
+
+                        <h5><i class="fas fa-sync me-2"></i>Changes to Terms</h5>
+                        <p>We may update these Terms and Conditions at any time. Continued use of the platform after changes constitutes acceptance of the new terms.</p>
+
+                        <h5><i class="fas fa-envelope me-2"></i>Contact</h5>
+                        <p>For questions regarding these terms, please contact your HopFog administrator.</p>
+                    </div>
+                    <div class="card-footer text-center py-3">
+                        <a href="{{ url_for('login_page') }}" class="btn btn-outline-primary btn-sm">
+                            <i class="fas fa-arrow-left me-2"></i>Back to Login
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+</body>
+</html>
