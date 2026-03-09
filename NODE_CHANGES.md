@@ -256,6 +256,22 @@ static void handleGetStats() {
 
 ---
 
+## ALSO IMPORTANT: ASYNCWEBSERVER_REGEX
+
+If the node uses ESPAsyncWebServer with any regex routes (e.g. `"^\\/api\\/path\\/(\\d+)$"`),
+you MUST add `-DASYNCWEBSERVER_REGEX=1` to `build_flags` in `platformio.ini`.
+
+Without this flag, regex routes **silently don't match** → 404.
+
+```ini
+build_flags =
+    -DCORE_DEBUG_LEVEL=0
+    -DBOARD_HAS_PSRAM=1
+    -DASYNCWEBSERVER_REGEX=1
+```
+
+---
+
 ## Verification After Flashing
 
 1. Admin serial monitor: `TX OK` for PINGs, `RX ←` for node REGISTER
