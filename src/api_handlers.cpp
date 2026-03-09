@@ -1134,7 +1134,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
         JsonDocument resp;
-        resp["rx_bytes_total"] = xbeeGetRxByteCount();
+        resp["rx_bytes_total"] = xbTotalRxBytes;
         resp["uptime_ms"]      = millis();
         // Include diagnostic summary for the serial monitor
         JsonObject diag = resp["diag"].to<JsonObject>();
@@ -1183,24 +1183,6 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument resp;
         JsonObject diag = resp.to<JsonObject>();
         xbeeGetDiagnostics(diag);
-        String out; serializeJson(resp, out);
-        request->send(200, "application/json", out);
-    });
-
-    // ╭───────────────────────────────────────────────────────────────╮
-    // │  XBEE: POST /api/xbee/loopback-test — UART self-test         │
-    // ╰───────────────────────────────────────────────────────────────╯
-    server.on("/api/xbee/loopback-test", HTTP_POST,
-              [](AsyncWebServerRequest *request) {
-        int uid = authenticateRequest(request);
-        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
-
-        String result;
-        bool pass = xbeeRunLoopbackTest(result);
-
-        JsonDocument resp;
-        resp["success"] = pass;
-        resp["result"]  = result;
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
     });

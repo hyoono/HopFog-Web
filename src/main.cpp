@@ -69,23 +69,32 @@ static void startAP() {
 
 // ── Setup ───────────────────────────────────────────────────────────
 //
-//  INIT ORDER — designed to isolate SPI/WiFi from UART0:
+//  INIT ORDER — matches the working XBEE_COMM_TEST project exactly:
 //
 //   1. Flash LED off
-//   2. SD card (SPI — before UART0 is configured at 9600)
-//   3. Auth
-//   4. delay(2000) — let bootloader UART0 traffic settle
-//   5. xbeeInit() — Serial.begin(9600)
-//   6. xbeeQueryConfig() — AT probe (proves UART works)
-//   7. Node protocol + callback
-//   8. WiFi AP
-//   9. DNS + Web server
-//  10. delay(3000) — XBee network stabilisation
+//   2. xbeeInit() — Serial.begin(9600) FIRST, before anything else
+//   3. xbeeSetReceiveCallback()
+//   4. SD card
+//   5. Auth
+//   6. WiFi AP
+//   7. DNS + Web server
+//   8. delay(3000) — wait for XBee network to form
 //
 void setup() {
     // Disable ESP32-CAM flash LED (GPIO 4 = flash LED transistor)
     pinMode(4, OUTPUT);
     digitalWrite(4, LOW);
+
+    // 1. XBee — Serial.begin(9600) FIRST, BEFORE anything else.
+    //    This matches the test project which calls xbeeInit() first.
+    xbeeInit();
+
+    // 2. Receive callback
+    xbeeSetReceiveCallback([](const char* line, size_t len) {
+        if (!nodeProtocolHandleLine(line, len)) {
+            logMsg('R', "Unhandled: %.160s", line);
+        }
+    });
 
 #ifndef XBEE_USES_UART0
     // Generic ESP32: UART0 is free for debug output
@@ -96,52 +105,31 @@ void setup() {
     dbgprintln("   HopFog-Web  ESP32 Firmware");
     dbgprintln("========================================");
 
-    // 1. SD card — init SPI BEFORE configuring UART0 for XBee.
-    //    This ensures any SPI GPIO matrix changes happen while UART0
-    //    is still at bootloader baud rate (115200), not at XBee baud.
+    // 3. SD card
     if (!initSDCard()) {
         dbgprintln("[FATAL] SD card init failed – halting.");
         while (true) { delay(1000); }
     }
 
-    // 2. Auth
+    // 4. Auth
     authInit();
 
-    // 3. Wait for bootloader UART0 output and XBee boot-up to finish.
-    //    The ESP32 bootloader outputs text at 115200 baud on GPIO1.
-    //    The XBee module takes ~1.5s to boot and join a network.
-    //    This delay matches the test project's blinkLed(3, 300) = 1.8s.
-    delay(2000);
-
-    // 4. XBee — Serial.begin(9600) AFTER all SPI/peripheral init
-    xbeeInit();
-
-    // 5. AT command probe — query XBee module config
-    //    If this gets responses, UART TX+RX are both proven working.
-    xbeeQueryConfig();
-
-    // 6. Node protocol + callback
-    nodeProtocolInit();
-    xbeeSetReceiveCallback([](const char* line, size_t len) {
-        if (!nodeProtocolHandleLine(line, len)) {
-            dbgprintf("[XBee] RX (%d bytes): %s\n", (int)len, line);
-        }
-    });
-
-    // 7. WiFi AP
+    // 5. WiFi AP
     startAP();
 
-    // 8. DNS captive portal + Web server
+    // 6. DNS captive portal + Web server
     dnsServer.setTTL(300);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
     dbgprintf("[DNS] Captive portal → %s\n", WiFi.softAPIP().toString().c_str());
 
+    nodeProtocolInit();
     setupWebServer(server);
     registerApiRoutes(server);
     server.begin();
     dbgprintf("[HTTP] Server on port %d — http://%s\n", HTTP_PORT, CUSTOM_DOMAIN);
 
-    // 9. Wait for XBee ZigBee network to form/join (3 seconds)
+    // 7. Wait for XBee ZigBee network to form/join (3 seconds)
+    //    Matches the test project's delay(3000).
     delay(3000);
 }
 

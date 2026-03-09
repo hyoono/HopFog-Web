@@ -93,23 +93,18 @@
                                     <hr class="my-1">
                                     <div class="row small">
                                         <div class="col-md-6">
-                                            <strong>XBee Module Config</strong> (AT command probe):<br>
-                                            <span id="diagXbeeProbe" class="text-muted">Not probed yet</span><br>
-                                            <strong>AP Mode:</strong> <span id="diagAP">?</span> |
-                                            <strong>CE Role:</strong> <span id="diagCE">?</span><br>
-                                            <strong>PAN ID:</strong> <span id="diagPanId">?</span> |
-                                            <strong>MY Addr:</strong> <span id="diagMyAddr">?</span>
-                                        </div>
-                                        <div class="col-md-6">
                                             <strong>TX Bytes:</strong> <span id="diagTxBytes">0</span> |
                                             <strong>RX Bytes:</strong> <span id="diagRxBytes">0</span><br>
                                             <strong>TX Status OK:</strong> <span id="diagTxOk">0</span> |
-                                            <strong>TX Status Fail:</strong> <span id="diagTxFail">0</span> |
+                                            <strong>TX Status Fail:</strong> <span id="diagTxFail">0</span><br>
                                             <strong>RX Frames:</strong> <span id="diagRxFrames">0</span> |
-                                            <strong>Self-Echo:</strong> <span id="diagSelfEcho">0</span><br>
-                                            <strong>Modem Status:</strong> <span id="diagModemStatus">0</span> |
-                                            <strong>Checksum Errors:</strong> <span id="diagChecksumErr">0</span> |
-                                            <strong>Timeouts:</strong> <span id="diagTimeouts">0</span>
+                                            <strong>Self-Echo:</strong> <span id="diagSelfEcho">0</span>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <strong>Uptime:</strong> <span id="diagUptime">0</span>s<br>
+                                            <strong>TX Pin:</strong> GPIO <span id="diagTxPin">?</span> |
+                                            <strong>RX Pin:</strong> GPIO <span id="diagRxPin">?</span> |
+                                            <strong>Baud:</strong> <span id="diagBaud">?</span>
                                         </div>
                                     </div>
                                 </div>
@@ -119,9 +114,6 @@
                                     </button>
                                     <button class="btn btn-sm btn-outline-info py-0 ms-1" onclick="runDiagnostics()">
                                         <i class="fas fa-stethoscope me-1"></i>Run Diagnostics
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-warning py-0 ms-1" onclick="runLoopbackTest()">
-                                        <i class="fas fa-exchange-alt me-1"></i>UART Loopback Test
                                     </button>
                                 </div>
                             </div>
@@ -399,11 +391,9 @@
                 for (let i = data.log.length - 1; i >= 0; i--) {
                     const e = data.log[i];
                     const timeStr = formatMs(e.ts);
-                    const ft = e.frame_type ? ' [0x' + e.frame_type.toString(16).toUpperCase() + ']' : '';
-                    const fid = e.frame_id ? ' #' + e.frame_id : '';
                     html += '<div>' + dirLabel(e.dir) +
                             ' <span class="text-muted">' + escHtml(timeStr) + '</span>' +
-                            ft + fid + ' ' + escHtml(e.msg) + '</div>';
+                            ' ' + escHtml(e.text) + '</div>';
                 }
                 con.innerHTML = html;
                 con.scrollTop = con.scrollHeight;
@@ -430,12 +420,9 @@
 
         // RX direction
         const rxEl = document.getElementById('diagRx');
-        if (d.rx_data_frames > 0) {
+        if (d.rx_frames_parsed > 0) {
             rxEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> Working</span>' +
-                ' (' + d.rx_bytes + ' B, ' + d.rx_data_frames + ' data frames)';
-        } else if (d.rx_frames_parsed > 0) {
-            rxEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> RX Working</span>' +
-                ' (' + d.rx_bytes + ' B, ' + d.rx_frames_parsed + ' frames — waiting for remote data)';
+                ' (' + d.rx_bytes + ' B, ' + d.rx_frames_parsed + ' data frames)';
         } else if (d.rx_bytes > 0) {
             rxEl.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-circle"></i> ' +
                 d.rx_bytes + ' B received but 0 frames parsed</span>';
@@ -445,7 +432,7 @@
 
         // Assessment
         const assessEl = document.getElementById('diagAssessment');
-        if (d.rx_data_frames > 0 && d.tx_status_ok > 0) {
+        if (d.rx_frames_parsed > 0 && d.tx_status_ok > 0) {
             assessEl.innerHTML = '<span class="text-success">' + escHtml(d.assessment) + '</span>';
         } else if (d.rx_frames_parsed > 0) {
             assessEl.innerHTML = '<span class="text-info">' + escHtml(d.assessment) + '</span>';
@@ -455,40 +442,6 @@
             assessEl.innerHTML = '<span class="text-danger">' + escHtml(d.assessment) + '</span>';
         }
 
-        // XBee module config (AT command probe results)
-        if (d.xbee_config) {
-            var c = d.xbee_config;
-            var probeEl = document.getElementById('diagXbeeProbe');
-            if (c.probe_ok) {
-                probeEl.innerHTML = '<span class="text-success"><i class="fas fa-check-circle"></i> ' +
-                    c.responses + '/4 AT responses received — UART TX+RX proven working</span>';
-            } else {
-                probeEl.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> ' +
-                    '0 AT responses — XBee not responding. Check wiring + power.</span>';
-            }
-
-            var apEl = document.getElementById('diagAP');
-            if (c.ap_mode === 1) {
-                apEl.innerHTML = '<span class="text-success">1 (API) ✅</span>';
-            } else if (c.ap_mode === 0) {
-                apEl.innerHTML = '<span class="text-danger">0 (Transparent) ❌ MUST BE 1</span>';
-            } else {
-                apEl.innerHTML = '<span class="text-muted">unknown</span>';
-            }
-
-            var ceEl = document.getElementById('diagCE');
-            if (c.coordinator === 1) {
-                ceEl.innerHTML = '<span class="text-success">Coordinator ✅</span>';
-            } else if (c.coordinator === 0) {
-                ceEl.innerHTML = '<span class="text-info">Router</span>';
-            } else {
-                ceEl.innerHTML = '<span class="text-muted">unknown</span>';
-            }
-
-            document.getElementById('diagPanId').textContent = c.pan_id_hex || '?';
-            document.getElementById('diagMyAddr').textContent = c.my_addr_hex || '?';
-        }
-
         // Detail fields
         document.getElementById('diagTxBytes').textContent = d.tx_bytes;
         document.getElementById('diagRxBytes').textContent = d.rx_bytes;
@@ -496,9 +449,10 @@
         document.getElementById('diagTxFail').textContent = d.tx_status_fail;
         document.getElementById('diagRxFrames').textContent = d.rx_frames_parsed;
         document.getElementById('diagSelfEcho').textContent = d.self_echo_count || 0;
-        document.getElementById('diagModemStatus').textContent = d.modem_status_cnt || 0;
-        document.getElementById('diagChecksumErr').textContent = d.checksum_errors || 0;
-        document.getElementById('diagTimeouts').textContent = d.frame_timeouts || 0;
+        document.getElementById('diagUptime').textContent = Math.floor((d.uptime_ms || 0) / 1000);
+        document.getElementById('diagTxPin').textContent = d.tx_pin || '?';
+        document.getElementById('diagRxPin').textContent = d.rx_pin || '?';
+        document.getElementById('diagBaud').textContent = d.baud || '?';
     }
 
     function toggleDiagDetails() {
@@ -522,33 +476,6 @@
                 document.getElementById('diagToggleLabel').textContent = 'Hide Details';
             })
             .catch(err => alert('Failed: ' + err.message));
-    }
-
-    function runLoopbackTest() {
-        // Fetch pin config from status endpoint for accurate dialog
-        fetch('/api/xbee/status', { credentials: 'same-origin' })
-            .then(r => r.json())
-            .then(cfg => {
-                if (!confirm('UART Loopback Test\n\n' +
-                    'This test verifies the ESP32 UART hardware works.\n\n' +
-                    'IMPORTANT: Disconnect the XBee first, then connect a jumper wire\n' +
-                    'from GPIO ' + cfg.tx_pin + ' (TX) directly to GPIO ' + cfg.rx_pin + ' (RX).\n\n' +
-                    'Press OK to run the test.')) return;
-
-                fetch('/api/xbee/loopback-test', {
-                    method: 'POST',
-                    credentials: 'same-origin'
-                })
-                .then(r => r.json())
-                .then(data => {
-                    alert((data.success ? '✅ ' : '❌ ') + data.result);
-                    refreshLog();
-                })
-                .catch(err => alert('Network error: ' + err.message));
-            })
-            .catch(() => {
-                alert('Could not fetch pin configuration.');
-            });
     }
 
     function toggleAutoRefresh() {
