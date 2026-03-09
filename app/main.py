@@ -55,6 +55,17 @@ async def on_startup():
 async def on_shutdown():
     await dispatcher.stop()
 
+
+@app.get("/privacy-policy", response_class=HTMLResponse)
+def privacy_policy(request: Request):
+    return templates.TemplateResponse("privacy_policy.html", {"request": request})
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms(request: Request):
+    return templates.TemplateResponse("terms.html", {"request": request})
+
+
+
 @app.get("/", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
