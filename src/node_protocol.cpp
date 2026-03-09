@@ -1,19 +1,16 @@
 /*
  * node_protocol.cpp — Handle HopFog-Node JSON commands over XBee.
  *
- * When a node sends {"cmd":"REGISTER","node_id":"node-01",...} the admin
- * parses it, stores the node info, and replies with {"cmd":"REGISTER_ACK",...}.
+ * CRITICAL: ZigBee broadcast max payload is ~84 bytes. All RESPONSES
+ * are sent via unicast (xbeeSendTo) which supports fragmentation up
+ * to ~255 bytes. Only discovery PINGs use broadcast.
  *
- * Supported incoming commands:
- *   REGISTER, HEARTBEAT, SYNC_REQUEST, RELAY_MSG, RELAY_FOG_NODE,
- *   RELAY_CHAT_MSG, SOS_ALERT, CHANGE_PASSWORD, STATS_RESPONSE
- *
- * Outgoing responses:
- *   REGISTER_ACK, PONG, SYNC_DATA, BROADCAST_MSG, GET_STATS
+ * SYNC_DATA is chunked into multiple small messages to stay within
+ * the unicast payload limit.
  */
 
 #include "node_protocol.h"
-#include "config.h"    // for dbgprintf/dbgprintln macros
+#include "config.h"
 #include "xbee_comm.h"
 #include "sd_storage.h"
 
@@ -29,21 +26,39 @@ static NodeInfo* findNode(const char* nodeId) {
     return nullptr;
 }
 
-static NodeInfo* registerNode(const char* nodeId) {
+static NodeInfo* registerNode(const char* nodeId, const XBeeAddr& addr) {
     NodeInfo* n = findNode(nodeId);
-    if (n) return n;
-    if (nodeCount >= MAX_NODES) return nullptr; // registry full
+    if (n) {
+        n->xbeeAddr = addr;  // Update address
+        return n;
+    }
+    if (nodeCount >= MAX_NODES) return nullptr;
     n = &nodes[nodeCount++];
     memset(n, 0, sizeof(NodeInfo));
     strncpy(n->node_id, nodeId, sizeof(n->node_id) - 1);
     strncpy(n->status, "active", sizeof(n->status) - 1);
     n->registered_at = millis();
     n->last_heartbeat = millis();
+    n->xbeeAddr = addr;
     return n;
 }
 
-// ── Helper: send a JSON command via XBee broadcast ─────────────────
-static void sendJsonCommand(JsonDocument& doc) {
+// ── Helper: send JSON command to a specific node (unicast) ─────────
+static void sendReply(const XBeeAddr& dest, JsonDocument& doc) {
+    String json;
+    serializeJson(doc, json);
+
+    if (dest.valid) {
+        // Unicast: supports fragmentation, up to ~255 bytes
+        xbeeSendTo(dest, json.c_str(), json.length());
+    } else {
+        // Fallback to broadcast if no known address
+        xbeeSendBroadcast(json.c_str(), json.length());
+    }
+}
+
+// ── Helper: send JSON as broadcast (for PING discovery only) ───────
+static void sendBroadcast(JsonDocument& doc) {
     String json;
     serializeJson(doc, json);
     xbeeSendBroadcast(json.c_str(), json.length());
@@ -51,126 +66,111 @@ static void sendJsonCommand(JsonDocument& doc) {
 
 // ── Command handlers ───────────────────────────────────────────────
 
-static void handleRegister(const char* nodeId, JsonObject params) {
-    NodeInfo* n = registerNode(nodeId);
+static void handleRegister(const char* nodeId, JsonObject params,
+                           const XBeeAddr& src) {
+    NodeInfo* n = registerNode(nodeId, src);
     if (!n) {
-        dbgprintln("[NODE] Registry full, cannot register");
+        logMsg('E', "Registry full, cannot register %s", nodeId);
         return;
     }
     strncpy(n->device_name,
-            params["device_name"] | nodeId,
+            params["device_name"] | params["name"] | nodeId,
             sizeof(n->device_name) - 1);
     strncpy(n->ip_address,
-            params["ip_address"] | "",
+            params["ip_address"] | params["ip"] | "",
             sizeof(n->ip_address) - 1);
     strncpy(n->status, "active", sizeof(n->status) - 1);
     n->last_heartbeat = millis();
 
-    // Reply REGISTER_ACK
+    // Reply REGISTER_ACK via unicast (~44 bytes)
     JsonDocument ack;
     ack["cmd"] = "REGISTER_ACK";
     ack["node_id"] = nodeId;
-    sendJsonCommand(ack);
-    dbgprintf("[NODE] Registered %s (%s)\n", nodeId, n->ip_address);
+    sendReply(src, ack);
+    logMsg('S', "Registered %s (addr %02X%02X)",
+           nodeId, src.addr64[6], src.addr64[7]);
 }
 
-static void handleHeartbeat(const char* nodeId, JsonObject params) {
+static void handleHeartbeat(const char* nodeId, JsonObject params,
+                            const XBeeAddr& src) {
     NodeInfo* n = findNode(nodeId);
-    if (!n) n = registerNode(nodeId);
+    if (!n) n = registerNode(nodeId, src);
     if (!n) return;
     n->last_heartbeat = millis();
+    n->xbeeAddr = src;
     strncpy(n->status, "active", sizeof(n->status) - 1);
     strncpy(n->ip_address,
-            params["ip_address"] | n->ip_address,
+            params["ip_address"] | params["ip"] | n->ip_address,
             sizeof(n->ip_address) - 1);
-    n->free_heap = params["free_heap"] | 0;
+    n->free_heap = params["free_heap"] | params["heap"] | 0;
     n->uptime = params["uptime"] | 0;
 
-    // Reply PONG
+    // Reply PONG via unicast (~33 bytes)
     JsonDocument pong;
     pong["cmd"] = "PONG";
     pong["node_id"] = nodeId;
-    sendJsonCommand(pong);
+    sendReply(src, pong);
 }
 
-static void handleSyncRequest(const char* nodeId) {
-    // Build SYNC_DATA from SD card files
-    JsonDocument sync;
-    sync["cmd"] = "SYNC_DATA";
-    sync["node_id"] = nodeId;
+static void handleSyncRequest(const char* nodeId, const XBeeAddr& dest) {
+    // SYNC_DATA is too large for a single XBee frame.
+    // We send it in chunks, each < 200 bytes (unicast fragmentation limit).
+    //
+    // Chunk format: {"cmd":"SYNC_DATA","node_id":"...","part":"users","data":[...]}
+    // Final chunk:  {"cmd":"SYNC_DONE","node_id":"..."}
 
-    // Users
-    JsonDocument usersDoc;
-    readJsonArray(SD_USERS_FILE, usersDoc);
-    JsonArray usersArr = sync["users"].to<JsonArray>();
-    if (usersDoc.is<JsonArray>()) {
-        for (JsonObject u : usersDoc.as<JsonArray>()) {
-            if (u["is_active"].as<int>() == 1) {
-                JsonObject o = usersArr.add<JsonObject>();
-                o["id"] = u["id"];
-                o["username"] = u["username"];
-                o["email"] = u["email"];
-                o["role"] = u["role"];
-                o["is_active"] = true;
-                o["has_agreed_sos"] = (u["has_agreed_sos"].as<int>() == 1);
-            }
+    auto sendChunk = [&](const char* partName, const char* sdFile) {
+        JsonDocument chunk;
+        chunk["cmd"] = "SYNC_DATA";
+        chunk["node_id"] = nodeId;
+        chunk["part"] = partName;
+
+        JsonDocument fileDoc;
+        readJsonArray(sdFile, fileDoc);
+        if (fileDoc.is<JsonArray>()) {
+            chunk["data"] = fileDoc.as<JsonArray>();
+        } else {
+            chunk["data"].to<JsonArray>();
         }
-    }
 
-    // Announcements (sent broadcasts)
-    JsonDocument bcastDoc;
-    readJsonArray(SD_BCASTS_FILE, bcastDoc);
-    JsonArray annArr = sync["announcements"].to<JsonArray>();
-    if (bcastDoc.is<JsonArray>()) {
-        int count = 0;
-        for (JsonObject b : bcastDoc.as<JsonArray>()) {
-            const char* st = b["status"] | "";
-            if (strcmp(st, "sent") == 0 || strcmp(st, "queued") == 0) {
-                JsonObject o = annArr.add<JsonObject>();
-                o["id"] = b["id"];
-                o["title"] = b["subject"];
-                o["message"] = b["body"];
-                o["created_at"] = b["created_at"];
-                if (++count >= 50) break;
-            }
+        String json;
+        serializeJson(chunk, json);
+
+        // If chunk fits in unicast, send it. Otherwise send empty array.
+        if (json.length() > XBEE_UNICAST_MAX) {
+            // Too large even for unicast — send empty with count
+            JsonDocument small;
+            small["cmd"] = "SYNC_DATA";
+            small["node_id"] = nodeId;
+            small["part"] = partName;
+            small["data"].to<JsonArray>();
+            small["truncated"] = true;
+            sendReply(dest, small);
+        } else {
+            sendReply(dest, chunk);
         }
-    }
+        delay(SYNC_CHUNK_DELAY_MS); // Delay between chunks to avoid UART buffer overflow
+    };
 
-    // Conversations
-    JsonDocument convDoc;
-    readJsonArray(SD_CONVOS_FILE, convDoc);
-    sync["conversations"] = convDoc.as<JsonArray>();
+    sendChunk("users", SD_USERS_FILE);
+    sendChunk("announcements", SD_BCASTS_FILE);
+    sendChunk("conversations", SD_CONVOS_FILE);
+    sendChunk("chat_messages", SD_DMS_FILE);
+    sendChunk("fog_nodes", SD_FOG_FILE);
 
-    // Chat messages (direct messages, last 100)
-    JsonDocument dmDoc;
-    readJsonArray(SD_DMS_FILE, dmDoc);
-    JsonArray chatArr = sync["chat_messages"].to<JsonArray>();
-    if (dmDoc.is<JsonArray>()) {
-        JsonArray dmArr = dmDoc.as<JsonArray>();
-        int start = (int)dmArr.size() - 100;
-        if (start < 0) start = 0;
-        for (int i = start; i < (int)dmArr.size(); i++) {
-            chatArr.add(dmArr[i]);
-        }
-    }
+    // Final: SYNC_DONE
+    JsonDocument done;
+    done["cmd"] = "SYNC_DONE";
+    done["node_id"] = nodeId;
+    sendReply(dest, done);
 
-    // Fog nodes
-    JsonDocument fogDoc;
-    readJsonArray(SD_FOG_FILE, fogDoc);
-    sync["fog_nodes"] = fogDoc.as<JsonArray>();
-
-    // Messages (log)
-    sync["messages"] = JsonArray();
-
-    sendJsonCommand(sync);
-    dbgprintf("[NODE] Sent SYNC_DATA to %s\n", nodeId);
+    logMsg('S', "Sent SYNC_DATA (chunked) to %s", nodeId);
 }
 
 static void handleSosAlert(const char* nodeId, JsonObject params) {
     int userId = params["user_id"] | 0;
     if (userId <= 0) return;
 
-    // Create a resident_admin_message for the SOS
     JsonDocument doc;
     readJsonArray(SD_RES_MSG_FILE, doc);
     JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc.to<JsonArray>();
@@ -181,7 +181,6 @@ static void handleSosAlert(const char* nodeId, JsonObject params) {
         if (id >= newId) newId = id + 1;
     }
 
-    // Look up username
     JsonDocument usersDoc;
     readJsonArray(SD_USERS_FILE, usersDoc);
     String username = "User " + String(userId);
@@ -205,19 +204,7 @@ static void handleSosAlert(const char* nodeId, JsonObject params) {
     sos["created_at"] = (long)time(nullptr);
 
     writeJsonArray(SD_RES_MSG_FILE, doc);
-    dbgprintf("[NODE] SOS alert from user %d via %s\n", userId, nodeId);
-
-    // Also send SOS via XBee in JSON format (for node protocol)
-    String sosXbeePayload = "SOS_ALERT|" + username + "|SOS via " + String(nodeId);
-    JsonDocument sosRelayCmd;
-    sosRelayCmd["cmd"] = "SOS_ALERT";
-    sosRelayCmd["node_id"] = "admin";
-    JsonObject sosRelayParams = sosRelayCmd["params"].to<JsonObject>();
-    sosRelayParams["user_id"] = userId;
-    sosRelayParams["username"] = username;
-    String sosRelayJson;
-    serializeJson(sosRelayCmd, sosRelayJson);
-    xbeeSendBroadcast(sosRelayJson.c_str(), sosRelayJson.length());
+    logMsg('S', "SOS from user %d via %s", userId, nodeId);
 }
 
 static void handleChangePassword(JsonObject params) {
@@ -231,9 +218,8 @@ static void handleChangePassword(JsonObject params) {
 
     for (JsonObject u : doc.as<JsonArray>()) {
         if ((u["id"] | 0) == userId) {
-            u["password_hash"] = newPw;  // ESP32: stored as-is (no bcrypt on MCU)
+            u["password_hash"] = newPw;
             writeJsonArray(SD_USERS_FILE, doc);
-            dbgprintf("[NODE] Password changed for user %d\n", userId);
             return;
         }
     }
@@ -247,7 +233,6 @@ static void handleRelayFogNode(JsonObject params) {
     readJsonArray(SD_FOG_FILE, doc);
     JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc.to<JsonArray>();
 
-    // Check if already exists
     for (JsonObject d : arr) {
         if (strcmp(d["device_name"] | "", name) == 0) {
             d["status"] = params["status"] | "active";
@@ -256,7 +241,6 @@ static void handleRelayFogNode(JsonObject params) {
         }
     }
 
-    // Add new
     int newId = 1;
     for (JsonObject d : arr) {
         int id = d["id"] | 0;
@@ -293,8 +277,6 @@ static void handleRelayChatMsg(const char* nodeId, JsonObject params) {
     msg["sent_at"] = (long)time(nullptr);
 
     writeJsonArray(SD_DMS_FILE, doc);
-    dbgprintf("[NODE] Chat msg from node %s: conv=%d sender=%d\n",
-                  nodeId, convId, senderId);
 }
 
 static void handleStatsResponse(const char* nodeId, JsonObject params) {
@@ -302,8 +284,6 @@ static void handleStatsResponse(const char* nodeId, JsonObject params) {
     if (!n) return;
     n->free_heap = params["free_heap"] | 0;
     n->uptime = params["uptime"] | 0;
-    dbgprintf("[NODE] Stats from %s: heap=%d uptime=%d\n",
-                  nodeId, n->free_heap, n->uptime);
 }
 
 // ── Public API ─────────────────────────────────────────────────────
@@ -319,21 +299,19 @@ void nodeProtocolInit() {
 void nodeProtocolLoop() {
     unsigned long now = millis();
 
-    // Admin sends periodic PING — this is the KEY CHANGE.
-    // The working test project has BOTH sides actively sending.
-    // Without this, the admin sits silently and never discovers nodes.
+    // Admin sends periodic PING via BROADCAST (small, fits in 72 bytes).
+    // This is the only message that uses broadcast — for discovery.
     if (now - lastPingMs >= ADMIN_PING_INTERVAL_MS) {
         JsonDocument ping;
         ping["cmd"] = "PING";
         ping["node_id"] = "admin";
-        ping["ts"] = (long)(millis() / 1000);
-        sendJsonCommand(ping);
+        sendBroadcast(ping);
         lastPingMs = now;
     }
 }
 
-bool nodeProtocolHandleLine(const char* line, size_t len) {
-    // Try to parse as JSON
+bool nodeProtocolHandleLine(const char* line, size_t len,
+                            const XBeeAddr& src) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, line, len);
     if (err) return false;
@@ -344,14 +322,14 @@ bool nodeProtocolHandleLine(const char* line, size_t len) {
     const char* nodeId = doc["node_id"] | "unknown";
     JsonObject params = doc["params"].as<JsonObject>();
 
-    dbgprintf("[NODE] CMD=%s from %s\n", cmd, nodeId);
+    logMsg('S', "CMD=%s from %s", cmd, nodeId);
 
     if (strcmp(cmd, "REGISTER") == 0) {
-        handleRegister(nodeId, params);
+        handleRegister(nodeId, params, src);
     } else if (strcmp(cmd, "HEARTBEAT") == 0) {
-        handleHeartbeat(nodeId, params);
+        handleHeartbeat(nodeId, params, src);
     } else if (strcmp(cmd, "SYNC_REQUEST") == 0) {
-        handleSyncRequest(nodeId);
+        handleSyncRequest(nodeId, src);
     } else if (strcmp(cmd, "SOS_ALERT") == 0) {
         handleSosAlert(nodeId, params);
     } else if (strcmp(cmd, "CHANGE_PASSWORD") == 0) {
@@ -361,23 +339,18 @@ bool nodeProtocolHandleLine(const char* line, size_t len) {
     } else if (strcmp(cmd, "RELAY_CHAT_MSG") == 0) {
         handleRelayChatMsg(nodeId, params);
     } else if (strcmp(cmd, "RELAY_MSG") == 0) {
-        dbgprintf("[NODE] Relay msg from %s: %s -> %s\n",
-                      nodeId,
-                      (const char*)(params["from"] | "?"),
-                      (const char*)(params["to"] | "?"));
+        // Log only
     } else if (strcmp(cmd, "STATS_RESPONSE") == 0) {
         handleStatsResponse(nodeId, params);
     } else if (strcmp(cmd, "PONG") == 0) {
-        // Node responded to our PING — node is alive
-        dbgprintf("[NODE] PONG from %s\n", nodeId);
+        // Node responded to our PING
     } else if (strcmp(cmd, "PING") == 0) {
-        // Node sent a PING — reply with PONG
+        // Node sent a PING — reply with PONG via unicast
         JsonDocument pong;
         pong["cmd"] = "PONG";
         pong["node_id"] = "admin";
-        sendJsonCommand(pong);
+        sendReply(src, pong);
     } else {
-        dbgprintf("[NODE] Unknown command: %s\n", cmd);
         return false;
     }
     return true;
@@ -387,7 +360,6 @@ void nodeProtocolGetNodes(JsonArray& arr) {
     unsigned long now = millis();
     for (int i = 0; i < nodeCount; i++) {
         NodeInfo& n = nodes[i];
-        // Mark stale if no heartbeat
         if (now - n.last_heartbeat > NODE_STALE_MS) {
             strncpy(n.status, "stale", sizeof(n.status) - 1);
         }
@@ -395,11 +367,20 @@ void nodeProtocolGetNodes(JsonArray& arr) {
         o["node_id"] = n.node_id;
         o["device_name"] = n.device_name;
         o["ip_address"] = n.ip_address;
-        o["xbee_addr"] = n.xbee_addr;
         o["status"] = n.status;
         o["seconds_since_heartbeat"] = (int)((now - n.last_heartbeat) / 1000);
         o["free_heap"] = n.free_heap;
         o["uptime"] = n.uptime;
+        o["xbee_addr_valid"] = n.xbeeAddr.valid;
+        if (n.xbeeAddr.valid) {
+            char addrStr[20];
+            snprintf(addrStr, sizeof(addrStr), "%02X%02X%02X%02X%02X%02X%02X%02X",
+                     n.xbeeAddr.addr64[0], n.xbeeAddr.addr64[1],
+                     n.xbeeAddr.addr64[2], n.xbeeAddr.addr64[3],
+                     n.xbeeAddr.addr64[4], n.xbeeAddr.addr64[5],
+                     n.xbeeAddr.addr64[6], n.xbeeAddr.addr64[7]);
+            o["xbee_addr"] = String(addrStr);
+        }
     }
 }
 
@@ -417,5 +398,14 @@ int nodeProtocolTotalCount() {
 }
 
 void nodeProtocolTriggerSync(const char* nodeId) {
-    handleSyncRequest(nodeId);
+    // Find node's XBee address for unicast
+    NodeInfo* n = findNode(nodeId);
+    XBeeAddr dest = {};
+    if (n && n->xbeeAddr.valid) {
+        dest = n->xbeeAddr;
+    } else {
+        // Fallback: use last received source address
+        dest = xbeeGetLastSource();
+    }
+    handleSyncRequest(nodeId, dest);
 }

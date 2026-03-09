@@ -76,9 +76,10 @@ void setup() {
     // Step 3: XBee — Serial.begin(9600)
     xbeeInit();
 
-    // Step 4: Receive callback
-    xbeeSetReceiveCallback([](const char* line, size_t len) {
-        if (!nodeProtocolHandleLine(line, len)) {
+    // Step 4: Receive callback (now includes source address)
+    xbeeSetReceiveCallback([](const char* line, size_t len,
+                              const XBeeAddr& src) {
+        if (!nodeProtocolHandleLine(line, len, src)) {
             logMsg('R', "Unhandled: %.160s", line);
         }
     });

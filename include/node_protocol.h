@@ -4,9 +4,10 @@
  * Parses incoming JSON commands from HopFog-Node devices over XBee
  * and sends appropriate responses (REGISTER_ACK, PONG, SYNC_DATA, etc).
  *
- * Protocol: JSON payloads inside XBee API mode 1 frames.
- * Every message has at minimum:
- *   {"cmd":"COMMAND","node_id":"node-01","ts":12345}
+ * CRITICAL: ZigBee broadcast max payload is ~84 bytes.
+ * - Broadcast: only used for PING discovery (~35 bytes)
+ * - Unicast:   used for all responses (supports fragmentation, ~255 bytes)
+ * - SYNC_DATA: chunked into multiple small unicast messages
  */
 
 #ifndef NODE_PROTOCOL_H
@@ -14,6 +15,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include "xbee_comm.h"   // for XBeeAddr
 
 // ── Max registered nodes tracked in memory ─────────────────────────
 #define MAX_NODES 10
@@ -27,37 +29,26 @@ struct NodeInfo {
     char   node_id[32];
     char   device_name[32];
     char   ip_address[16];
-    char   xbee_addr[20]; // "XXXXXXXXXXXXXXXX"
     char   status[10];    // "active" or "stale"
-    unsigned long registered_at;  // millis()
-    unsigned long last_heartbeat; // millis()
+    unsigned long registered_at;
+    unsigned long last_heartbeat;
     int    free_heap;
     int    uptime;
+    XBeeAddr xbeeAddr;    // XBee 64-bit + 16-bit address for unicast
 };
 
 // ── Public API ─────────────────────────────────────────────────────
 
-/// Initialise the node registry (call once in setup).
 void nodeProtocolInit();
-
-/// Call from loop() — handles periodic admin broadcasts (PING).
 void nodeProtocolLoop();
 
-/// Try to parse a payload as a JSON node command and dispatch it.
-/// Called from the XBee receive callback (API mode 1, payload from 0x90 frame).
-/// Returns true if the payload was a valid JSON command and was handled.
-bool nodeProtocolHandleLine(const char* line, size_t len);
+/// Parse payload and dispatch. src = source XBee address for unicast replies.
+bool nodeProtocolHandleLine(const char* line, size_t len,
+                            const XBeeAddr& src);
 
-/// Get all registered nodes as a JSON array (for /api/nodes).
 void nodeProtocolGetNodes(JsonArray& arr);
-
-/// Get count of active (non-stale) nodes.
 int nodeProtocolActiveCount();
-
-/// Get total registered nodes.
 int nodeProtocolTotalCount();
-
-/// Trigger a SYNC_DATA send to a specific node by ID.
 void nodeProtocolTriggerSync(const char* nodeId);
 
 #endif // NODE_PROTOCOL_H

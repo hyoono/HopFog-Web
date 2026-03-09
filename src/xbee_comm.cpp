@@ -3,20 +3,21 @@
  *
  * Uses UART0 (Serial) on GPIO 1/3 — native IOMUX pins.
  *
- * Core driver is CHARACTER-FOR-CHARACTER identical to the working
- * XBEE_COMM_TEST project AND to HopFog-Node's xbee_comm.cpp.
- * Only additions: MsgLogEntry ring buffer + web API functions for
- * the admin dashboard.
- *
- * Uses the same XBeeStats struct as the node for alignment.
+ * CRITICAL: ZigBee broadcast max RF payload is ~84 bytes (NP parameter).
+ * Broadcast frames CANNOT be fragmented — oversized frames are silently
+ * dropped by the XBee module. Use xbeeSendTo() for unicast, which
+ * supports fragmentation up to ~255 bytes.
  */
 
 #include "xbee_comm.h"
 #include "config.h"
 #include <stdarg.h>
 
-// ── Stats (same struct as HopFog-Node) ──────────────────────
+// ── Stats ───────────────────────────────────────────────────
 static XBeeStats stats = {};
+
+// ── Source address from last received 0x90 frame ────────────
+static XBeeAddr lastSource = {};
 
 // ── Message log (admin-only) ────────────────────────────────
 MsgLogEntry msgLog[MSG_LOG_SIZE];
@@ -39,7 +40,7 @@ void logMsg(char dir, const char* fmt, ...) {
 static XBeeReceiveCB   rxCallback = nullptr;
 static uint8_t         frameIdCounter = 0;
 
-// ── RX state machine (identical to test project + node) ─────
+// ── RX state machine ────────────────────────────────────────
 enum RxState { WAIT_DELIM, LEN_HI, LEN_LO, FRAME_DATA, CHECKSUM };
 
 static RxState  rxState     = WAIT_DELIM;
@@ -48,17 +49,19 @@ static uint16_t rxIdx       = 0;
 static uint8_t  rxFrame[XBEE_MAX_FRAME];
 static uint8_t  rxChecksum  = 0;
 
-// ── Init (identical to test project + node) ─────────────────
+// ── Init ────────────────────────────────────────────────────
 
 void xbeeInit() {
     Serial.begin(XBEE_BAUD);
     memset(&stats, 0, sizeof(stats));
+    memset(&lastSource, 0, sizeof(lastSource));
     logMsg('S', "XBee UART0 GPIO1/3 @ %d baud", XBEE_BAUD);
 }
 
-// ── TX (identical to test project + node) ───────────────────
+// ── Internal: send a TX Request frame to a specific address ─
 
-uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
+static uint8_t sendFrame(const uint8_t* dest64, uint16_t dest16,
+                         const char* payload, size_t len) {
     if (len == 0 || len > XBEE_MAX_FRAME - 18) return 0;
 
     if (++frameIdCounter == 0) frameIdCounter = 1;
@@ -67,8 +70,10 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
 
     uint8_t hdr[14] = {
         XBEE_TX_REQUEST, fid,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
-        0xFF, 0xFE, 0x00, 0x00
+        dest64[0], dest64[1], dest64[2], dest64[3],
+        dest64[4], dest64[5], dest64[6], dest64[7],
+        (uint8_t)(dest16 >> 8), (uint8_t)(dest16 & 0xFF),
+        0x00, 0x00  // broadcast radius, options
     };
 
     uint8_t cksum = 0;
@@ -86,37 +91,100 @@ uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
 
     stats.totalTxBytes += 3 + 14 + len + 1;
     stats.txFramesSent++;
-    logMsg('T', "fid=%d (%d B) %.160s", fid, (int)len, payload);
     return fid;
 }
 
-// ── Callback ────────────────────────────────────────────────
+// ── TX: Broadcast (max ~72 bytes — no fragmentation) ────────
+
+uint8_t xbeeSendBroadcast(const char* payload, size_t len) {
+    // WARN if payload exceeds safe broadcast limit
+    if (len > XBEE_BROADCAST_MAX) {
+        stats.oversizedDrops++;
+        logMsg('E', "OVERSIZED BROADCAST! %d B > %d B limit — WILL BE DROPPED BY XBEE",
+               (int)len, XBEE_BROADCAST_MAX);
+        // Still try to send — the XBee will return TX FAIL (0x74)
+        // This lets the user see the failure in diagnostics.
+    }
+
+    static const uint8_t broadcastAddr64[8] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF
+    };
+    uint8_t fid = sendFrame(broadcastAddr64, 0xFFFE, payload, len);
+    if (fid > 0) {
+        const char* sizeWarn = (len > XBEE_BROADCAST_MAX) ? " [OVERSIZED!]" : "";
+        logMsg('T', "BC fid=%d (%d B)%s %.140s", fid, (int)len, sizeWarn, payload);
+    }
+    return fid;
+}
+
+// ── TX: Unicast (supports fragmentation, ~255 bytes) ────────
+
+uint8_t xbeeSendTo(const XBeeAddr& dest, const char* payload, size_t len) {
+    if (!dest.valid) {
+        logMsg('E', "Cannot unicast — no source address received yet");
+        return 0;
+    }
+
+    uint8_t fid = sendFrame(dest.addr64, dest.addr16, payload, len);
+    if (fid > 0) {
+        logMsg('T', "UC fid=%d (%d B) to %02X%02X→ %.130s",
+               fid, (int)len,
+               dest.addr64[6], dest.addr64[7],
+               payload);
+    }
+    return fid;
+}
+
+// ── Callback / accessors ────────────────────────────────────
 
 void xbeeSetReceiveCallback(XBeeReceiveCB cb) { rxCallback = cb; }
 const XBeeStats& xbeeGetStats() { return stats; }
+const XBeeAddr& xbeeGetLastSource() { return lastSource; }
 
-// ── Frame handler (identical to node) ───────────────────────
+// ── Frame handler ───────────────────────────────────────────
 
 static void handleCompleteFrame() {
     stats.rxFramesParsed++;
     uint8_t ft = rxFrame[0];
 
     if (ft == XBEE_RX_PACKET && rxFrameLen >= 13) {
+        // Extract source address from 0x90 frame
+        //   Bytes 1-8:  64-bit source address
+        //   Bytes 9-10: 16-bit source address
+        //   Byte 11:    receive options
+        //   Bytes 12+:  RF data (payload)
+        XBeeAddr src;
+        memcpy(src.addr64, &rxFrame[1], 8);
+        src.addr16 = ((uint16_t)rxFrame[9] << 8) | rxFrame[10];
+        src.valid = true;
+
+        // Store as last known source (for unicast replies)
+        lastSource = src;
+
         const char* rfData = (const char*)&rxFrame[12];
         size_t rfLen = rxFrameLen - 12;
         while (rfLen > 0 && (rfData[rfLen - 1] == '\n' || rfData[rfLen - 1] == '\r')) rfLen--;
         if (rfLen > 0) {
             rxFrame[12 + rfLen] = '\0';
-            logMsg('R', "(%d B) %.160s", (int)rfLen, rfData);
-            if (rxCallback) rxCallback(rfData, rfLen);
+            logMsg('R', "(%d B from %02X%02X) %.150s",
+                   (int)rfLen, src.addr64[6], src.addr64[7], rfData);
+            if (rxCallback) rxCallback(rfData, rfLen, src);
         }
     } else if (ft == XBEE_TX_STATUS && rxFrameLen >= 7) {
-        if (rxFrame[5] == 0x00) {
+        uint8_t deliveryStatus = rxFrame[5];
+        if (deliveryStatus == 0x00) {
             stats.txStatusOK++;
             logMsg('S', "TX OK fid=%d", rxFrame[1]);
         } else {
             stats.txStatusFail++;
-            logMsg('E', "TX FAIL fid=%d err=0x%02X", rxFrame[1], rxFrame[5]);
+            const char* reason = "unknown";
+            switch (deliveryStatus) {
+                case 0x24: reason = "No ACK (no remote)"; break;
+                case 0x25: reason = "Network ACK fail"; break;
+                case 0x74: reason = "PAYLOAD TOO LARGE!"; break;
+                case 0x75: reason = "Indirect msg timeout"; break;
+            }
+            logMsg('E', "TX FAIL fid=%d err=0x%02X (%s)", rxFrame[1], deliveryStatus, reason);
         }
     } else if (ft == XBEE_MODEM_STATUS && rxFrameLen >= 2) {
         stats.modemStatusCount++;
@@ -132,7 +200,7 @@ static void handleCompleteFrame() {
     // 0x10 self-echo and others: silently ignore
 }
 
-// ── RX processing (identical to test project + node) ────────
+// ── RX processing ───────────────────────────────────────────
 
 void xbeeProcessIncoming() {
     while (Serial.available()) {
@@ -188,14 +256,29 @@ void xbeeGetDiagnostics(JsonObject& diag) {
     diag["tx_frames_sent"]   = stats.txFramesSent;
     diag["tx_status_ok"]     = stats.txStatusOK;
     diag["tx_status_fail"]   = stats.txStatusFail;
+    diag["oversized_drops"]  = stats.oversizedDrops;
     diag["modem_status_count"] = stats.modemStatusCount;
     diag["last_modem_status"]  = stats.lastModemStatus;
     diag["uptime_ms"]        = millis();
     diag["tx_pin"]           = XBEE_TX_PIN;
     diag["rx_pin"]           = XBEE_RX_PIN;
     diag["baud"]             = XBEE_BAUD;
+    diag["broadcast_max"]    = XBEE_BROADCAST_MAX;
+    diag["last_source_valid"] = lastSource.valid;
+    if (lastSource.valid) {
+        char addrStr[20];
+        snprintf(addrStr, sizeof(addrStr), "%02X%02X%02X%02X%02X%02X%02X%02X",
+                 lastSource.addr64[0], lastSource.addr64[1],
+                 lastSource.addr64[2], lastSource.addr64[3],
+                 lastSource.addr64[4], lastSource.addr64[5],
+                 lastSource.addr64[6], lastSource.addr64[7]);
+        diag["last_source_addr64"] = String(addrStr);
+        diag["last_source_addr16"] = lastSource.addr16;
+    }
 
-    if (stats.rxFramesParsed > 0)
+    if (stats.oversizedDrops > 0)
+        diag["assessment"] = "OVERSIZED PAYLOADS DETECTED — messages too large for broadcast!";
+    else if (stats.rxFramesParsed > 0)
         diag["assessment"] = "WORKING — receiving data from remote XBee.";
     else if (stats.txStatusOK > 0)
         diag["assessment"] = "TX OK — XBee responds. Waiting for remote device.";

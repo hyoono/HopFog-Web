@@ -1,210 +1,263 @@
-# HopFog-Node — Alignment Changes (2-Module Setup)
+# HopFog-Node — Critical Fix: XBee Payload Size Limit
 
 > **Purpose:** Give this entire file as a task to the Copilot agent working on
 > [hyoono/HopFog-Node](https://github.com/hyoono/HopFog-Node)
 > Branch: `copilot/setup-and-xbee-driver`
 >
-> This document SUPERSEDES all previous change instructions (#1–#9).
-> It describes alignment changes between admin and node for a 2-module setup
-> (1 coordinator admin + 1 router node).
+> **THIS IS THE FIX.** All previous NODE_CHANGES (#1–#9) were trying to fix
+> init order, UART config, etc. — but the real problem was **payload size**.
 
 ---
 
-## What Changed on the Admin Side (HopFog-Web)
+## ROOT CAUSE: ZigBee Broadcast Payload Limit
 
-### 1. Admin Now Sends Periodic PINGs
+**XBee S2C ZigBee broadcast max RF payload: ~84 bytes.**
+Broadcast frames CANNOT be fragmented. Messages larger than ~84 bytes are
+**silently dropped** by the XBee module — no error, no TX FAIL, nothing.
 
-**THE KEY CHANGE.** Previously, the admin sat silently waiting for nodes.
-Now the admin broadcasts `{"cmd":"PING","node_id":"admin"}` every 10 seconds.
+### Message Size Analysis
 
-This means:
-- The node knows the admin exists (and can respond with PONG)
-- TX Status frames (0x8B) prove the admin's XBee is working
-- If the node sees PINGs but admin doesn't see REGISTER, we know the issue is
-  admin RX specifically
+| Message | Bytes | Limit | Result |
+|---------|-------|-------|--------|
+| PING | ~35 | 84 | ✅ Works |
+| PONG | ~31 | 84 | ✅ Works |
+| REGISTER_ACK | ~44 | 84 | ✅ Works |
+| **Node REGISTER** | **~155** | 84 | ❌ **Silently dropped** |
+| **Node HEARTBEAT** | **~120** | 84 | ❌ **Silently dropped** |
+| **SYNC_REQUEST** | ~55 | 84 | ✅ Works |
+| **SYNC_DATA (empty)** | **~160** | 84 | ❌ **Silently dropped** |
 
-### 2. XBee Driver Aligned with Node
-
-The admin's `xbee_comm.cpp` now uses the same `XBeeStats` struct as the node.
-Previously the admin used individual `extern unsigned long` counters. The
-driver is otherwise character-for-character identical to the node's.
-
-### 3. WiFi Channel Aligned
-
-Admin WiFi changed from channel 1 to channel 6 to match the node.
-Not critical for XBee (different protocol), but reduces potential 2.4 GHz
-interference between WiFi and ZigBee.
-
-### 4. PING/PONG Handling
-
-Admin now handles incoming "PING" commands (responds with PONG) and
-incoming "PONG" commands (logs that node is alive). This matches the
-working test project's bidirectional heartbeat.
+This is why:
+- XCTU registration works (small messages fit)
+- The test project works (small messages fit)
+- The real node doesn't register (REGISTER is ~155 bytes = DROPPED)
+- Sync never works (SYNC_DATA is ~160+ bytes = DROPPED)
 
 ---
 
-## Required Changes for the Node
+## Fix Summary
 
-Apply ALL of the following to the HopFog-Node repository on
-branch `copilot/setup-and-xbee-driver`.
+1. **Trim REGISTER to < 72 bytes** — remove ip_address, status, free_heap
+2. **Trim HEARTBEAT to < 72 bytes** — use short keys, drop ip_address
+3. **Remove `ts` field** from sendCommand — saves ~10 bytes per message
+4. **Shorter DEVICE_NAME** — "Node01" instead of "HopFog-Node-01"
+5. **Handle chunked SYNC_DATA** — admin sends SYNC_DATA with `part` field
+6. **Handle SYNC_DONE** — new command marking end of chunked sync
+7. **Handle PING** — admin sends PING every 10s, node replies PONG
 
-### Change 1: Handle Admin PING in `node_client.cpp`
+---
 
-The admin sends `{"cmd":"PING","node_id":"admin"}` every 10 seconds.
-The node's `nodeClientHandleCommand()` must handle this.
+## Required Changes
 
-In `src/node_client.cpp`, find the command dispatcher and add PING handling:
+### Change 1: Trim `sendCommand()` in `src/node_client.cpp`
+
+Remove the `ts` field to save ~10 bytes per message:
 
 ```cpp
-// In nodeClientHandleCommand(), add these cases:
+static void sendCommand(JsonDocument& doc) {
+    doc["node_id"] = NODE_ID;
+    // REMOVED: doc["ts"] = (long)(millis() / 1000);
+    // ts adds ~10 bytes and pushes messages over the 72-byte broadcast limit
+    String json;
+    serializeJson(doc, json);
+    xbeeSendBroadcast(json.c_str(), json.length());
+}
+```
 
+### Change 2: Trim `sendRegister()` in `src/node_client.cpp`
+
+```cpp
+static void sendRegister() {
+    // MUST be < 72 bytes total for ZigBee broadcast!
+    // Old version was ~155 bytes and was SILENTLY DROPPED by XBee.
+    JsonDocument doc;
+    doc["cmd"] = "REGISTER";
+    JsonObject p = doc["params"].to<JsonObject>();
+    p["name"] = DEVICE_NAME;
+    // DO NOT add ip_address, status, free_heap — makes payload too large
+    sendCommand(doc);
+}
+```
+
+**Output:** `{"cmd":"REGISTER","params":{"name":"Node01"},"node_id":"node-01"}` = ~63 bytes ✅
+
+### Change 3: Trim `sendHeartbeat()` in `src/node_client.cpp`
+
+```cpp
+static void sendHeartbeat() {
+    // MUST be < 72 bytes for ZigBee broadcast
+    JsonDocument doc;
+    doc["cmd"] = "HEARTBEAT";
+    JsonObject p = doc["params"].to<JsonObject>();
+    p["up"] = (int)(millis() / 1000);
+    p["heap"] = (int)(ESP.getFreeHeap() / 1024);  // KB not bytes
+    sendCommand(doc);
+}
+```
+
+**Output:** `{"cmd":"HEARTBEAT","params":{"up":123,"heap":180},"node_id":"node-01"}` = ~67 bytes ✅
+
+### Change 4: Shorter DEVICE_NAME in `include/config.h`
+
+```cpp
+#define DEVICE_NAME   "Node01"   // Was "HopFog-Node-01" — too long for broadcast limit
+```
+
+### Change 5: Handle chunked SYNC_DATA in `src/node_client.cpp`
+
+The admin now sends SYNC_DATA in parts, not as one giant message:
+
+```json
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","data":[...]}
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"announcements","data":[...]}
+...
+{"cmd":"SYNC_DONE","node_id":"node-01"}
+```
+
+**Replace `handleSyncData()` with:**
+
+```cpp
+static void handleSyncData(JsonDocument& doc) {
+    const char* part = doc["part"] | "";
+
+    if (strlen(part) == 0) {
+        // Legacy single SYNC_DATA (backward compatible)
+        if (doc["users"].is<JsonArray>()) {
+            JsonDocument d; d.set(doc["users"]);
+            writeJsonFile(SD_USERS_FILE, d);
+        }
+        if (doc["announcements"].is<JsonArray>()) {
+            JsonDocument d; d.set(doc["announcements"]);
+            writeJsonFile(SD_ANNOUNCE_FILE, d);
+        }
+        if (doc["conversations"].is<JsonArray>()) {
+            JsonDocument d; d.set(doc["conversations"]);
+            writeJsonFile(SD_CONVOS_FILE, d);
+        }
+        if (doc["chat_messages"].is<JsonArray>()) {
+            JsonDocument d; d.set(doc["chat_messages"]);
+            writeJsonFile(SD_DMS_FILE, d);
+        }
+        if (doc["fog_nodes"].is<JsonArray>()) {
+            JsonDocument d; d.set(doc["fog_nodes"]);
+            writeJsonFile(SD_FOG_FILE, d);
+        }
+        state = STATE_RUNNING;
+        lastHeartbeatMs = millis();
+        return;
+    }
+
+    // Chunked SYNC_DATA (new format)
+    JsonDocument saveDoc;
+    if (doc["data"].is<JsonArray>()) {
+        saveDoc.set(doc["data"]);
+    } else {
+        saveDoc.to<JsonArray>();
+    }
+
+    if (strcmp(part, "users") == 0) {
+        writeJsonFile(SD_USERS_FILE, saveDoc);
+    } else if (strcmp(part, "announcements") == 0) {
+        writeJsonFile(SD_ANNOUNCE_FILE, saveDoc);
+    } else if (strcmp(part, "conversations") == 0) {
+        writeJsonFile(SD_CONVOS_FILE, saveDoc);
+    } else if (strcmp(part, "chat_messages") == 0) {
+        writeJsonFile(SD_DMS_FILE, saveDoc);
+    } else if (strcmp(part, "fog_nodes") == 0) {
+        writeJsonFile(SD_FOG_FILE, saveDoc);
+    }
+}
+
+static void handleSyncDone() {
+    state = STATE_RUNNING;
+    lastHeartbeatMs = millis();
+}
+```
+
+### Change 6: Handle PING and SYNC_DONE in `nodeClientHandleCommand()`
+
+Add these cases to the command dispatcher:
+
+```cpp
+    } else if (strcmp(cmd, "SYNC_DATA") == 0) {
+        handleSyncData(doc);
+    } else if (strcmp(cmd, "SYNC_DONE") == 0) {
+        handleSyncDone();
     } else if (strcmp(cmd, "PING") == 0) {
-        // Admin sent a PING — reply with PONG
+        // Admin sends PING every 10s — reply with PONG
         JsonDocument pong;
         pong["cmd"] = "PONG";
         sendCommand(pong);
     } else if (strcmp(cmd, "PONG") == 0) {
-        // Admin responded to our heartbeat — admin is alive
-        dbgprintln("[Node] Got PONG from admin");
+        handlePong();
+    } else if (strcmp(cmd, "BROADCAST_MSG") == 0) {
 ```
 
-Make sure these are added BEFORE the `else { return false; }` fallback.
-
-### Change 2: WiFi Channel to 6
-
-In `include/config.h`, change the WiFi channel to match the admin:
+### Change 7: Trim `handleGetStats()` in `src/node_client.cpp`
 
 ```cpp
-#define AP_CHANNEL    6
-```
-
-### Change 3: Verify `ets_install_putc1(nullPutc)` is Present
-
-The node's `src/main.cpp` must have this as the VERY FIRST line in `setup()`:
-
-```cpp
-#include <rom/ets_sys.h>
-#include <esp_log.h>
-
-static void nullPutc(char c) { (void)c; }
-
-void setup() {
-    ets_install_putc1(nullPutc);
-    esp_log_level_set("*", ESP_LOG_NONE);
-    // ... rest of setup ...
+static void handleGetStats() {
+    JsonDocument doc;
+    doc["cmd"] = "STATS_RESPONSE";
+    JsonObject p = doc["params"].to<JsonObject>();
+    p["heap"] = (int)(ESP.getFreeHeap() / 1024);
+    p["up"] = (int)(millis() / 1000);
+    sendCommand(doc);
 }
 ```
 
-This silences `ets_printf()` which ESP-IDF's WiFi/SPI/AsyncTCP drivers use
-internally. Without this, UART0 debug output corrupts XBee frames.
+---
+
+## What the Admin Side Changed
+
+1. **Unicast replies**: Admin sends REGISTER_ACK, PONG, SYNC_DATA via unicast
+   to the node's specific XBee address (from 0x90 frame source address).
+   Unicast supports fragmentation up to ~255 bytes.
+
+2. **Broadcast only for PING**: Only the admin's periodic PING uses broadcast.
+
+3. **Chunked SYNC_DATA**: Multiple small chunks with `part` field, ended by
+   `SYNC_DONE`.
+
+4. **Payload size warning**: `xbeeSendBroadcast()` logs "OVERSIZED BROADCAST!"
+   when payload exceeds 72 bytes.
+
+5. **TX Status decoding**: TX FAIL 0x74 decoded as "PAYLOAD TOO LARGE".
+
+6. **Manual trigger buttons**: Admin testing page has buttons to manually send
+   PING, REGISTER_ACK, PONG, GET_STATS, SYNC_DATA, etc.
 
 ---
 
-## XBee Configuration (XCTU) — 2 Modules
-
-Configure BOTH XBee modules in XCTU before connecting to ESP32-CAMs.
+## XCTU Configuration — 2 Modules
 
 ### Admin XBee (Coordinator)
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **CE** | **1** | Coordinator Enable |
-| **AP** | **1** | API mode 1 (0x7E framed) |
-| **BD** | **3** | 9600 baud |
-| **ID** | **1234** | PAN ID (any value 0-FFFF, MUST match node) |
-| **DH** | **0** | Destination High (broadcast) |
-| **DL** | **FFFF** | Destination Low (broadcast) |
-| **NI** | **ADMIN** | Node Identifier (optional) |
+| Parameter | Value |
+|-----------|-------|
+| CE | 1 (Coordinator) |
+| AP | 1 (API Mode 1) |
+| BD | 3 (9600 baud) |
+| ID | 1234 (PAN ID) |
+| DH | 0 |
+| DL | FFFF |
 
 ### Node XBee (Router)
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| **CE** | **0** | Router (NOT coordinator) |
-| **JV** | **1** | Channel Verification (joins coordinator) |
-| **AP** | **1** | API mode 1 (0x7E framed) |
-| **BD** | **3** | 9600 baud |
-| **ID** | **1234** | PAN ID (any value 0-FFFF, MUST match admin) |
-| **DH** | **0** | Destination High (broadcast) |
-| **DL** | **FFFF** | Destination Low (broadcast) |
-| **NI** | **NODE01** | Node Identifier (optional) |
-
-### CRITICAL: Both must have:
-- **Same PAN ID** (ID parameter)
-- **AP = 1** (API mode, NOT transparent mode)
-- **BD = 3** (9600 baud, matching `Serial.begin(9600)`)
-
-### To configure in XCTU:
-1. Connect XBee to USB Explorer board (NOT to ESP32-CAM)
-2. Open XCTU → Add Radio Module
-3. Set parameters as above
-4. Click "Write" to save to XBee
-5. Repeat for the other XBee
-6. Connect to ESP32-CAMs and power on
+| Parameter | Value |
+|-----------|-------|
+| CE | 0 (Router) |
+| JV | 1 (Channel Verify) |
+| AP | 1 (API Mode 1) |
+| BD | 3 (9600 baud) |
+| ID | 1234 (PAN ID) |
+| DH | 0 |
+| DL | FFFF |
 
 ---
 
-## Verification Checklist
+## Verification After Flashing
 
-After flashing both devices:
-
-1. Power on admin ESP32-CAM first (coordinator starts network)
-2. Power on node ESP32-CAM second (router joins network)
-3. Wait 30 seconds for ZigBee network formation
-
-### Check Admin Dashboard
-Connect phone to "HopFog-Network" WiFi, open http://192.168.4.1
-
-- ✅ `tx_frames_sent > 0` — Admin is sending PINGs
-- ✅ `tx_status_ok > 0` — XBee acknowledged the TX (even without remote)
-- ✅ `rx_bytes > 0` — Receiving data from node XBee
-- ✅ `rx_frames_parsed > 0` — Complete frames from remote device
-- ✅ Node appears in "Registered Nodes" list
-
-### Check Node Status
-Connect phone to "HopFog-Node-01" WiFi, open http://192.168.4.1/status
-
-- ✅ `totalRxBytes > 0` — UART0 RX is working
-- ✅ `rxFramesParsed > 0` — Admin PING received
-- ✅ `state == 3` — STATE_RUNNING (0=unregistered, 1=registered, 2=syncing, 3=running)
-
-### Admin Manual Triggers (NEW)
-
-The admin testing page at `/admin/messaging/testing` now has **manual trigger buttons**:
-- **PING** — sends `{"cmd":"PING","node_id":"admin"}`
-- **REGISTER_ACK** — sends `{"cmd":"REGISTER_ACK","node_id":"<target>"}`
-- **PONG** — sends `{"cmd":"PONG","node_id":"admin"}`
-- **GET_STATS** — sends `{"cmd":"GET_STATS","node_id":"admin"}`
-- **HEARTBEAT** — sends `{"cmd":"HEARTBEAT","node_id":"admin"}`
-- **BROADCAST_MSG** — sends a test broadcast
-- **Send SYNC_DATA** — triggers full data sync to the target node
-
-These buttons let you test each protocol step independently, without relying on the
-automatic registration flow. If clicking REGISTER_ACK on admin and the node picks
-it up and transitions to registered state, it proves the XBee communication works.
-
-### Diagnostic Decision Tree
-
-```
-Admin tx_status_ok == 0?
-  → XBee not connected or wrong baud. Check wiring + AP=1 + BD=3.
-
-Admin tx_status_ok > 0 but rx_bytes == 0?
-  → Admin TX works, admin RX broken.
-  → Check: XBee DOUT pin connected to GPIO 3 (U0RXD).
-  → Check: ets_install_putc1(nullPutc) is FIRST in setup().
-
-Admin rx_bytes > 0 but rx_frames_parsed == 0?
-  → Getting garbage on UART0, not valid XBee frames.
-  → Check: BD=3 (9600) on XBee matches Serial.begin(9600).
-
-Node totalRxBytes == 0?
-  → Node is not receiving any UART0 data.
-  → Check same things as admin above.
-
-Node state == 0 (stuck UNREGISTERED)?
-  → Node REGISTER never got REGISTER_ACK from admin.
-  → Try clicking REGISTER_ACK on admin testing page manually.
-  → Check admin is receiving frames (rx_frames_parsed > 0).
-  → Check PAN IDs match on both XBees.
-```
+1. Admin serial monitor: `TX OK` for PINGs, `RX ←` for node REGISTER
+2. Node status: state progresses 0→1→2→3
+3. No "OVERSIZED BROADCAST!" errors in admin log
