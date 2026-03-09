@@ -113,17 +113,20 @@ static void handleHeartbeat(const char* nodeId, JsonObject params,
 }
 
 static void handleSyncRequest(const char* nodeId, const XBeeAddr& dest) {
-    // SYNC_DATA sends records ONE AT A TIME to stay within the
-    // XBee unicast payload limit (240 bytes).
+    // SYNC_DATA sends records ONE AT A TIME.  ALL fields are included
+    // (password_hash, body, message_text — nothing is stripped).
     //
-    // Format: {"cmd":"SYNC_DATA","node_id":"...","part":"users","seq":0,"d":{...}}
-    //         {"cmd":"SYNC_DATA","node_id":"...","part":"users","seq":1,"d":{...}}
-    //         ...
-    //         {"cmd":"SYNC_DATA","node_id":"...","part":"users","n":3}  (count msg)
-    //         {"cmd":"SYNC_DONE","node_id":"..."}  (after all parts)
+    // If a record fits in XBEE_UNICAST_MAX (240 B), it's sent as one message:
+    //   {"cmd":"SYNC_DATA","node_id":"...","part":"users","seq":0,"d":{record}}
     //
-    // "d" is used instead of "data" to save bytes.
-    // "n" = total count for that part (sent as final message for each part).
+    // If a record is TOO LARGE, long text fields (>30 chars) are emptied in
+    // the base message, and the full text is sent in SC (Sync Continuation)
+    // messages:
+    //   {"cmd":"SC","p":"users","s":0,"k":"body","v":"...chunk of text..."}
+    //
+    // The node appends each SC chunk to the corresponding record+field.
+    // Count message (no "d"): {"cmd":"SYNC_DATA",...,"part":"users","n":5}
+    // Final: {"cmd":"SYNC_DONE","node_id":"..."}
 
     auto sendPart = [&](const char* partName, const char* sdFile) {
         JsonDocument fileDoc;
@@ -132,52 +135,107 @@ static void handleSyncRequest(const char* nodeId, const XBeeAddr& dest) {
                                                  : fileDoc.to<JsonArray>();
 
         int sent = 0;
-        int total = 0;
         for (JsonVariant item : arr) {
+            JsonObject rec = item.as<JsonObject>();
+
+            // Build SYNC_DATA with ALL fields (no stripping)
             JsonDocument msg;
             msg["cmd"] = "SYNC_DATA";
             msg["node_id"] = nodeId;
             msg["part"] = partName;
-            msg["seq"] = total;
-
-            // Copy the record, stripping large fields to fit in 240 bytes
-            JsonObject rec = item.as<JsonObject>();
+            msg["seq"] = sent;
             JsonObject d = msg["d"].to<JsonObject>();
             for (JsonPair kv : rec) {
-                const char* key = kv.key().c_str();
-                // Skip password hashes (not needed on node)
-                if (strcmp(key, "password_hash") == 0) continue;
-                // Truncate long text fields (body, text, content)
-                if ((strcmp(key, "body") == 0 || strcmp(key, "text") == 0 ||
-                     strcmp(key, "content") == 0) && kv.value().is<const char*>()) {
-                    const char* val = kv.value().as<const char*>();
-                    if (strlen(val) > 60) {
-                        char trunc[61];
-                        strncpy(trunc, val, 60);
-                        trunc[60] = '\0';
-                        d[key] = trunc;
-                    } else {
-                        d[key] = val;
-                    }
-                } else {
-                    d[key] = kv.value();
+                d[kv.key()] = kv.value();
+            }
+
+            // Check if it fits in unicast
+            String json;
+            serializeJson(msg, json);
+
+            if ((int)json.length() <= XBEE_UNICAST_MAX) {
+                // Fits! Send as-is.
+                sendReply(dest, msg);
+                sent++;
+                delay(SYNC_CHUNK_DELAY_MS);
+                continue;
+            }
+
+            // ── Record too large: chunk long text fields ──────────
+            // Collect long string fields (>30 chars) for continuation
+            String longKeys[4];
+            String longValues[4];
+            int nLong = 0;
+
+            for (JsonPair kv : rec) {
+                if (nLong >= 4) break;
+                if (!kv.value().is<const char*>()) continue;
+                const char* v = kv.value().as<const char*>();
+                if (strlen(v) > 30) {
+                    longKeys[nLong] = kv.key().c_str();
+                    longValues[nLong] = v;
+                    d[longKeys[nLong]] = "";  // Empty in base record
+                    nLong++;
                 }
             }
 
-            String json;
+            // Send base record (long fields emptied)
             serializeJson(msg, json);
-            total++;
-            if (json.length() <= XBEE_UNICAST_MAX) {
-                sendReply(dest, msg);
-                sent++;
-            } else {
-                logMsg('E', "Record too large for %s[%d]: %d B",
-                       partName, total - 1, (int)json.length());
+            if ((int)json.length() > XBEE_UNICAST_MAX) {
+                logMsg('E', "Base %s[%d] still %d B, skipping",
+                       partName, sent, (int)json.length());
+                // Don't increment sent — skip this record entirely
+                // so seq numbers stay consistent with what the node receives
+                delay(SYNC_CHUNK_DELAY_MS);
+                continue;
             }
+            sendReply(dest, msg);
             delay(SYNC_CHUNK_DELAY_MS);
+
+            // Send SC (Sync Continuation) messages for each long field
+            for (int i = 0; i < nLong; i++) {
+                int offset = 0;
+                int fullLen = longValues[i].length();
+
+                while (offset < fullLen) {
+                    JsonDocument cont;
+                    cont["cmd"] = "SC";
+                    cont["p"] = partName;
+                    cont["s"] = sent;
+                    cont["k"] = longKeys[i];
+
+                    // Dynamic chunk sizing — reduce until serialized size fits
+                    int trySize = 130;
+                    int actualEnd = 0;
+                    String cJson;
+                    bool fits = false;
+                    while (trySize >= 20) {
+                        actualEnd = (offset + trySize < fullLen)
+                                    ? offset + trySize : fullLen;
+                        cont["v"] = longValues[i].substring(offset, actualEnd);
+                        serializeJson(cont, cJson);
+                        if ((int)cJson.length() <= XBEE_UNICAST_MAX) {
+                            fits = true;
+                            break;
+                        }
+                        trySize -= 20;
+                    }
+
+                    if (!fits) {
+                        logMsg('E', "SC chunk too large %s[%d].%s",
+                               partName, sent, longKeys[i].c_str());
+                        break;
+                    }
+
+                    sendReply(dest, cont);
+                    delay(SYNC_CHUNK_DELAY_MS);
+                    offset = actualEnd;
+                }
+            }
+            sent++;
         }
 
-        // Send count message for this part
+        // Count message for this part
         JsonDocument countMsg;
         countMsg["cmd"] = "SYNC_DATA";
         countMsg["node_id"] = nodeId;

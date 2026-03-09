@@ -103,22 +103,27 @@ static void sendHeartbeat() {
 #define DEVICE_NAME   "Node01"   // Was "HopFog-Node-01" — too long for broadcast limit
 ```
 
-### Change 5: Handle record-by-record SYNC_DATA in `src/node_client.cpp`
+### Change 5: Handle SYNC_DATA and SC (Sync Continuation) in `src/node_client.cpp`
 
-The admin sends SYNC_DATA **one record at a time** (because the full file is too
-large for even unicast). The format is:
+The admin sends SYNC_DATA **one record at a time**. ALL fields are included
+(password_hash, body, message_text — nothing is stripped).
 
+**Small records** (<240 bytes) are sent in a single message:
 ```json
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":0,"d":{...record...}}
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":1,"d":{...record...}}
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","n":2}
-... (same for announcements, conversations, chat_messages, fog_nodes) ...
-{"cmd":"SYNC_DONE","node_id":"node-01"}
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":0,"d":{"id":1,"username":"admin","password_hash":"$2b$10$...","role":"admin"}}
 ```
 
-- `"d"` (not `"data"`) = single record object (to save bytes)
-- `"seq"` = sequence number for ordering
-- `"n"` = count message (final message for each part, no `"d"` field)
+**Large records** (>240 bytes) are split: the base record has long text fields
+emptied, followed by SC (Sync Continuation) messages with the full text:
+```json
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"announcements","seq":0,"d":{"id":1,"subject":"","body":"","status":"sent","created_at":1709900000}}
+{"cmd":"SC","p":"announcements","s":0,"k":"subject","v":"Emergency Evacuation Notice"}
+{"cmd":"SC","p":"announcements","s":0,"k":"body","v":"first 130 chars of body text..."}
+{"cmd":"SC","p":"announcements","s":0,"k":"body","v":"next 130 chars of body text..."}
+```
+
+**Count** message (no "d" field): `{"cmd":"SYNC_DATA",...,"part":"users","n":3}`
+**Final**: `{"cmd":"SYNC_DONE","node_id":"node-01"}`
 
 **You need in-memory buffers to collect records per part:**
 
@@ -140,6 +145,16 @@ static void initSyncBuffers() {
     syncChatMessages.to<JsonArray>();
     syncFogNodes.to<JsonArray>();
 }
+
+// Helper: find the sync buffer for a given part name
+static JsonDocument* getSyncBuffer(const char* part) {
+    if (strcmp(part, "users") == 0) return &syncUsers;
+    if (strcmp(part, "announcements") == 0) return &syncAnnouncements;
+    if (strcmp(part, "conversations") == 0) return &syncConversations;
+    if (strcmp(part, "chat_messages") == 0) return &syncChatMessages;
+    if (strcmp(part, "fog_nodes") == 0) return &syncFogNodes;
+    return nullptr;
+}
 ```
 
 **Replace `handleSyncData()` with:**
@@ -149,20 +164,19 @@ static void handleSyncData(JsonDocument& doc) {
     const char* part = doc["part"] | "";
     if (strlen(part) == 0) return;
 
-    // If this is a count message (has "n"), save the collected data
+    // Count message (has "n") — save accumulated buffer to SD
     if (doc["n"].is<int>()) {
-        // "n" message = all records for this part have been sent.
-        // Write the accumulated buffer to SD.
-        if (strcmp(part, "users") == 0) {
-            writeJsonFile(SD_USERS_FILE, syncUsers);
-        } else if (strcmp(part, "announcements") == 0) {
-            writeJsonFile(SD_ANNOUNCE_FILE, syncAnnouncements);
-        } else if (strcmp(part, "conversations") == 0) {
-            writeJsonFile(SD_CONVOS_FILE, syncConversations);
-        } else if (strcmp(part, "chat_messages") == 0) {
-            writeJsonFile(SD_DMS_FILE, syncChatMessages);
-        } else if (strcmp(part, "fog_nodes") == 0) {
-            writeJsonFile(SD_FOG_FILE, syncFogNodes);
+        JsonDocument* buf = getSyncBuffer(part);
+        if (buf) {
+            // Use your existing writeJsonFile or writeJsonArray function.
+            // Map part name to your SD file path constant:
+            const char* path = nullptr;
+            if (strcmp(part, "users") == 0) path = SD_USERS_FILE;
+            else if (strcmp(part, "announcements") == 0) path = SD_ANNOUNCE_FILE;
+            else if (strcmp(part, "conversations") == 0) path = SD_CONVOS_FILE;
+            else if (strcmp(part, "chat_messages") == 0) path = SD_DMS_FILE;
+            else if (strcmp(part, "fog_nodes") == 0) path = SD_FOG_FILE;
+            if (path) writeJsonFile(path, *buf);
         }
         return;
     }
@@ -171,26 +185,62 @@ static void handleSyncData(JsonDocument& doc) {
     if (!doc["d"].is<JsonObject>()) return;
     JsonObject record = doc["d"].as<JsonObject>();
 
-    // Append to the appropriate buffer
-    if (strcmp(part, "users") == 0) {
-        syncUsers.as<JsonArray>().add(record);
-    } else if (strcmp(part, "announcements") == 0) {
-        syncAnnouncements.as<JsonArray>().add(record);
-    } else if (strcmp(part, "conversations") == 0) {
-        syncConversations.as<JsonArray>().add(record);
-    } else if (strcmp(part, "chat_messages") == 0) {
-        syncChatMessages.as<JsonArray>().add(record);
-    } else if (strcmp(part, "fog_nodes") == 0) {
-        syncFogNodes.as<JsonArray>().add(record);
+    JsonDocument* buf = getSyncBuffer(part);
+    if (buf) {
+        buf->as<JsonArray>().add(record);
     }
+}
+```
+
+**NEW: Add `handleSyncContinuation()` for SC messages:**
+
+```cpp
+static void handleSyncContinuation(JsonDocument& doc) {
+    // SC = Sync Continuation: appends text to a field in a previously
+    // received record. Used for long text fields that exceeded the
+    // 240-byte XBee unicast limit.
+    //
+    // Format: {"cmd":"SC","p":"announcements","s":0,"k":"body","v":"...text chunk..."}
+    //   p = part name
+    //   s = seq number (index into the sync buffer for that part)
+    //   k = field key to append to
+    //   v = text chunk to append
+
+    const char* part = doc["p"] | "";
+    int seq = doc["s"] | -1;
+    const char* key = doc["k"] | "";
+    const char* val = doc["v"] | "";
+    if (seq < 0 || strlen(key) == 0 || strlen(part) == 0) return;
+
+    JsonDocument* buf = getSyncBuffer(part);
+    if (!buf) return;
+
+    JsonArray arr = buf->as<JsonArray>();
+    if (seq >= (int)arr.size()) return;  // Record not yet received
+
+    JsonObject rec = arr[seq].as<JsonObject>();
+    // Append v to existing value of key
+    String existing = rec[key].as<String>();
+    existing += val;
+    rec[key] = existing;
 }
 
 static void handleSyncDone() {
     state = STATE_RUNNING;
     lastHeartbeatMs = millis();
-    // Clear sync buffers for next sync
     initSyncBuffers();
 }
+```
+
+**Add SC handling in the command dispatcher:**
+
+```cpp
+    } else if (strcmp(cmd, "SYNC_DATA") == 0) {
+        handleSyncData(doc);
+    } else if (strcmp(cmd, "SC") == 0) {
+        handleSyncContinuation(doc);
+    } else if (strcmp(cmd, "SYNC_DONE") == 0) {
+        handleSyncDone();
 ```
 
 **Call `initSyncBuffers()` in your `nodeClientInit()` and at the start of
@@ -255,15 +305,21 @@ static void handleGetStats() {
 
 2. **Broadcast only for PING**: Only the admin's periodic PING uses broadcast.
 
-3. **Chunked SYNC_DATA**: Multiple small chunks with `part` field, ended by
-   `SYNC_DONE`.
+3. **ALL fields included in sync**: Password hashes, full body text, full
+   message text — nothing is stripped or truncated.
 
-4. **Payload size warning**: `xbeeSendBroadcast()` logs "OVERSIZED BROADCAST!"
+4. **SC (Sync Continuation) for large records**: When a record exceeds the
+   240-byte unicast limit, long text fields (>30 chars) are emptied in the
+   base SYNC_DATA message, and the full text is sent in separate SC messages:
+   `{"cmd":"SC","p":"announcements","s":0,"k":"body","v":"...text chunk..."}`
+   The node appends each chunk to the corresponding record+field.
+
+5. **Payload size warning**: `xbeeSendBroadcast()` logs "OVERSIZED BROADCAST!"
    when payload exceeds 72 bytes.
 
-5. **TX Status decoding**: TX FAIL 0x74 decoded as "PAYLOAD TOO LARGE".
+6. **TX Status decoding**: TX FAIL 0x74 decoded as "PAYLOAD TOO LARGE".
 
-6. **Manual trigger buttons**: Admin testing page has buttons to manually send
+7. **Manual trigger buttons**: Admin testing page has buttons to manually send
    PING, REGISTER_ACK, PONG, GET_STATS, SYNC_DATA, etc.
 
 ---
