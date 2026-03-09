@@ -113,50 +113,87 @@ static void handleHeartbeat(const char* nodeId, JsonObject params,
 }
 
 static void handleSyncRequest(const char* nodeId, const XBeeAddr& dest) {
-    // SYNC_DATA is too large for a single XBee frame.
-    // We send it in chunks, each < 200 bytes (unicast fragmentation limit).
+    // SYNC_DATA sends records ONE AT A TIME to stay within the
+    // XBee unicast payload limit (240 bytes).
     //
-    // Chunk format: {"cmd":"SYNC_DATA","node_id":"...","part":"users","data":[...]}
-    // Final chunk:  {"cmd":"SYNC_DONE","node_id":"..."}
+    // Format: {"cmd":"SYNC_DATA","node_id":"...","part":"users","seq":0,"d":{...}}
+    //         {"cmd":"SYNC_DATA","node_id":"...","part":"users","seq":1,"d":{...}}
+    //         ...
+    //         {"cmd":"SYNC_DATA","node_id":"...","part":"users","n":3}  (count msg)
+    //         {"cmd":"SYNC_DONE","node_id":"..."}  (after all parts)
+    //
+    // "d" is used instead of "data" to save bytes.
+    // "n" = total count for that part (sent as final message for each part).
 
-    auto sendChunk = [&](const char* partName, const char* sdFile) {
-        JsonDocument chunk;
-        chunk["cmd"] = "SYNC_DATA";
-        chunk["node_id"] = nodeId;
-        chunk["part"] = partName;
-
+    auto sendPart = [&](const char* partName, const char* sdFile) {
         JsonDocument fileDoc;
         readJsonArray(sdFile, fileDoc);
-        if (fileDoc.is<JsonArray>()) {
-            chunk["data"] = fileDoc.as<JsonArray>();
-        } else {
-            chunk["data"].to<JsonArray>();
+        JsonArray arr = fileDoc.is<JsonArray>() ? fileDoc.as<JsonArray>()
+                                                 : fileDoc.to<JsonArray>();
+
+        int sent = 0;
+        int total = 0;
+        for (JsonVariant item : arr) {
+            JsonDocument msg;
+            msg["cmd"] = "SYNC_DATA";
+            msg["node_id"] = nodeId;
+            msg["part"] = partName;
+            msg["seq"] = total;
+
+            // Copy the record, stripping large fields to fit in 240 bytes
+            JsonObject rec = item.as<JsonObject>();
+            JsonObject d = msg["d"].to<JsonObject>();
+            for (JsonPair kv : rec) {
+                const char* key = kv.key().c_str();
+                // Skip password hashes (not needed on node)
+                if (strcmp(key, "password_hash") == 0) continue;
+                // Truncate long text fields (body, text, content)
+                if ((strcmp(key, "body") == 0 || strcmp(key, "text") == 0 ||
+                     strcmp(key, "content") == 0) && kv.value().is<const char*>()) {
+                    const char* val = kv.value().as<const char*>();
+                    if (strlen(val) > 60) {
+                        char trunc[61];
+                        strncpy(trunc, val, 60);
+                        trunc[60] = '\0';
+                        d[key] = trunc;
+                    } else {
+                        d[key] = val;
+                    }
+                } else {
+                    d[key] = kv.value();
+                }
+            }
+
+            String json;
+            serializeJson(msg, json);
+            total++;
+            if (json.length() <= XBEE_UNICAST_MAX) {
+                sendReply(dest, msg);
+                sent++;
+            } else {
+                logMsg('E', "Record too large for %s[%d]: %d B",
+                       partName, total - 1, (int)json.length());
+            }
+            delay(SYNC_CHUNK_DELAY_MS);
         }
 
-        String json;
-        serializeJson(chunk, json);
+        // Send count message for this part
+        JsonDocument countMsg;
+        countMsg["cmd"] = "SYNC_DATA";
+        countMsg["node_id"] = nodeId;
+        countMsg["part"] = partName;
+        countMsg["n"] = sent;
+        sendReply(dest, countMsg);
+        delay(SYNC_CHUNK_DELAY_MS);
 
-        // If chunk fits in unicast, send it. Otherwise send empty array.
-        if (json.length() > XBEE_UNICAST_MAX) {
-            // Too large even for unicast — send empty with count
-            JsonDocument small;
-            small["cmd"] = "SYNC_DATA";
-            small["node_id"] = nodeId;
-            small["part"] = partName;
-            small["data"].to<JsonArray>();
-            small["truncated"] = true;
-            sendReply(dest, small);
-        } else {
-            sendReply(dest, chunk);
-        }
-        delay(SYNC_CHUNK_DELAY_MS); // Delay between chunks to avoid UART buffer overflow
+        logMsg('S', "Synced %s: %d records", partName, sent);
     };
 
-    sendChunk("users", SD_USERS_FILE);
-    sendChunk("announcements", SD_BCASTS_FILE);
-    sendChunk("conversations", SD_CONVOS_FILE);
-    sendChunk("chat_messages", SD_DMS_FILE);
-    sendChunk("fog_nodes", SD_FOG_FILE);
+    sendPart("users", SD_USERS_FILE);
+    sendPart("announcements", SD_BCASTS_FILE);
+    sendPart("conversations", SD_CONVOS_FILE);
+    sendPart("chat_messages", SD_DMS_FILE);
+    sendPart("fog_nodes", SD_FOG_FILE);
 
     // Final: SYNC_DONE
     JsonDocument done;
@@ -164,7 +201,7 @@ static void handleSyncRequest(const char* nodeId, const XBeeAddr& dest) {
     done["node_id"] = nodeId;
     sendReply(dest, done);
 
-    logMsg('S', "Sent SYNC_DATA (chunked) to %s", nodeId);
+    logMsg('S', "SYNC complete to %s", nodeId);
 }
 
 static void handleSosAlert(const char* nodeId, JsonObject params) {

@@ -103,15 +103,43 @@ static void sendHeartbeat() {
 #define DEVICE_NAME   "Node01"   // Was "HopFog-Node-01" — too long for broadcast limit
 ```
 
-### Change 5: Handle chunked SYNC_DATA in `src/node_client.cpp`
+### Change 5: Handle record-by-record SYNC_DATA in `src/node_client.cpp`
 
-The admin now sends SYNC_DATA in parts, not as one giant message:
+The admin sends SYNC_DATA **one record at a time** (because the full file is too
+large for even unicast). The format is:
 
 ```json
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","data":[...]}
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"announcements","data":[...]}
-...
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":0,"d":{...record...}}
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":1,"d":{...record...}}
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","n":2}
+... (same for announcements, conversations, chat_messages, fog_nodes) ...
 {"cmd":"SYNC_DONE","node_id":"node-01"}
+```
+
+- `"d"` (not `"data"`) = single record object (to save bytes)
+- `"seq"` = sequence number for ordering
+- `"n"` = count message (final message for each part, no `"d"` field)
+
+**You need in-memory buffers to collect records per part:**
+
+```cpp
+// Add at the top of node_client.cpp (file scope)
+#include <ArduinoJson.h>
+
+// Sync accumulation buffers — one JsonDocument per data part
+static JsonDocument syncUsers;
+static JsonDocument syncAnnouncements;
+static JsonDocument syncConversations;
+static JsonDocument syncChatMessages;
+static JsonDocument syncFogNodes;
+
+static void initSyncBuffers() {
+    syncUsers.to<JsonArray>();
+    syncAnnouncements.to<JsonArray>();
+    syncConversations.to<JsonArray>();
+    syncChatMessages.to<JsonArray>();
+    syncFogNodes.to<JsonArray>();
+}
 ```
 
 **Replace `handleSyncData()` with:**
@@ -119,58 +147,69 @@ The admin now sends SYNC_DATA in parts, not as one giant message:
 ```cpp
 static void handleSyncData(JsonDocument& doc) {
     const char* part = doc["part"] | "";
+    if (strlen(part) == 0) return;
 
-    if (strlen(part) == 0) {
-        // Legacy single SYNC_DATA (backward compatible)
-        if (doc["users"].is<JsonArray>()) {
-            JsonDocument d; d.set(doc["users"]);
-            writeJsonFile(SD_USERS_FILE, d);
+    // If this is a count message (has "n"), save the collected data
+    if (doc["n"].is<int>()) {
+        // "n" message = all records for this part have been sent.
+        // Write the accumulated buffer to SD.
+        if (strcmp(part, "users") == 0) {
+            writeJsonFile(SD_USERS_FILE, syncUsers);
+        } else if (strcmp(part, "announcements") == 0) {
+            writeJsonFile(SD_ANNOUNCE_FILE, syncAnnouncements);
+        } else if (strcmp(part, "conversations") == 0) {
+            writeJsonFile(SD_CONVOS_FILE, syncConversations);
+        } else if (strcmp(part, "chat_messages") == 0) {
+            writeJsonFile(SD_DMS_FILE, syncChatMessages);
+        } else if (strcmp(part, "fog_nodes") == 0) {
+            writeJsonFile(SD_FOG_FILE, syncFogNodes);
         }
-        if (doc["announcements"].is<JsonArray>()) {
-            JsonDocument d; d.set(doc["announcements"]);
-            writeJsonFile(SD_ANNOUNCE_FILE, d);
-        }
-        if (doc["conversations"].is<JsonArray>()) {
-            JsonDocument d; d.set(doc["conversations"]);
-            writeJsonFile(SD_CONVOS_FILE, d);
-        }
-        if (doc["chat_messages"].is<JsonArray>()) {
-            JsonDocument d; d.set(doc["chat_messages"]);
-            writeJsonFile(SD_DMS_FILE, d);
-        }
-        if (doc["fog_nodes"].is<JsonArray>()) {
-            JsonDocument d; d.set(doc["fog_nodes"]);
-            writeJsonFile(SD_FOG_FILE, d);
-        }
-        state = STATE_RUNNING;
-        lastHeartbeatMs = millis();
         return;
     }
 
-    // Chunked SYNC_DATA (new format)
-    JsonDocument saveDoc;
-    if (doc["data"].is<JsonArray>()) {
-        saveDoc.set(doc["data"]);
-    } else {
-        saveDoc.to<JsonArray>();
-    }
+    // Regular record message (has "d")
+    if (!doc["d"].is<JsonObject>()) return;
+    JsonObject record = doc["d"].as<JsonObject>();
 
+    // Append to the appropriate buffer
     if (strcmp(part, "users") == 0) {
-        writeJsonFile(SD_USERS_FILE, saveDoc);
+        syncUsers.as<JsonArray>().add(record);
     } else if (strcmp(part, "announcements") == 0) {
-        writeJsonFile(SD_ANNOUNCE_FILE, saveDoc);
+        syncAnnouncements.as<JsonArray>().add(record);
     } else if (strcmp(part, "conversations") == 0) {
-        writeJsonFile(SD_CONVOS_FILE, saveDoc);
+        syncConversations.as<JsonArray>().add(record);
     } else if (strcmp(part, "chat_messages") == 0) {
-        writeJsonFile(SD_DMS_FILE, saveDoc);
+        syncChatMessages.as<JsonArray>().add(record);
     } else if (strcmp(part, "fog_nodes") == 0) {
-        writeJsonFile(SD_FOG_FILE, saveDoc);
+        syncFogNodes.as<JsonArray>().add(record);
     }
 }
 
 static void handleSyncDone() {
     state = STATE_RUNNING;
     lastHeartbeatMs = millis();
+    // Clear sync buffers for next sync
+    initSyncBuffers();
+}
+```
+
+**Call `initSyncBuffers()` in your `nodeClientInit()` and at the start of
+`handleSyncRequest()` (when sending SYNC_REQUEST):**
+
+```cpp
+void nodeClientInit() {
+    state = STATE_UNREGISTERED;
+    initSyncBuffers();
+    // ... rest of init ...
+}
+
+// Also in sendSyncRequest():
+static void sendSyncRequest() {
+    initSyncBuffers();  // Clear buffers before receiving new sync
+    JsonDocument doc;
+    doc["cmd"] = "SYNC_REQUEST";
+    sendCommand(doc);
+    state = STATE_SYNCING;
 }
 ```
 
