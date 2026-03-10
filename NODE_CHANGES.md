@@ -19,7 +19,49 @@ REST endpoints. The app has strict Kotlin data class expectations.
 {"id":1, "user1_id":1, "user2_id":2, "is_sos":false, "created_at":"12345"}
 ```
 
+**Admin announcement format (synced to node) — NEW:**
+The admin transforms broadcasts to mobile-friendly format before syncing:
+```json
+{"id":1, "title":"Emergency Notice", "message":"Body text...", "created_at":"12345"}
+```
+The node's `/announcements` endpoint can serve this directly — no transformation needed.
+
 **XBee limits:** Broadcast ≤72 bytes, Unicast ≤240 bytes.
+
+**COMPACT SYNC FORMAT:** The admin now sends SYNC_DATA, SC, and SYNC_DONE
+using compact JSON keys to save ~30 bytes per message:
+
+| Old Key | New Key | Example |
+|---------|---------|---------|
+| `"cmd":"SYNC_DATA"` | `"c":"SD"` | — |
+| `"cmd":"SC"` | `"c":"SC"` | — |
+| `"cmd":"SYNC_DONE"` | `"c":"DONE"` | — |
+| `"node_id":"node-01"` | `"n":"node-01"` | — |
+| `"part":"users"` | `"p":"users"` | — |
+| `"seq":0` | `"s":0` | — |
+| `"d":{record}` | `"d":{record}` | unchanged |
+| `"n":3` (count) | `"n2":3` | ⚠️ `"n"` is now node_id! |
+
+**Old format (no longer sent):**
+```json
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":0,"d":{...}}
+{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","n":3}
+{"cmd":"SC","p":"users","s":0,"k":"body","v":"...text..."}
+{"cmd":"SYNC_DONE","node_id":"node-01"}
+```
+
+**New compact format:**
+```json
+{"c":"SD","n":"node-01","p":"users","s":0,"d":{...}}
+{"c":"SD","n":"node-01","p":"users","n2":3}
+{"c":"SC","p":"users","s":0,"k":"body","v":"...text..."}
+{"c":"DONE","n":"node-01"}
+```
+
+Note: SC messages already used compact keys — no change there.
+
+**Incremental sync:** Auto-sync (every 5 min) only sends NEW records
+(id > last synced). Manual sync and SYNC_REQUEST always send ALL records.
 
 ---
 
@@ -28,11 +70,6 @@ REST endpoints. The app has strict Kotlin data class expectations.
 The Android app's Kotlin data class `SosChatResponse` expects:
 ```json
 {"conversation_id": 1, "contact_name": "John"}
-```
-
-**Current node response (WRONG):**
-```json
-{"success": true, "conversation": {"id": 1, "participants": [1, 2]}}
 ```
 
 **Replace the entire `/create-chat` handler in `src/api_handlers.cpp`:**
@@ -50,67 +87,64 @@ The Android app's Kotlin data class `SosChatResponse` expects:
             return;
         }
 
-        int user1Id = reqDoc["user1_id"] | 0;
-        int user2Id = reqDoc["user2_id"] | 0;
-
-        if (user1Id <= 0 || user2Id <= 0) {
-            request->send(400, "application/json",
-                          "{\"error\":\"user1_id and user2_id required\"}");
+        int u1 = reqDoc["user1_id"] | 0;
+        int u2 = reqDoc["user2_id"] | 0;
+        if (u1 <= 0 || u2 <= 0) {
+            request->send(400, "application/json", "{\"error\":\"user1_id and user2_id required\"}");
             return;
         }
 
-        // Find existing or create new conversation
-        JsonDocument convDoc;
-        readJsonFile(SD_CONVOS_FILE, convDoc);
-        JsonArray convs = convDoc.is<JsonArray>()
-                          ? convDoc.as<JsonArray>() : convDoc.to<JsonArray>();
+        // Find or create conversation
+        JsonDocument convoDoc;
+        readJsonFile(SD_CONVOS_FILE, convoDoc);
+        JsonArray arr = convoDoc.is<JsonArray>() ? convoDoc.as<JsonArray>()
+                                                  : convoDoc.to<JsonArray>();
 
         int convoId = 0;
-        for (JsonObject c : convs) {
-            int u1 = c["user1_id"] | 0;
-            int u2 = c["user2_id"] | 0;
-            if ((u1 == user1Id && u2 == user2Id) ||
-                (u1 == user2Id && u2 == user1Id)) {
+        for (JsonObject c : arr) {
+            int cu1 = c["user1_id"] | 0;
+            int cu2 = c["user2_id"] | 0;
+            if ((cu1 == u1 && cu2 == u2) || (cu1 == u2 && cu2 == u1)) {
                 convoId = c["id"] | 0;
                 break;
             }
         }
 
         if (convoId == 0) {
-            int newId = 1;
-            for (JsonObject c : convs) {
+            // Create new conversation
+            int maxId = 0;
+            for (JsonObject c : arr) {
                 int id = c["id"] | 0;
-                if (id >= newId) newId = id + 1;
+                if (id > maxId) maxId = id;
             }
-            JsonObject nc = convs.add<JsonObject>();
-            nc["id"] = newId;
-            nc["user1_id"] = user1Id;
-            nc["user2_id"] = user2Id;
-            nc["is_sos"] = false;
-            nc["created_at"] = String((long)(millis() / 1000));
-            writeJsonFile(SD_CONVOS_FILE, convDoc);
-            convoId = newId;
+            convoId = maxId + 1;
+            JsonObject newConvo = arr.add<JsonObject>();
+            newConvo["id"] = convoId;
+            newConvo["user1_id"] = u1;
+            newConvo["user2_id"] = u2;
+            newConvo["is_sos"] = 0;
+            newConvo["created_at"] = String((long)(millis() / 1000));
+            writeJsonFile(SD_CONVOS_FILE, convoDoc);
         }
 
         // Look up contact name
-        int otherId = user2Id;
+        int otherId = (u1 == reqDoc["user1_id"].as<int>()) ? u2 : u1;
         String contactName = "Unknown";
         JsonDocument usersDoc;
         readJsonFile(SD_USERS_FILE, usersDoc);
-        for (JsonObject u : usersDoc.as<JsonArray>()) {
-            if ((u["id"] | 0) == otherId) {
-                contactName = u["username"] | "Unknown";
-                break;
+        if (usersDoc.is<JsonArray>()) {
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == otherId) {
+                    contactName = u["username"] | "Unknown";
+                    break;
+                }
             }
         }
 
-        // Return format matching admin's /create-chat
-        JsonDocument resp;
-        resp["conversation_id"] = convoId;
-        resp["contact_name"] = contactName;
-        String response;
-        serializeJson(resp, response);
-        request->send(200, "application/json", response);
+        // Return format matching SosChatResponse data class
+        String resp = "{\"conversation_id\":" + String(convoId) +
+                      ",\"contact_name\":\"" + contactName + "\"}";
+        request->send(200, "application/json", resp);
     });
 ```
 
@@ -118,7 +152,7 @@ The Android app's Kotlin data class `SosChatResponse` expects:
 
 ## Fix 2: POST /sos Response Format (CRITICAL)
 
-Same `SosChatResponse` data class. Current node returns `{"success":true,"message":"..."}`.
+Same data class `SosChatResponse`. Must return `conversation_id` + `contact_name`.
 
 **Replace the entire `/sos` handler:**
 
@@ -141,77 +175,67 @@ Same `SosChatResponse` data class. Current node returns `{"success":true,"messag
             return;
         }
 
-        // Find first admin user
+        // Find admin user (user_id=1 or role=admin)
+        int adminId = 1;
         JsonDocument usersDoc;
         readJsonFile(SD_USERS_FILE, usersDoc);
-        int adminId = 0;
-        String adminName = "Admin";
-        for (JsonObject u : usersDoc.as<JsonArray>()) {
-            String role = u["role"] | "";
-            if (role == "admin" && (u["is_active"] | 1)) {
-                adminId = u["id"] | 0;
-                adminName = u["username"] | "Admin";
-                break;
+        if (usersDoc.is<JsonArray>()) {
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                String role = u["role"] | "";
+                if (role == "admin") {
+                    adminId = u["id"] | 1;
+                    break;
+                }
             }
         }
 
-        if (adminId == 0) {
-            request->send(500, "application/json",
-                          "{\"error\":\"No admin user found\"}");
-            return;
-        }
-
-        // Find or create SOS conversation
-        JsonDocument convDoc;
-        readJsonFile(SD_CONVOS_FILE, convDoc);
-        JsonArray convs = convDoc.is<JsonArray>()
-                          ? convDoc.as<JsonArray>() : convDoc.to<JsonArray>();
+        // Find or create SOS conversation with admin
+        JsonDocument convoDoc;
+        readJsonFile(SD_CONVOS_FILE, convoDoc);
+        JsonArray convos = convoDoc.is<JsonArray>() ? convoDoc.as<JsonArray>()
+                                                     : convoDoc.to<JsonArray>();
 
         int convoId = 0;
-        for (JsonObject c : convs) {
-            int u1 = c["user1_id"] | 0;
-            int u2 = c["user2_id"] | 0;
-            if ((u1 == userId && u2 == adminId) ||
-                (u1 == adminId && u2 == userId)) {
+        for (JsonObject c : convos) {
+            int cu1 = c["user1_id"] | 0;
+            int cu2 = c["user2_id"] | 0;
+            if ((cu1 == userId && cu2 == adminId) || (cu1 == adminId && cu2 == userId)) {
                 convoId = c["id"] | 0;
                 break;
             }
         }
 
         if (convoId == 0) {
-            int newId = 1;
-            for (JsonObject c : convs) {
+            int maxId = 0;
+            for (JsonObject c : convos) {
                 int id = c["id"] | 0;
-                if (id >= newId) newId = id + 1;
+                if (id > maxId) maxId = id;
             }
-            JsonObject nc = convs.add<JsonObject>();
-            nc["id"] = newId;
-            nc["user1_id"] = userId;
-            nc["user2_id"] = adminId;
-            nc["is_sos"] = true;
-            nc["created_at"] = String((long)(millis() / 1000));
-            writeJsonFile(SD_CONVOS_FILE, convDoc);
-            convoId = newId;
+            convoId = maxId + 1;
+            JsonObject newConvo = convos.add<JsonObject>();
+            newConvo["id"] = convoId;
+            newConvo["user1_id"] = userId;
+            newConvo["user2_id"] = adminId;
+            newConvo["is_sos"] = 1;
+            newConvo["created_at"] = String((long)(millis() / 1000));
+            writeJsonFile(SD_CONVOS_FILE, convoDoc);
         }
 
-        // Relay SOS to admin via XBee
-        JsonDocument relayDoc;
-        relayDoc["cmd"] = "SOS_ALERT";
-        JsonObject params = relayDoc["params"].to<JsonObject>();
+        // Return format matching SosChatResponse data class
+        String resp = "{\"conversation_id\":" + String(convoId) +
+                      ",\"contact_name\":\"Admin\"}";
+        request->send(200, "application/json", resp);
+
+        // Relay SOS alert to admin via XBee
+        JsonDocument sosCmd;
+        sosCmd["cmd"] = "SOS_ALERT";
+        sosCmd["node_id"] = NODE_ID;
+        JsonObject params = sosCmd["params"].to<JsonObject>();
         params["user_id"] = userId;
         params["conversation_id"] = convoId;
-        relayDoc["node_id"] = NODE_ID;
         String json;
-        serializeJson(relayDoc, json);
+        serializeJson(sosCmd, json);
         xbeeSendBroadcast(json.c_str(), json.length());
-
-        // Return format matching admin's /sos
-        JsonDocument resp;
-        resp["conversation_id"] = convoId;
-        resp["contact_name"] = adminName;
-        String response;
-        serializeJson(resp, response);
-        request->send(200, "application/json", response);
     });
 ```
 
@@ -219,40 +243,29 @@ Same `SosChatResponse` data class. Current node returns `{"success":true,"messag
 
 ## Fix 3: GET /conversations Response Format (CRITICAL)
 
-Admin syncs conversations with `user1_id`/`user2_id` format. The node's
-current handler filters by `participants` array — which doesn't exist in
-synced data! Result: all synced conversations invisible.
-
-The admin's response format is:
+The app expects `ChatConversation` data class:
 ```json
-[
-  {"conversation_id":1, "contact_name":"John", "last_message":"Hello", "timestamp":"12345"},
-  {"conversation_id":2, "contact_name":"Admin", "last_message":null, "timestamp":null}
-]
+[{"conversation_id":1, "contact_name":"John", "last_message":"Hey", "timestamp":"12345"}]
 ```
 
-**Replace the entire `GET /conversations` handler:**
+Conversations use `user1_id`/`user2_id` format (NOT `participants` array).
+
+**Replace the entire `/conversations` handler:**
 
 ```cpp
-    // ── GET /conversations ──────────────────────────────────────────
     server.on("/conversations", HTTP_GET, [](AsyncWebServerRequest* request) {
         String userId = request->hasParam("user_id")
                         ? request->getParam("user_id")->value() : "";
-
         if (userId.length() == 0) {
-            request->send(400, "application/json",
-                          "{\"error\":\"user_id required\"}");
+            request->send(400, "application/json", "{\"error\":\"user_id required\"}");
             return;
         }
-
         int uid = userId.toInt();
 
         JsonDocument convoDoc;
         readJsonFile(SD_CONVOS_FILE, convoDoc);
-
         JsonDocument dmDoc;
         readJsonFile(SD_DMS_FILE, dmDoc);
-
         JsonDocument usersDoc;
         readJsonFile(SD_USERS_FILE, usersDoc);
 
@@ -273,150 +286,62 @@ The admin's response format is:
                 }
             }
 
-            // Find last message
-            int convoId = c["id"] | 0;
             String lastMsg = "";
             String lastTs = "";
-            unsigned long latestTime = 0;
             for (JsonObject m : dmDoc.as<JsonArray>()) {
-                if ((m["conversation_id"] | 0) != convoId) continue;
-                unsigned long ts = m["sent_at"] | m["created_at"].as<unsigned long>();
-                if (ts >= latestTime) {
-                    latestTime = ts;
+                if ((m["conversation_id"] | 0) == (c["id"] | 0)) {
                     lastMsg = m["message_text"] | "";
+                    long ts = m["sent_at"] | 0L;
                     lastTs = String(ts);
                 }
             }
 
-            JsonObject o = arr.add<JsonObject>();
-            o["conversation_id"] = convoId;
-            o["contact_name"] = contactName;
-            o["last_message"] = lastMsg.length() > 0 ? lastMsg : JsonVariant();
-            o["timestamp"] = lastTs.length() > 0 ? lastTs : JsonVariant();
+            JsonObject entry = arr.add<JsonObject>();
+            entry["conversation_id"] = c["id"];
+            entry["contact_name"] = contactName;
+            entry["last_message"] = lastMsg;
+            entry["timestamp"] = lastTs;
         }
 
-        String response;
-        serializeJson(resp, response);
-        request->send(200, "application/json", response);
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
     });
 ```
 
 ---
 
-## Fix 4: WiFi / Captive Portal (Match Admin)
+## Fix 4: GET /messages Response Format
 
-The node's `web_server.cpp` has a captive portal domain redirect in
-`onNotFound()` that triggers the phone's captive portal browser. The admin
-does NOT do this. Also the admin has captive portal detection handlers
-that prevent the phone from showing the login page.
-
-**Replace the entire `setupWebServer()` in `src/web_server.cpp`:**
-
-```cpp
-#include "web_server.h"
-#include "config.h"
-#include "sd_storage.h"
-#include "xbee_comm.h"
-#include "node_client.h"
-#include <WiFi.h>
-#include <ArduinoJson.h>
-
-extern void registerApiHandlers(AsyncWebServer& server);
-
-void setupWebServer(AsyncWebServer& server) {
-    // CORS headers for mobile app
-    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
-    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods",
-                                         "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers",
-                                         "Content-Type, Authorization");
-
-    // ── Captive portal detection (prevents login popup) ─────────────
-    // Android
-    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(204);
-    });
-    server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(204);
-    });
-
-    // Apple / iOS
-    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/html",
-                      "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
-                      "<BODY>Success</BODY></HTML>");
-    });
-    server.on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/html",
-                      "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
-                      "<BODY>Success</BODY></HTML>");
-    });
-
-    // Windows NCSI
-    server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/plain", "Microsoft NCSI");
-    });
-    server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/plain", "Microsoft Connect Test");
-    });
-
-    // Firefox
-    server.on("/canonical.html", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/html",
-                      "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
-                      "<BODY>Success</BODY></HTML>");
-    });
-    server.on("/success.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/plain", "success\n");
-    });
-
-    // Register API endpoints
-    registerApiHandlers(server);
-
-    // 404 — NO captive portal redirect! Just return 404.
-    server.onNotFound([](AsyncWebServerRequest* request) {
-        if (request->method() == HTTP_OPTIONS) {
-            request->send(200);
-            return;
-        }
-        request->send(404, "application/json", "{\"error\":\"Not found\"}");
-    });
-}
+The app expects `Message` data class:
+```json
+[{"message_id":1, "message_text":"Hey", "sent_at":"12345", "sender_id":1, "is_from_current_user":true, "sender_username":"John"}]
 ```
 
----
-
-## Fix 5: GET /messages Format (Match Admin)
-
-The admin returns messages with these fields. The node should match:
+**Replace the entire `/messages` handler:**
 
 ```cpp
-    // ── GET /messages ───────────────────────────────────────────────
     server.on("/messages", HTTP_GET, [](AsyncWebServerRequest* request) {
-        String convId = request->hasParam("conversation_id")
-                        ? request->getParam("conversation_id")->value() : "";
+        String convoId = request->hasParam("conversation_id")
+                         ? request->getParam("conversation_id")->value() : "";
         String userId = request->hasParam("user_id")
                         ? request->getParam("user_id")->value() : "";
-
-        if (convId.length() == 0 || userId.length() == 0) {
-            request->send(400, "application/json",
-                          "{\"error\":\"conversation_id and user_id required\"}");
+        if (convoId.length() == 0) {
+            request->send(400, "application/json", "{\"error\":\"conversation_id required\"}");
             return;
         }
-
-        int cid = convId.toInt();
+        int cid = convoId.toInt();
         int uid = userId.toInt();
 
-        JsonDocument doc;
-        readJsonFile(SD_DMS_FILE, doc);
-
+        JsonDocument dmDoc;
+        readJsonFile(SD_DMS_FILE, dmDoc);
         JsonDocument usersDoc;
         readJsonFile(SD_USERS_FILE, usersDoc);
 
         JsonDocument resp;
         JsonArray arr = resp.to<JsonArray>();
 
-        for (JsonObject m : doc.as<JsonArray>()) {
+        for (JsonObject m : dmDoc.as<JsonArray>()) {
             if ((m["conversation_id"] | 0) != cid) continue;
 
             int senderId = m["sender_id"] | 0;
@@ -428,72 +353,133 @@ The admin returns messages with these fields. The node should match:
                 }
             }
 
-            // Use sent_at or created_at (admin uses sent_at, node uses created_at)
-            unsigned long ts = m["sent_at"] | 0UL;
-            if (ts == 0 && m["created_at"].is<const char*>()) {
-                ts = String(m["created_at"].as<const char*>()).toInt();
-            } else if (ts == 0) {
-                ts = m["created_at"] | 0UL;
-            }
-
-            JsonObject o = arr.add<JsonObject>();
-            o["message_id"] = m["id"];
-            o["message_text"] = m["message_text"];
-            o["sent_at"] = String(ts);
-            o["sender_id"] = senderId;
-            o["is_from_current_user"] = (senderId == uid);
-            o["sender_username"] = senderName;
+            JsonObject entry = arr.add<JsonObject>();
+            entry["message_id"] = m["id"];
+            entry["message_text"] = m["message_text"] | "";
+            entry["sent_at"] = String(m["sent_at"] | 0L);
+            entry["sender_id"] = senderId;
+            entry["is_from_current_user"] = (senderId == uid);
+            entry["sender_username"] = senderName;
         }
 
-        String response;
-        serializeJson(resp, response);
-        request->send(200, "application/json", response);
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
     });
 ```
 
 ---
 
-## Fix 6: GET /new-messages Format (Match Admin)
+## Fix 5: POST /send Response Format + Relay to Admin
 
-The admin's `/new-messages` returns the same format as `/messages` plus
-checking conversation membership. Update the node to match:
+The app expects `SendMessageResponse`:
+```json
+{"success":true, "message":"sent", "secondsRemaining":0}
+```
+
+Uses `sent_at` (not `created_at`). Must relay to admin via XBee.
+
+**Replace the `/send` handler:**
 
 ```cpp
-    // ── GET /new-messages ───────────────────────────────────────────
+    server.on("/send", HTTP_POST, [](AsyncWebServerRequest* request) {
+    }, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len,
+                size_t index, size_t total) {
+        JsonDocument reqDoc;
+        if (deserializeJson(reqDoc, data, len)) {
+            request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+            return;
+        }
+
+        int convoId = reqDoc["conversation_id"] | 0;
+        int senderId = reqDoc["sender_id"] | 0;
+        const char* text = reqDoc["message_text"] | "";
+        if (convoId <= 0 || senderId <= 0 || strlen(text) == 0) {
+            request->send(400, "application/json", "{\"error\":\"Missing fields\"}");
+            return;
+        }
+
+        // Save to SD
+        JsonDocument dmDoc;
+        readJsonFile(SD_DMS_FILE, dmDoc);
+        JsonArray arr = dmDoc.is<JsonArray>() ? dmDoc.as<JsonArray>()
+                                               : dmDoc.to<JsonArray>();
+
+        int maxId = 0;
+        for (JsonObject m : arr) {
+            int id = m["id"] | 0;
+            if (id > maxId) maxId = id;
+        }
+
+        JsonObject msg = arr.add<JsonObject>();
+        msg["id"] = maxId + 1;
+        msg["conversation_id"] = convoId;
+        msg["sender_id"] = senderId;
+        msg["message_text"] = text;
+        msg["sent_at"] = (long)(millis() / 1000);
+        writeJsonFile(SD_DMS_FILE, dmDoc);
+
+        request->send(200, "application/json",
+                      "{\"success\":true,\"message\":\"sent\",\"secondsRemaining\":0}");
+
+        // Relay to admin via XBee
+        JsonDocument relayCmd;
+        relayCmd["cmd"] = "RELAY_CHAT_MSG";
+        relayCmd["node_id"] = NODE_ID;
+        JsonObject p = relayCmd["params"].to<JsonObject>();
+        p["conversation_id"] = convoId;
+        p["sender_id"] = senderId;
+        p["message_text"] = text;
+        String json;
+        serializeJson(relayCmd, json);
+        xbeeSendBroadcast(json.c_str(), json.length());
+    });
+```
+
+---
+
+## Fix 6: GET /new-messages
+
+The app polls for new messages. Must return the `Message` format.
+
+**Replace the `/new-messages` handler:**
+
+```cpp
     server.on("/new-messages", HTTP_GET, [](AsyncWebServerRequest* request) {
+        int lastId = request->hasParam("last_id")
+                     ? request->getParam("last_id")->value().toInt() : 0;
         String userId = request->hasParam("user_id")
                         ? request->getParam("user_id")->value() : "";
-        String lastIdStr = request->hasParam("last_id")
-                           ? request->getParam("last_id")->value() : "0";
-
         int uid = userId.toInt();
-        int lastId = lastIdStr.toInt();
 
         JsonDocument dmDoc;
         readJsonFile(SD_DMS_FILE, dmDoc);
-
-        JsonDocument convoDoc;
-        readJsonFile(SD_CONVOS_FILE, convoDoc);
-
         JsonDocument usersDoc;
         readJsonFile(SD_USERS_FILE, usersDoc);
+
+        // Find conversations this user is part of
+        JsonDocument convoDoc;
+        readJsonFile(SD_CONVOS_FILE, convoDoc);
 
         JsonDocument resp;
         JsonArray arr = resp.to<JsonArray>();
 
         for (JsonObject m : dmDoc.as<JsonArray>()) {
-            if ((m["id"] | 0) <= lastId) continue;
+            int mId = m["id"] | 0;
+            if (mId <= lastId) continue;
 
-            int cid = m["conversation_id"] | 0;
-            bool userInConvo = false;
+            int convoId = m["conversation_id"] | 0;
+            // Check if user is part of this conversation
+            bool inConvo = false;
             for (JsonObject c : convoDoc.as<JsonArray>()) {
-                if ((c["id"] | 0) != cid) continue;
-                int u1 = c["user1_id"] | 0;
-                int u2 = c["user2_id"] | 0;
-                if (u1 == uid || u2 == uid) userInConvo = true;
-                break;
+                if ((c["id"] | 0) == convoId) {
+                    int u1 = c["user1_id"] | 0;
+                    int u2 = c["user2_id"] | 0;
+                    if (u1 == uid || u2 == uid) inConvo = true;
+                    break;
+                }
             }
-            if (uid > 0 && !userInConvo) continue;
+            if (!inConvo) continue;
 
             int senderId = m["sender_id"] | 0;
             String senderName = "Unknown";
@@ -504,154 +490,284 @@ checking conversation membership. Update the node to match:
                 }
             }
 
-            unsigned long ts = m["sent_at"] | 0UL;
-            if (ts == 0 && m["created_at"].is<const char*>()) {
-                ts = String(m["created_at"].as<const char*>()).toInt();
-            } else if (ts == 0) {
-                ts = m["created_at"] | 0UL;
-            }
-
-            JsonObject o = arr.add<JsonObject>();
-            o["message_id"] = m["id"];
-            o["message_text"] = m["message_text"];
-            o["sent_at"] = String(ts);
-            o["sender_id"] = senderId;
-            o["is_from_current_user"] = (senderId == uid);
-            o["sender_username"] = senderName;
+            JsonObject entry = arr.add<JsonObject>();
+            entry["message_id"] = mId;
+            entry["message_text"] = m["message_text"] | "";
+            entry["sent_at"] = String(m["sent_at"] | 0L);
+            entry["sender_id"] = senderId;
+            entry["is_from_current_user"] = (senderId == uid);
+            entry["sender_username"] = senderName;
         }
 
-        String response;
-        serializeJson(resp, response);
-        request->send(200, "application/json", response);
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
     });
 ```
 
 ---
 
-## Fix 7: POST /send — Store message with sent_at (not created_at)
+## Fix 7: Handle Compact SYNC_DATA Format
 
-Admin uses `sent_at` field for message timestamps. Node currently uses
-`created_at`. Update to use `sent_at` for consistency:
+The admin now sends sync messages with compact keys. Update `nodeClientHandleCommand`
+in `src/node_client.cpp` to handle both old and new format:
 
-In the `/send` handler, change the message creation:
-```cpp
-        newMsg["sent_at"] = (long)(millis() / 1000);
-```
-Instead of:
-```cpp
-        newMsg["created_at"] = String((long)(millis() / 1000));
-```
-
----
-
-## Fix 8: Message Cleanup (48-Hour TTL)
-
-Direct messages older than 48 hours should be automatically deleted.
-Add this cleanup function and call it periodically from your main loop.
-
-**Add to `node_protocol.cpp` (or equivalent):**
+**Replace the command dispatch section in `nodeClientHandleCommand`:**
 
 ```cpp
-#define MESSAGE_TTL_SECONDS  172800  // 48 hours
-#define CLEANUP_INTERVAL_MS  600000  // Run cleanup every 10 minutes
-
-static unsigned long lastCleanupMs = 0;
-
-void cleanupOldMessages() {
+bool nodeClientHandleCommand(const char* payload, size_t len) {
     JsonDocument doc;
-    readJsonArray("/db/direct_messages.json", doc);
-    if (!doc.is<JsonArray>()) return;
+    DeserializationError err = deserializeJson(doc, payload, len);
+    if (err) return false;
 
-    JsonArray arr = doc.as<JsonArray>();
-    if (arr.size() == 0) return;
+    // Check for compact format first: "c" key
+    const char* compactCmd = doc["c"] | (const char*)nullptr;
+    const char* legacyCmd  = doc["cmd"] | (const char*)nullptr;
 
-    // Find the latest timestamp
-    long latestTs = 0;
-    for (JsonObject m : arr) {
-        long ts = m["sent_at"] | 0L;
-        if (ts > latestTs) latestTs = ts;
-    }
-    if (latestTs == 0) return;
-
-    long cutoff = latestTs - MESSAGE_TTL_SECONDS;
-    int removed = 0;
-    int i = 0;
-    while (i < (int)arr.size()) {
-        JsonObject m = arr[i].as<JsonObject>();
-        long ts = m["sent_at"] | 0L;
-        if (ts > 0 && ts < cutoff) {
-            arr.remove(i);
-            removed++;
-        } else {
-            i++;
+    if (compactCmd) {
+        // ── Compact format from admin sync ──
+        if (strcmp(compactCmd, "SD") == 0) {
+            // SYNC_DATA in compact format
+            handleCompactSyncData(doc);
+            return true;
+        } else if (strcmp(compactCmd, "SC") == 0) {
+            handleSyncContinuation(doc);
+            return true;
+        } else if (strcmp(compactCmd, "DONE") == 0) {
+            handleSyncDone();
+            return true;
         }
     }
 
-    if (removed > 0) {
-        writeJsonArray("/db/direct_messages.json", doc);
+    if (!legacyCmd) return false;  // No command found
+
+    // ── Legacy format ──
+    if (strcmp(legacyCmd, "REGISTER_ACK") == 0) {
+        handleRegisterAck();
+    } else if (strcmp(legacyCmd, "PONG") == 0) {
+        handlePong();
+    } else if (strcmp(legacyCmd, "SYNC_DATA") == 0) {
+        handleSyncData(doc);          // Legacy SYNC_DATA (backward compat)
+    } else if (strcmp(legacyCmd, "SC") == 0) {
+        handleSyncContinuation(doc);  // SC already uses compact keys
+    } else if (strcmp(legacyCmd, "SYNC_DONE") == 0) {
+        handleSyncDone();
+    } else if (strcmp(legacyCmd, "PING") == 0) {
+        JsonDocument pong;
+        pong["cmd"] = "PONG";
+        sendCommand(pong);
+    } else if (strcmp(legacyCmd, "BROADCAST_MSG") == 0) {
+        handleBroadcastMsg(doc["params"].as<JsonObject>());
+    } else if (strcmp(legacyCmd, "RELAY_CHAT_MSG") == 0) {
+        handleRelayChatMsg(doc["params"].as<JsonObject>());
+    } else if (strcmp(legacyCmd, "SOS_ALERT") == 0) {
+        handleSosAlert(doc["params"].as<JsonObject>());
+    } else if (strcmp(legacyCmd, "GET_STATS") == 0) {
+        handleGetStats();
+    } else {
+        return false;
+    }
+    return true;
+}
+```
+
+**Add the new `handleCompactSyncData` function:**
+
+```cpp
+static void handleCompactSyncData(JsonDocument& doc) {
+    // Compact format: "c"="SD", "n"=node_id, "p"=part, "s"=seq, "d"=record
+    // Count message: "c"="SD", "n"=node_id, "p"=part, "n2"=count
+    const char* part = doc["p"] | "";
+    if (strlen(part) == 0) return;
+
+    // Count message: "n2" = number of records for this part
+    if (doc["n2"].is<int>()) {
+        // Write accumulated buffer to SD
+        if (strcmp(part, "users") == 0) {
+            writeJsonFile(SD_USERS_FILE, syncUsers);
+        } else if (strcmp(part, "announcements") == 0) {
+            writeJsonFile(SD_ANNOUNCE_FILE, syncAnnouncements);
+        } else if (strcmp(part, "conversations") == 0) {
+            writeJsonFile(SD_CONVOS_FILE, syncConversations);
+        } else if (strcmp(part, "chat_messages") == 0) {
+            writeJsonFile(SD_DMS_FILE, syncChatMessages);
+        } else if (strcmp(part, "fog_nodes") == 0) {
+            writeJsonFile(SD_FOG_FILE, syncFogNodes);
+        }
+        return;
+    }
+
+    // Single record: "d" = record object
+    if (doc["d"].is<JsonObject>()) {
+        JsonObject record = doc["d"].as<JsonObject>();
+        JsonDocument* buf = getSyncBuffer(part);
+        if (buf) {
+            buf->as<JsonArray>().add(record);
+        }
     }
 }
 ```
 
-**Call from loop:**
+---
+
+## Fix 8: Handle RELAY_CHAT_MSG (Live Chat Relay)
+
+When the admin relays a chat message (user on admin network sends to user
+on node network), the node must save it to SD so the recipient can see it.
+
+**Add this function to `src/node_client.cpp`:**
+
 ```cpp
-void loop() {
-    // ... existing code ...
-    unsigned long now = millis();
-    if (now - lastCleanupMs >= CLEANUP_INTERVAL_MS) {
-        lastCleanupMs = now;
-        cleanupOldMessages();
+static void handleRelayChatMsg(JsonObject params) {
+    int convId = params["conversation_id"] | 0;
+    int senderId = params["sender_id"] | 0;
+    const char* text = params["message_text"] | "";
+    if (convId <= 0 || senderId <= 0 || strlen(text) == 0) return;
+
+    JsonDocument doc;
+    readJsonFile(SD_DMS_FILE, doc);
+    JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc.to<JsonArray>();
+
+    int maxId = 0;
+    for (JsonObject m : arr) {
+        int id = m["id"] | 0;
+        if (id > maxId) maxId = id;
     }
+
+    JsonObject msg = arr.add<JsonObject>();
+    msg["id"] = maxId + 1;
+    msg["conversation_id"] = convId;
+    msg["sender_id"] = senderId;
+    msg["message_text"] = text;
+    msg["sent_at"] = (long)(millis() / 1000);
+
+    writeJsonFile(SD_DMS_FILE, doc);
 }
 ```
 
 ---
 
-## Fix 9: WiFi Stability
+## Fix 9: Handle SOS_ALERT
 
-Add explicit WiFi TX power and power-save disable for stability:
+When the admin sends an SOS alert, the node stores it as an announcement.
+
+**Add this function:**
 
 ```cpp
-// In setup(), after WiFi.softAP():
-WiFi.setTxPower(WIFI_POWER_19_5dBm);    // Max power for range
-esp_wifi_set_ps(WIFI_PS_NONE);           // Disable power save
+static void handleSosAlert(JsonObject params) {
+    int userId = params["user_id"] | 0;
+    const char* username = params["username"] | "User";
+
+    JsonDocument doc;
+    readJsonFile(SD_ANNOUNCE_FILE, doc);
+    JsonArray arr = doc.is<JsonArray>() ? doc.as<JsonArray>() : doc.to<JsonArray>();
+
+    int maxId = 0;
+    for (JsonObject a : arr) {
+        int id = a["id"] | 0;
+        if (id > maxId) maxId = id;
+    }
+
+    JsonObject ann = arr.add<JsonObject>();
+    ann["id"] = maxId + 1;
+    ann["title"] = "SOS Alert from " + String(username);
+    ann["message"] = "Emergency SOS alert";
+    ann["created_at"] = String((long)(millis() / 1000));
+
+    writeJsonFile(SD_ANNOUNCE_FILE, doc);
+}
 ```
 
-Requires: `#include <esp_wifi.h>`
+---
+
+## Fix 10: WiFi Stability
+
+Add max TX power and disable WiFi power saving in `src/main.cpp` setup():
+
+```cpp
+#include <esp_wifi.h>
+
+// After WiFi.softAP():
+WiFi.setTxPower(WIFI_POWER_19_5dBm);
+esp_wifi_set_ps(WIFI_PS_NONE);
+```
 
 ---
 
-## Checklist
+## Fix 11: Captive Portal Detection
 
-- [ ] Fix 1: Replace `/create-chat` handler → return `conversation_id` + `contact_name`
-- [ ] Fix 2: Replace `/sos` handler → return `conversation_id` + `contact_name`
-- [ ] Fix 3: Replace `GET /conversations` → use `user1_id`/`user2_id`, return expected format
-- [ ] Fix 4: Replace `web_server.cpp` → captive portal detection, no domain redirect
-- [ ] Fix 5: Replace `GET /messages` → match admin format
-- [ ] Fix 6: Replace `GET /new-messages` → match admin format
-- [ ] Fix 7: Fix `/send` → use `sent_at` not `created_at`
-- [ ] Fix 8: Add message cleanup (48-hour TTL)
-- [ ] Fix 9: WiFi stability (TX power + no power save)
-- [ ] Build and verify
+Add captive portal detection endpoints so phones don't show login popup.
+**Add these BEFORE the `server.onNotFound(...)` call:**
+
+```cpp
+    // Android captive portal detection
+    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+    server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+    // iOS/macOS captive portal detection
+    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/html", "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    });
+    // Windows captive portal detection
+    server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/plain", "Microsoft Connect Test");
+    });
+    // Firefox captive portal detection
+    server.on("/success.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/plain", "success");
+    });
+```
+
+**Remove any domain-based redirect in `server.onNotFound()`** — it interferes
+with captive portal detection. The onNotFound should serve index.html from SD:
+
+```cpp
+    server.onNotFound([](AsyncWebServerRequest* request) {
+        // Serve index.html for any unknown path (SPA behavior)
+        request->send(SD, "/www/index.html", "text/html");
+    });
+```
 
 ---
 
-## Important: Admin Now Uses Unicast for All Messages
+## Fix 12: GET /announcements — Already Correct
 
-The admin now sends `RELAY_CHAT_MSG`, `BROADCAST_MSG`, `SOS_ALERT`, and `GET_STATS`
-via **unicast to each registered node** instead of broadcast. This means:
+The admin now syncs announcements in the mobile-friendly format:
+```json
+{"id":1, "title":"Notice", "message":"Body text", "created_at":"12345"}
+```
 
-1. Messages up to **240 bytes** now work (was limited to 72 bytes broadcast)
-2. The node receives the exact same JSON format — no changes needed on the RX side
-3. If the node wants to forward messages to OTHER nodes, it should also use unicast
-4. The admin falls back to broadcast if no nodes are registered yet
+The node's existing `sendJsonFileResponse(request, SD_ANNOUNCE_FILE)` will
+serve this correctly. The mobile app's `Announcement` data class expects:
+```kotlin
+@Serializable data class Announcement(
+    val id: Int,
+    val title: String,
+    val message: String,
+    @SerialName("created_at") val createdAt: String? = null
+)
+```
 
-## Important: Admin Sync is Non-Blocking
+**No changes needed** for GET /announcements — it already works.
 
-The admin's SYNC_DATA now uses a **non-blocking state machine**. It sends one
-record per loop iteration instead of blocking for 10+ seconds. This means:
+---
 
-1. WiFi clients stay connected during sync
-2. DNS/web server remains responsive
-3. Auto-sync runs every 5 minutes to keep nodes up-to-date
-4. The node doesn't need to change anything — same SYNC_DATA/SC/SYNC_DONE format
+## Summary
+
+| Fix | What | Why |
+|-----|------|-----|
+| 1 | POST /create-chat | Returns wrong format → app crashes |
+| 2 | POST /sos | Returns wrong format → app crashes |
+| 3 | GET /conversations | Missing contact_name, last_message |
+| 4 | GET /messages | Missing sender_username, is_from_current_user |
+| 5 | POST /send | Wrong field names + no relay to admin |
+| 6 | GET /new-messages | Wrong format + no convo membership check |
+| 7 | Compact SYNC_DATA | Admin now sends "c":"SD" instead of "cmd":"SYNC_DATA" |
+| 8 | RELAY_CHAT_MSG | Live chat relay from admin not handled |
+| 9 | SOS_ALERT | SOS alerts from admin not handled |
+| 10 | WiFi stability | Max TX power + disable power save |
+| 11 | Captive portal | Phones show login popup without detection endpoints |
+| 12 | GET /announcements | Already correct (no changes needed) |
