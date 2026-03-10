@@ -60,8 +60,10 @@ using compact JSON keys to save ~30 bytes per message:
 
 Note: SC messages already used compact keys — no change there.
 
-**Incremental sync:** Auto-sync (every 5 min) only sends NEW records
-(id > last synced). Manual sync and SYNC_REQUEST always send ALL records.
+**ALWAYS FULL SYNC:** Every sync (manual and auto) sends ALL records.
+The node's sync handler OVERWRITES files — incremental sync would wipe
+previously-synced data. This is correct behavior: the admin is the
+source of truth for users, announcements, conversations, etc.
 
 ---
 

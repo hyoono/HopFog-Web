@@ -145,8 +145,9 @@ static void handleHeartbeat(const char* nodeId, JsonObject params,
 // during sync. The node and mobile app expect {id, title, message,
 // created_at} — NOT the full broadcast fields.
 //
-// INCREMENTAL: Auto-sync only sends records with id > last synced id.
-// Manual "Send SYNC_DATA" triggers a FULL sync (all records).
+// ALWAYS FULL SYNC: Every sync sends ALL records. The node's sync
+// handler OVERWRITES files (not merges), so incremental sync would
+// wipe previously-synced data.
 //
 // COMPACT KEYS: Messages use short keys to save ~30 bytes:
 //   "c"="SD" (SYNC_DATA), "c"="SC" (continuation), "c"="DONE"
@@ -171,7 +172,6 @@ static char         syncNodeId[32] = "";
 static XBeeAddr     syncDest = {};
 static int          syncPartIndex = 0;       // 0-4 (users, announcements, ...)
 static unsigned long syncLastSendMs = 0;     // Pacing timer
-static bool         syncIsFullSync = false;  // true = manual full, false = incremental
 
 // Per-part state
 static JsonDocument syncPartDoc;             // Loaded JSON array for current part
@@ -185,9 +185,6 @@ static String scValues[16];
 static int    scFieldCount = 0;
 static int    scFieldIdx = 0;                // Current field being sent
 static int    scOffset = 0;                  // Offset within current field value
-
-// Incremental sync: track the highest ID synced per part
-static int lastSyncedId[5] = {0, 0, 0, 0, 0};  // per part
 
 static const char* syncPartNames[] = {
     "users", "announcements", "conversations", "chat_messages", "fog_nodes"
@@ -220,33 +217,14 @@ static void transformBroadcastsToAnnouncements(JsonDocument& doc) {
     doc.set(transformed);
 }
 
-// ── Filter to only new records (id > threshold) for incremental sync ──
-static void filterNewRecords(JsonDocument& doc, int minId) {
-    if (minId <= 0) return;  // Full sync — don't filter
-    if (!doc.is<JsonArray>()) return;
-
-    JsonDocument filtered;
-    JsonArray out = filtered.to<JsonArray>();
-    for (JsonVariant v : doc.as<JsonArray>()) {
-        JsonObject rec = v.as<JsonObject>();
-        int recId = rec["id"] | 0;
-        if (recId > minId) {
-            out.add(rec);
-        }
-    }
-    doc.set(filtered);
-}
-
-static void syncStart(const char* nodeId, const XBeeAddr& dest, bool fullSync) {
+static void syncStart(const char* nodeId, const XBeeAddr& dest) {
     strncpy(syncNodeId, nodeId, sizeof(syncNodeId) - 1);
     syncNodeId[sizeof(syncNodeId) - 1] = '\0';
     syncDest = dest;
     syncPartIndex = 0;
-    syncIsFullSync = fullSync;
     syncState = SYNC_LOAD_PART;
     syncLastSendMs = millis();
-    logMsg('S', "SYNC starting to %s (%s)", nodeId,
-           fullSync ? "FULL" : "incremental");
+    logMsg('S', "SYNC starting to %s (full)", nodeId);
 }
 
 // Called from nodeProtocolLoop() -- sends at most one message per call.
@@ -271,11 +249,6 @@ static void syncTick() {
             transformBroadcastsToAnnouncements(syncPartDoc);
         }
 
-        // Incremental sync: filter to only new records
-        if (!syncIsFullSync) {
-            filterNewRecords(syncPartDoc, lastSyncedId[syncPartIndex]);
-        }
-
         JsonArray arr = syncPartDoc.is<JsonArray>() ? syncPartDoc.as<JsonArray>()
                                                       : syncPartDoc.to<JsonArray>();
         syncRecordCount = arr.size();
@@ -297,12 +270,6 @@ static void syncTick() {
 
         JsonArray arr = syncPartDoc.as<JsonArray>();
         JsonObject rec = arr[syncRecordIndex].as<JsonObject>();
-
-        // Track the highest ID for incremental sync
-        int recId = rec["id"] | 0;
-        if (recId > lastSyncedId[syncPartIndex]) {
-            lastSyncedId[syncPartIndex] = recId;
-        }
 
         // Build SYNC_DATA with compact keys:
         //   "c"="SD" (cmd), "n"=node_id, "p"=part, "s"=seq, "d"=record
@@ -813,8 +780,8 @@ void nodeProtocolLoop() {
                 int idx = (autoSyncNodeIdx + tries) % nodeCount;
                 if (nodes[idx].xbeeAddr.valid &&
                     now - nodes[idx].last_heartbeat <= NODE_STALE_MS) {
-                    syncStart(nodes[idx].node_id, nodes[idx].xbeeAddr, false);
-                    logMsg('S', "Auto-sync (incremental) to %s", nodes[idx].node_id);
+                    syncStart(nodes[idx].node_id, nodes[idx].xbeeAddr);
+                    logMsg('S', "Auto-sync to %s", nodes[idx].node_id);
                     autoSyncNodeIdx = (idx + 1) % nodeCount;
                     break;
                 }
@@ -850,7 +817,7 @@ bool nodeProtocolHandleLine(const char* line, size_t len,
     } else if (strcmp(cmd, "SYNC_REQUEST") == 0) {
         // Start non-blocking sync (if not already syncing)
         if (syncState == SYNC_IDLE) {
-            syncStart(nodeId, src, true);  // Node request = full sync
+            syncStart(nodeId, src);  // Full sync
         } else {
             logMsg('S', "SYNC busy, ignoring request from %s", nodeId);
         }
@@ -946,7 +913,7 @@ void nodeProtocolTriggerSync(const char* nodeId) {
     } else {
         dest = xbeeGetLastSource();
     }
-    syncStart(nodeId, dest, true);  // Manual trigger = full sync
+    syncStart(nodeId, dest);  // Full sync
 }
 
 bool nodeProtocolSyncInProgress() {
