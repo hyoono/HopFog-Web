@@ -161,69 +161,77 @@ static void handleSyncRequest(const char* nodeId, const XBeeAddr& dest) {
                 continue;
             }
 
-            // ── Record too large: chunk long text fields ──────────
-            // Collect long string fields (>30 chars) for continuation
-            String longKeys[4];
-            String longValues[4];
-            int nLong = 0;
+            // ── Record too large: chunk ALL string fields via SC ──
+            // Strategy: send a skeleton base with only the "id" field
+            // (guaranteed to fit), then send every field as SC messages.
+
+            // Collect ALL fields for continuation
+            String allKeys[16];
+            String allValues[16];
+            int nFields = 0;
 
             for (JsonPair kv : rec) {
-                if (nLong >= 4) break;
+                if (nFields >= 16) {
+                    logMsg('E', "%s[%d] has >16 string fields, some skipped",
+                           partName, sent);
+                    break;
+                }
                 if (!kv.value().is<const char*>()) continue;
-                const char* v = kv.value().as<const char*>();
-                if (strlen(v) > 30) {
-                    longKeys[nLong] = kv.key().c_str();
-                    longValues[nLong] = v;
-                    d[longKeys[nLong]] = "";  // Empty in base record
-                    nLong++;
+                allKeys[nFields] = kv.key().c_str();
+                allValues[nFields] = kv.value().as<const char*>();
+                nFields++;
+            }
+
+            // Build skeleton base: only non-string fields (id, ints, bools)
+            JsonDocument skelMsg;
+            skelMsg["cmd"] = "SYNC_DATA";
+            skelMsg["node_id"] = nodeId;
+            skelMsg["part"] = partName;
+            skelMsg["seq"] = sent;
+            JsonObject skelD = skelMsg["d"].to<JsonObject>();
+            for (JsonPair kv : rec) {
+                if (kv.value().is<const char*>()) {
+                    skelD[kv.key()] = "";  // Empty all string fields
+                } else {
+                    skelD[kv.key()] = kv.value();  // Keep ints, bools
                 }
             }
-
-            // Send base record (long fields emptied)
-            serializeJson(msg, json);
-            if ((int)json.length() > XBEE_UNICAST_MAX) {
-                logMsg('E', "Base %s[%d] still %d B, skipping",
-                       partName, sent, (int)json.length());
-                // Don't increment sent — skip this record entirely
-                // so seq numbers stay consistent with what the node receives
-                delay(SYNC_CHUNK_DELAY_MS);
-                continue;
-            }
-            sendReply(dest, msg);
+            sendReply(dest, skelMsg);
             delay(SYNC_CHUNK_DELAY_MS);
 
-            // Send SC (Sync Continuation) messages for each long field
-            for (int i = 0; i < nLong; i++) {
+            // Send SC messages for each string field
+            for (int i = 0; i < nFields; i++) {
                 int offset = 0;
-                int fullLen = longValues[i].length();
+                int fullLen = allValues[i].length();
+                if (fullLen == 0) continue;  // Skip empty strings
 
                 while (offset < fullLen) {
                     JsonDocument cont;
                     cont["cmd"] = "SC";
                     cont["p"] = partName;
                     cont["s"] = sent;
-                    cont["k"] = longKeys[i];
+                    cont["k"] = allKeys[i];
 
                     // Dynamic chunk sizing — reduce until serialized size fits
                     int trySize = 130;
                     int actualEnd = 0;
                     String cJson;
                     bool fits = false;
-                    while (trySize >= 20) {
+                    while (trySize >= 10) {
                         actualEnd = (offset + trySize < fullLen)
                                     ? offset + trySize : fullLen;
-                        cont["v"] = longValues[i].substring(offset, actualEnd);
+                        cont["v"] = allValues[i].substring(offset, actualEnd);
                         serializeJson(cont, cJson);
                         if ((int)cJson.length() <= XBEE_UNICAST_MAX) {
                             fits = true;
                             break;
                         }
-                        trySize -= 20;
+                        trySize -= 10;
                     }
 
                     if (!fits) {
                         logMsg('E', "SC chunk too large %s[%d].%s",
-                               partName, sent, longKeys[i].c_str());
+                               partName, sent, allKeys[i].c_str());
                         break;
                     }
 
@@ -381,6 +389,140 @@ static void handleStatsResponse(const char* nodeId, JsonObject params) {
     n->uptime = params["uptime"] | 0;
 }
 
+// ── SYNC_BACK: Node → Admin data merge ─────────────────────────────
+//
+// Receives records from a node and merges them into admin's SD card.
+// Matches by "id" field: new records are added, existing are skipped.
+// Same format as SYNC_DATA: part="chat_messages", seq=N, d={record}
+// Count message: part="chat_messages", n=5
+// Final: SYNC_BACK_DONE
+
+// Temporary accumulation buffers for incoming SYNC_BACK data
+static JsonDocument sbUsers;
+static JsonDocument sbAnnouncements;
+static JsonDocument sbConversations;
+static JsonDocument sbChatMessages;
+static JsonDocument sbFogNodes;
+static bool sbInProgress = false;
+
+static void initSyncBackBuffers() {
+    sbUsers.to<JsonArray>();
+    sbAnnouncements.to<JsonArray>();
+    sbConversations.to<JsonArray>();
+    sbChatMessages.to<JsonArray>();
+    sbFogNodes.to<JsonArray>();
+    sbInProgress = true;
+}
+
+static JsonDocument* getSyncBackBuffer(const char* part) {
+    if (strcmp(part, "users") == 0) return &sbUsers;
+    if (strcmp(part, "announcements") == 0) return &sbAnnouncements;
+    if (strcmp(part, "conversations") == 0) return &sbConversations;
+    if (strcmp(part, "chat_messages") == 0) return &sbChatMessages;
+    if (strcmp(part, "fog_nodes") == 0) return &sbFogNodes;
+    return nullptr;
+}
+
+static const char* partToSdFile(const char* part) {
+    if (strcmp(part, "users") == 0) return SD_USERS_FILE;
+    if (strcmp(part, "announcements") == 0) return SD_BCASTS_FILE;
+    if (strcmp(part, "conversations") == 0) return SD_CONVOS_FILE;
+    if (strcmp(part, "chat_messages") == 0) return SD_DMS_FILE;
+    if (strcmp(part, "fog_nodes") == 0) return SD_FOG_FILE;
+    return nullptr;
+}
+
+static void mergePartToSD(const char* part, JsonDocument& newRecords) {
+    const char* sdFile = partToSdFile(part);
+    if (!sdFile) return;
+
+    JsonArray incoming = newRecords.as<JsonArray>();
+    if (incoming.size() == 0) return;
+
+    // Read existing data from SD
+    JsonDocument existing;
+    readJsonArray(sdFile, existing);
+    JsonArray arr = existing.is<JsonArray>() ? existing.as<JsonArray>()
+                                              : existing.to<JsonArray>();
+
+    int added = 0;
+    for (JsonVariant item : incoming) {
+        JsonObject rec = item.as<JsonObject>();
+        int recId = rec["id"] | -1;
+
+        // Check if this ID already exists (skip records without id)
+        bool found = false;
+        if (recId > 0) {
+            for (JsonObject ex : arr) {
+                if ((ex["id"] | -1) == recId) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found) {
+            arr.add(rec);
+            added++;
+        }
+    }
+
+    if (added > 0) {
+        writeJsonArray(sdFile, existing);
+        logMsg('S', "SYNC_BACK: merged %d new %s records", added, part);
+    }
+}
+
+static void handleSyncBack(JsonDocument& doc) {
+    const char* part = doc["part"] | "";
+    if (strlen(part) == 0) return;
+
+    // Initialize buffers on first SYNC_BACK message
+    if (!sbInProgress) {
+        initSyncBackBuffers();
+    }
+
+    // Count message: merge accumulated records to SD
+    if (doc["n"].is<int>()) {
+        JsonDocument* buf = getSyncBackBuffer(part);
+        if (buf) {
+            mergePartToSD(part, *buf);
+        }
+        return;
+    }
+
+    // Single record: accumulate in buffer
+    if (doc["d"].is<JsonObject>()) {
+        JsonDocument* buf = getSyncBackBuffer(part);
+        if (buf) {
+            buf->as<JsonArray>().add(doc["d"].as<JsonObject>());
+        }
+    }
+}
+
+static void handleSyncBackSC(JsonDocument& doc) {
+    // SC continuation for SYNC_BACK — same format as regular SC
+    const char* part = doc["p"] | "";
+    int seq = doc["s"] | -1;
+    const char* key = doc["k"] | "";
+    const char* val = doc["v"] | "";
+    if (seq < 0 || strlen(key) == 0 || strlen(part) == 0) return;
+
+    JsonDocument* buf = getSyncBackBuffer(part);
+    if (!buf) return;
+
+    JsonArray arr = buf->as<JsonArray>();
+    if (seq >= (int)arr.size()) return;
+
+    JsonObject rec = arr[seq].as<JsonObject>();
+    rec[key] = rec[key].as<String>() + val;
+}
+
+static void handleSyncBackDone(const char* nodeId) {
+    sbInProgress = false;
+    logMsg('S', "SYNC_BACK complete from %s", nodeId);
+}
+
 // ── Public API ─────────────────────────────────────────────────────
 
 static unsigned long lastPingMs = 0;
@@ -437,6 +579,18 @@ bool nodeProtocolHandleLine(const char* line, size_t len,
         // Log only
     } else if (strcmp(cmd, "STATS_RESPONSE") == 0) {
         handleStatsResponse(nodeId, params);
+    } else if (strcmp(cmd, "SYNC_BACK") == 0) {
+        handleSyncBack(doc);
+    } else if (strcmp(cmd, "SC") == 0) {
+        // SC messages can be for regular sync OR sync-back
+        // During SYNC_BACK, SC messages are handled by handleSyncBackSC
+        if (sbInProgress) {
+            handleSyncBackSC(doc);
+        } else {
+            logMsg('S', "SC outside SYNC_BACK (ignored)");
+        }
+    } else if (strcmp(cmd, "SYNC_BACK_DONE") == 0) {
+        handleSyncBackDone(nodeId);
     } else if (strcmp(cmd, "PONG") == 0) {
         // Node responded to our PING
     } else if (strcmp(cmd, "PING") == 0) {

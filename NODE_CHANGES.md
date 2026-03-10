@@ -1,326 +1,341 @@
-# HopFog-Node — Critical Fix: XBee Payload Size Limit
+# HopFog-Node — Complete Alignment Guide
 
 > **Purpose:** Give this entire file as a task to the Copilot agent working on
 > [hyoono/HopFog-Node](https://github.com/hyoono/HopFog-Node)
 > Branch: `copilot/setup-and-xbee-driver`
 >
-> **THIS IS THE FIX.** All previous NODE_CHANGES (#1–#9) were trying to fix
-> init order, UART config, etc. — but the real problem was **payload size**.
+> **This supersedes ALL previous NODE_CHANGES documents.**
 
 ---
 
-## ROOT CAUSE: ZigBee Broadcast Payload Limit
+## Issue 1: Login Fails (CRITICAL)
 
-**XBee S2C ZigBee broadcast max RF payload: ~84 bytes.**
-Broadcast frames CANNOT be fragmented. Messages larger than ~84 bytes are
-**silently dropped** by the XBee module — no error, no TX FAIL, nothing.
+The node's POST /login does plaintext password comparison:
+```cpp
+strcmp(user["password"] | "", password) == 0  // ← WRONG
+```
 
-### Message Size Analysis
+But admin stores passwords as `password_hash` with format `"salt:sha256hex"`.
+After sync, users.json has `password_hash` field, not `password`. Login always fails.
 
-| Message | Bytes | Limit | Result |
-|---------|-------|-------|--------|
-| PING | ~35 | 84 | ✅ Works |
-| PONG | ~31 | 84 | ✅ Works |
-| REGISTER_ACK | ~44 | 84 | ✅ Works |
-| **Node REGISTER** | **~155** | 84 | ❌ **Silently dropped** |
-| **Node HEARTBEAT** | **~120** | 84 | ❌ **Silently dropped** |
-| **SYNC_REQUEST** | ~55 | 84 | ✅ Works |
-| **SYNC_DATA (empty)** | **~160** | 84 | ❌ **Silently dropped** |
+### Fix: Add SHA-256 Password Verification
 
-This is why:
-- XCTU registration works (small messages fit)
-- The test project works (small messages fit)
-- The real node doesn't register (REGISTER is ~155 bytes = DROPPED)
-- Sync never works (SYNC_DATA is ~160+ bytes = DROPPED)
-
----
-
-## Fix Summary
-
-1. **Trim REGISTER to < 72 bytes** — remove ip_address, status, free_heap
-2. **Trim HEARTBEAT to < 72 bytes** — use short keys, drop ip_address
-3. **Remove `ts` field** from sendCommand — saves ~10 bytes per message
-4. **Shorter DEVICE_NAME** — "Node01" instead of "HopFog-Node-01"
-5. **Handle chunked SYNC_DATA** — admin sends SYNC_DATA with `part` field
-6. **Handle SYNC_DONE** — new command marking end of chunked sync
-7. **Handle PING** — admin sends PING every 10s, node replies PONG
-
----
-
-## Required Changes
-
-### Change 1: Trim `sendCommand()` in `src/node_client.cpp`
-
-Remove the `ts` field to save ~10 bytes per message:
+**Create `include/auth.h`:**
 
 ```cpp
-static void sendCommand(JsonDocument& doc) {
-    doc["node_id"] = NODE_ID;
-    // REMOVED: doc["ts"] = (long)(millis() / 1000);
-    // ts adds ~10 bytes and pushes messages over the 72-byte broadcast limit
-    String json;
-    serializeJson(doc, json);
-    xbeeSendBroadcast(json.c_str(), json.length());
+#ifndef AUTH_H
+#define AUTH_H
+
+#include <Arduino.h>
+
+String hashPassword(const String& password);
+bool verifyPassword(const String& password, const String& storedHash);
+
+#endif
+```
+
+**Create `src/auth.cpp`:**
+
+```cpp
+#include "auth.h"
+#include <mbedtls/sha256.h>
+#include <esp_random.h>
+
+static String sha256Hex(const String& input) {
+    unsigned char hash[32];
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0);
+    mbedtls_sha256_update(&ctx,
+        (const unsigned char*)input.c_str(), input.length());
+    mbedtls_sha256_finish(&ctx, hash);
+    mbedtls_sha256_free(&ctx);
+
+    String hex;
+    hex.reserve(64);
+    for (int i = 0; i < 32; i++) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", hash[i]);
+        hex += buf;
+    }
+    return hex;
+}
+
+static String generateSalt() {
+    String salt;
+    salt.reserve(16);
+    for (int i = 0; i < 8; i++) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", (uint8_t)esp_random());
+        salt += buf;
+    }
+    return salt;
+}
+
+String hashPassword(const String& password) {
+    String salt = generateSalt();
+    String hash = sha256Hex(salt + ":" + password);
+    return salt + ":" + hash;
+}
+
+bool verifyPassword(const String& password, const String& storedHash) {
+    int sep = storedHash.indexOf(':');
+    if (sep < 0) return false;
+    String salt = storedHash.substring(0, sep);
+    String expectedHash = storedHash.substring(sep + 1);
+    String computedHash = sha256Hex(salt + ":" + password);
+    return computedHash == expectedHash;
 }
 ```
 
-### Change 2: Trim `sendRegister()` in `src/node_client.cpp`
+**Fix POST /login in `src/api_handlers.cpp`:**
+
+Add `#include "auth.h"` at the top, then replace the login handler body:
 
 ```cpp
-static void sendRegister() {
-    // MUST be < 72 bytes total for ZigBee broadcast!
-    // Old version was ~155 bytes and was SILENTLY DROPPED by XBee.
-    JsonDocument doc;
-    doc["cmd"] = "REGISTER";
-    JsonObject p = doc["params"].to<JsonObject>();
-    p["name"] = DEVICE_NAME;
-    // DO NOT add ip_address, status, free_heap — makes payload too large
-    sendCommand(doc);
-}
-```
-
-**Output:** `{"cmd":"REGISTER","params":{"name":"Node01"},"node_id":"node-01"}` = ~63 bytes ✅
-
-### Change 3: Trim `sendHeartbeat()` in `src/node_client.cpp`
-
-```cpp
-static void sendHeartbeat() {
-    // MUST be < 72 bytes for ZigBee broadcast
-    JsonDocument doc;
-    doc["cmd"] = "HEARTBEAT";
-    JsonObject p = doc["params"].to<JsonObject>();
-    p["up"] = (int)(millis() / 1000);
-    p["heap"] = (int)(ESP.getFreeHeap() / 1024);  // KB not bytes
-    sendCommand(doc);
-}
-```
-
-**Output:** `{"cmd":"HEARTBEAT","params":{"up":123,"heap":180},"node_id":"node-01"}` = ~67 bytes ✅
-
-### Change 4: Shorter DEVICE_NAME in `include/config.h`
-
-```cpp
-#define DEVICE_NAME   "Node01"   // Was "HopFog-Node-01" — too long for broadcast limit
-```
-
-### Change 5: Handle SYNC_DATA and SC (Sync Continuation) in `src/node_client.cpp`
-
-The admin sends SYNC_DATA **one record at a time**. ALL fields are included
-(password_hash, body, message_text — nothing is stripped).
-
-**Small records** (<240 bytes) are sent in a single message:
-```json
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"users","seq":0,"d":{"id":1,"username":"admin","password_hash":"$2b$10$...","role":"admin"}}
-```
-
-**Large records** (>240 bytes) are split: the base record has long text fields
-emptied, followed by SC (Sync Continuation) messages with the full text:
-```json
-{"cmd":"SYNC_DATA","node_id":"node-01","part":"announcements","seq":0,"d":{"id":1,"subject":"","body":"","status":"sent","created_at":1709900000}}
-{"cmd":"SC","p":"announcements","s":0,"k":"subject","v":"Emergency Evacuation Notice"}
-{"cmd":"SC","p":"announcements","s":0,"k":"body","v":"first 130 chars of body text..."}
-{"cmd":"SC","p":"announcements","s":0,"k":"body","v":"next 130 chars of body text..."}
-```
-
-**Count** message (no "d" field): `{"cmd":"SYNC_DATA",...,"part":"users","n":3}`
-**Final**: `{"cmd":"SYNC_DONE","node_id":"node-01"}`
-
-**You need in-memory buffers to collect records per part:**
-
-```cpp
-// Add at the top of node_client.cpp (file scope)
-#include <ArduinoJson.h>
-
-// Sync accumulation buffers — one JsonDocument per data part
-static JsonDocument syncUsers;
-static JsonDocument syncAnnouncements;
-static JsonDocument syncConversations;
-static JsonDocument syncChatMessages;
-static JsonDocument syncFogNodes;
-
-static void initSyncBuffers() {
-    syncUsers.to<JsonArray>();
-    syncAnnouncements.to<JsonArray>();
-    syncConversations.to<JsonArray>();
-    syncChatMessages.to<JsonArray>();
-    syncFogNodes.to<JsonArray>();
-}
-
-// Helper: find the sync buffer for a given part name
-static JsonDocument* getSyncBuffer(const char* part) {
-    if (strcmp(part, "users") == 0) return &syncUsers;
-    if (strcmp(part, "announcements") == 0) return &syncAnnouncements;
-    if (strcmp(part, "conversations") == 0) return &syncConversations;
-    if (strcmp(part, "chat_messages") == 0) return &syncChatMessages;
-    if (strcmp(part, "fog_nodes") == 0) return &syncFogNodes;
-    return nullptr;
-}
-```
-
-**Replace `handleSyncData()` with:**
-
-```cpp
-static void handleSyncData(JsonDocument& doc) {
-    const char* part = doc["part"] | "";
-    if (strlen(part) == 0) return;
-
-    // Count message (has "n") — save accumulated buffer to SD
-    if (doc["n"].is<int>()) {
-        JsonDocument* buf = getSyncBuffer(part);
-        if (buf) {
-            // Use your existing writeJsonFile or writeJsonArray function.
-            // Map part name to your SD file path constant:
-            const char* path = nullptr;
-            if (strcmp(part, "users") == 0) path = SD_USERS_FILE;
-            else if (strcmp(part, "announcements") == 0) path = SD_ANNOUNCE_FILE;
-            else if (strcmp(part, "conversations") == 0) path = SD_CONVOS_FILE;
-            else if (strcmp(part, "chat_messages") == 0) path = SD_DMS_FILE;
-            else if (strcmp(part, "fog_nodes") == 0) path = SD_FOG_FILE;
-            if (path) writeJsonFile(path, *buf);
-        }
+server.on("/login", HTTP_POST, [](AsyncWebServerRequest* request) {
+}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len,
+            size_t index, size_t total) {
+    JsonDocument reqDoc;
+    DeserializationError err = deserializeJson(reqDoc, data, len);
+    if (err) {
+        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
         return;
     }
 
-    // Regular record message (has "d")
-    if (!doc["d"].is<JsonObject>()) return;
-    JsonObject record = doc["d"].as<JsonObject>();
-
-    JsonDocument* buf = getSyncBuffer(part);
-    if (buf) {
-        buf->as<JsonArray>().add(record);
+    const char* username = reqDoc["username"];
+    const char* password = reqDoc["password"];
+    if (!username || !password) {
+        request->send(400, "application/json",
+                      "{\"error\":\"Missing username or password\"}");
+        return;
     }
-}
+
+    JsonDocument usersDoc;
+    readJsonFile(SD_USERS_FILE, usersDoc);
+    JsonArray users = usersDoc.as<JsonArray>();
+
+    for (JsonObject user : users) {
+        if (strcmp(user["username"] | "", username) != 0) continue;
+
+        // Check is_active
+        int active = user["is_active"] | 1;
+        if (active == 0) {
+            request->send(403, "application/json",
+                          "{\"success\":false,\"error\":\"Account inactive\"}");
+            return;
+        }
+
+        // Verify password against password_hash (salt:sha256hex format)
+        const char* storedHash = user["password_hash"] | "";
+        if (strlen(storedHash) > 0 && verifyPassword(String(password), String(storedHash))) {
+            JsonDocument respDoc;
+            respDoc["success"] = true;
+            JsonObject u = respDoc["user"].to<JsonObject>();
+            u["user_id"] = user["id"] | 0;
+            u["username"] = user["username"] | "";
+            u["email"] = user["email"] | "";
+            u["has_agreed_sos"] = (user["has_agreed_sos"] | 0) == 1;
+            String response;
+            serializeJson(respDoc, response);
+            request->send(200, "application/json", response);
+            return;
+        }
+
+        request->send(401, "application/json",
+                      "{\"success\":false,\"error\":\"Invalid credentials\"}");
+        return;
+    }
+
+    request->send(401, "application/json",
+                  "{\"success\":false,\"error\":\"Invalid credentials\"}");
+});
 ```
 
-**NEW: Add `handleSyncContinuation()` for SC messages:**
+**Fix POST /change-password in `src/api_handlers.cpp`:**
+
+Replace the password check and storage:
 
 ```cpp
-static void handleSyncContinuation(JsonDocument& doc) {
-    // SC = Sync Continuation: appends text to a field in a previously
-    // received record. Used for long text fields that exceeded the
-    // 240-byte XBee unicast limit.
-    //
-    // Format: {"cmd":"SC","p":"announcements","s":0,"k":"body","v":"...text chunk..."}
-    //   p = part name
-    //   s = seq number (index into the sync buffer for that part)
-    //   k = field key to append to
-    //   v = text chunk to append
-
-    const char* part = doc["p"] | "";
-    int seq = doc["s"] | -1;
-    const char* key = doc["k"] | "";
-    const char* val = doc["v"] | "";
-    if (seq < 0 || strlen(key) == 0 || strlen(part) == 0) return;
-
-    JsonDocument* buf = getSyncBuffer(part);
-    if (!buf) return;
-
-    JsonArray arr = buf->as<JsonArray>();
-    if (seq >= (int)arr.size()) return;  // Record not yet received
-
-    JsonObject rec = arr[seq].as<JsonObject>();
-    // Append v to existing value of key
-    String existing = rec[key].as<String>();
-    existing += val;
-    rec[key] = existing;
+// Old: strcmp(user["password"] | "", oldPw) != 0
+// New:
+const char* storedHash = user["password_hash"] | "";
+if (!verifyPassword(String(oldPw), String(storedHash))) {
+    request->send(401, "application/json",
+                  "{\"success\":false,\"error\":\"Wrong old password\"}");
+    return;
 }
-
-static void handleSyncDone() {
-    state = STATE_RUNNING;
-    lastHeartbeatMs = millis();
-    initSyncBuffers();
-}
-```
-
-**Add SC handling in the command dispatcher:**
-
-```cpp
-    } else if (strcmp(cmd, "SYNC_DATA") == 0) {
-        handleSyncData(doc);
-    } else if (strcmp(cmd, "SC") == 0) {
-        handleSyncContinuation(doc);
-    } else if (strcmp(cmd, "SYNC_DONE") == 0) {
-        handleSyncDone();
-```
-
-**Call `initSyncBuffers()` in your `nodeClientInit()` and at the start of
-`handleSyncRequest()` (when sending SYNC_REQUEST):**
-
-```cpp
-void nodeClientInit() {
-    state = STATE_UNREGISTERED;
-    initSyncBuffers();
-    // ... rest of init ...
-}
-
-// Also in sendSyncRequest():
-static void sendSyncRequest() {
-    initSyncBuffers();  // Clear buffers before receiving new sync
-    JsonDocument doc;
-    doc["cmd"] = "SYNC_REQUEST";
-    sendCommand(doc);
-    state = STATE_SYNCING;
-}
-```
-
-### Change 6: Handle PING and SYNC_DONE in `nodeClientHandleCommand()`
-
-Add these cases to the command dispatcher:
-
-```cpp
-    } else if (strcmp(cmd, "SYNC_DATA") == 0) {
-        handleSyncData(doc);
-    } else if (strcmp(cmd, "SYNC_DONE") == 0) {
-        handleSyncDone();
-    } else if (strcmp(cmd, "PING") == 0) {
-        // Admin sends PING every 10s — reply with PONG
-        JsonDocument pong;
-        pong["cmd"] = "PONG";
-        sendCommand(pong);
-    } else if (strcmp(cmd, "PONG") == 0) {
-        handlePong();
-    } else if (strcmp(cmd, "BROADCAST_MSG") == 0) {
-```
-
-### Change 7: Trim `handleGetStats()` in `src/node_client.cpp`
-
-```cpp
-static void handleGetStats() {
-    JsonDocument doc;
-    doc["cmd"] = "STATS_RESPONSE";
-    JsonObject p = doc["params"].to<JsonObject>();
-    p["heap"] = (int)(ESP.getFreeHeap() / 1024);
-    p["up"] = (int)(millis() / 1000);
-    sendCommand(doc);
-}
+// Old: user["password"] = newPw;
+// New:
+user["password_hash"] = hashPassword(String(newPw));
 ```
 
 ---
 
-## What the Admin Side Changed
+## Issue 2: SYNC_BACK (Node → Admin)
 
-1. **Unicast replies**: Admin sends REGISTER_ACK, PONG, SYNC_DATA via unicast
-   to the node's specific XBee address (from 0x90 frame source address).
-   Unicast supports fragmentation up to ~255 bytes.
+The admin now handles `SYNC_BACK`, `SC`, and `SYNC_BACK_DONE` commands.
+This lets the node send its local data back to the admin for merging.
 
-2. **Broadcast only for PING**: Only the admin's periodic PING uses broadcast.
+**Add `sendSyncBack()` in `src/node_client.cpp`:**
 
-3. **ALL fields included in sync**: Password hashes, full body text, full
-   message text — nothing is stripped or truncated.
+```cpp
+static void sendSyncBackPart(const char* partName, const char* sdFile) {
+    JsonDocument fileDoc;
+    readJsonFile(sdFile, fileDoc);
+    JsonArray arr = fileDoc.is<JsonArray>() ? fileDoc.as<JsonArray>()
+                                            : fileDoc.to<JsonArray>();
+    int sent = 0;
+    for (JsonVariant item : arr) {
+        JsonObject rec = item.as<JsonObject>();
 
-4. **SC (Sync Continuation) for large records**: When a record exceeds the
-   240-byte unicast limit, long text fields (>30 chars) are emptied in the
-   base SYNC_DATA message, and the full text is sent in separate SC messages:
-   `{"cmd":"SC","p":"announcements","s":0,"k":"body","v":"...text chunk..."}`
-   The node appends each chunk to the corresponding record+field.
+        JsonDocument msg;
+        msg["cmd"] = "SYNC_BACK";
+        msg["node_id"] = NODE_ID;
+        msg["part"] = partName;
+        msg["seq"] = sent;
+        JsonObject d = msg["d"].to<JsonObject>();
+        for (JsonPair kv : rec) {
+            d[kv.key()] = kv.value();
+        }
 
-5. **Payload size warning**: `xbeeSendBroadcast()` logs "OVERSIZED BROADCAST!"
-   when payload exceeds 72 bytes.
+        String json;
+        serializeJson(msg, json);
 
-6. **TX Status decoding**: TX FAIL 0x74 decoded as "PAYLOAD TOO LARGE".
+        if ((int)json.length() <= 72) {
+            // Fits in broadcast
+            xbeeSendBroadcast(json.c_str(), json.length());
+        } else {
+            // Too large for broadcast — send just id, rest as SC
+            JsonDocument skelMsg;
+            skelMsg["cmd"] = "SYNC_BACK";
+            skelMsg["node_id"] = NODE_ID;
+            skelMsg["part"] = partName;
+            skelMsg["seq"] = sent;
+            JsonObject skelD = skelMsg["d"].to<JsonObject>();
+            // Copy only non-string fields (id, ints, bools)
+            for (JsonPair kv : rec) {
+                if (kv.value().is<const char*>()) {
+                    skelD[kv.key()] = "";
+                } else {
+                    skelD[kv.key()] = kv.value();
+                }
+            }
+            String skelJson;
+            serializeJson(skelMsg, skelJson);
+            xbeeSendBroadcast(skelJson.c_str(), skelJson.length());
+            delay(50);
 
-7. **Manual trigger buttons**: Admin testing page has buttons to manually send
-   PING, REGISTER_ACK, PONG, GET_STATS, SYNC_DATA, etc.
+            // Send string fields as SC
+            for (JsonPair kv : rec) {
+                if (!kv.value().is<const char*>()) continue;
+                const char* val = kv.value().as<const char*>();
+                if (strlen(val) == 0) continue;
+
+                int offset = 0;
+                int fullLen = strlen(val);
+                while (offset < fullLen) {
+                    int chunkSize = 40;  // Conservative for broadcast
+                    int end = (offset + chunkSize < fullLen)
+                              ? offset + chunkSize : fullLen;
+
+                    JsonDocument sc;
+                    sc["cmd"] = "SC";
+                    sc["p"] = partName;
+                    sc["s"] = sent;
+                    sc["k"] = kv.key().c_str();
+                    sc["v"] = String(val).substring(offset, end);
+                    String scJson;
+                    serializeJson(sc, scJson);
+                    if ((int)scJson.length() <= 72) {
+                        xbeeSendBroadcast(scJson.c_str(), scJson.length());
+                    }
+                    delay(50);
+                    offset = end;
+                }
+            }
+        }
+
+        sent++;
+        delay(50);
+    }
+
+    // Count message
+    JsonDocument countMsg;
+    countMsg["cmd"] = "SYNC_BACK";
+    countMsg["node_id"] = NODE_ID;
+    countMsg["part"] = partName;
+    countMsg["n"] = sent;
+    String countJson;
+    serializeJson(countMsg, countJson);
+    xbeeSendBroadcast(countJson.c_str(), countJson.length());
+    delay(50);
+}
+
+static void sendSyncBack() {
+    // Only sync parts that the node generates locally
+    sendSyncBackPart("chat_messages", SD_DMS_FILE);
+    sendSyncBackPart("conversations", SD_CONVOS_FILE);
+
+    JsonDocument done;
+    done["cmd"] = "SYNC_BACK_DONE";
+    done["node_id"] = NODE_ID;
+    String doneJson;
+    serializeJson(done, doneJson);
+    xbeeSendBroadcast(doneJson.c_str(), doneJson.length());
+}
+```
+
+**Add `/api/trigger/sync-back` endpoint in `src/api_handlers.cpp`:**
+
+```cpp
+server.on("/api/trigger/sync-back", HTTP_POST, [](AsyncWebServerRequest* request) {
+    sendSyncBack();
+    request->send(200, "application/json",
+                  "{\"success\":true,\"message\":\"SYNC_BACK sent\"}");
+});
+```
+
+**Make `sendSyncBack()` accessible:**
+Either move it to a public function or declare it in node_client.h:
+```cpp
+void nodeClientTriggerSyncBack();
+```
+
+---
+
+## Issue 3: Oversized Announcements
+
+The admin now handles oversized records differently. Instead of skipping records
+whose base exceeds 240 bytes, it sends a skeleton with only numeric fields plus
+empty strings, then sends ALL string fields as SC continuation messages.
+
+**No node-side changes needed** — the existing SC handler already works.
+Just make sure `handleSyncContinuation()` is implemented per Change 5 above.
+
+---
+
+## Quick Reference: All Commands
+
+| Command | Direction | Purpose |
+|---------|-----------|---------|
+| PING | Admin→All | Discovery (broadcast, every 10s) |
+| PONG | Node→Admin | Response to PING (broadcast) |
+| REGISTER | Node→Admin | Register with admin (broadcast) |
+| REGISTER_ACK | Admin→Node | Confirm registration (unicast) |
+| HEARTBEAT | Node→Admin | Periodic status (broadcast, 30s) |
+| SYNC_REQUEST | Node→Admin | Request data sync (broadcast) |
+| SYNC_DATA | Admin→Node | One record at a time (unicast) |
+| SC | Admin→Node | Continuation chunk (unicast) |
+| SYNC_DONE | Admin→Node | End of sync (unicast) |
+| SYNC_BACK | Node→Admin | Node sends data to admin (broadcast) |
+| SYNC_BACK_DONE | Node→Admin | End of sync-back (broadcast) |
+| GET_STATS | Admin→Node | Request node stats (unicast) |
+| STATS_RESPONSE | Node→Admin | Stats reply (broadcast) |
+| BROADCAST_MSG | Admin→Node | Push announcement (unicast) |
+| SOS_ALERT | Node→Admin | Emergency alert (broadcast) |
+| RELAY_CHAT_MSG | Node→Admin | Chat message relay (broadcast) |
+| CHANGE_PASSWORD | Node→Admin | Password change relay (broadcast) |
 
 ---
 
@@ -348,27 +363,3 @@ static void handleGetStats() {
 | ID | 1234 (PAN ID) |
 | DH | 0 |
 | DL | FFFF |
-
----
-
-## ALSO IMPORTANT: ASYNCWEBSERVER_REGEX
-
-If the node uses ESPAsyncWebServer with any regex routes (e.g. `"^\\/api\\/path\\/(\\d+)$"`),
-you MUST add `-DASYNCWEBSERVER_REGEX=1` to `build_flags` in `platformio.ini`.
-
-Without this flag, regex routes **silently don't match** → 404.
-
-```ini
-build_flags =
-    -DCORE_DEBUG_LEVEL=0
-    -DBOARD_HAS_PSRAM=1
-    -DASYNCWEBSERVER_REGEX=1
-```
-
----
-
-## Verification After Flashing
-
-1. Admin serial monitor: `TX OK` for PINGs, `RX ←` for node REGISTER
-2. Node status: state progresses 0→1→2→3
-3. No "OVERSIZED BROADCAST!" errors in admin log
