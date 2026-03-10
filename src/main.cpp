@@ -97,6 +97,9 @@ void setup() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONN);
     delay(100);
+    // Max TX power + disable power save for WiFi stability
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     logMsg('S', "WiFi AP: %s  IP: 192.168.4.1", AP_SSID);
 

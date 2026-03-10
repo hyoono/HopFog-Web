@@ -1662,11 +1662,19 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
         String nodeId = request->pathArg(0);
+        if (nodeProtocolSyncInProgress()) {
+            JsonDocument resp;
+            resp["success"] = false;
+            resp["message"] = "Sync already in progress";
+            String out; serializeJson(resp, out);
+            request->send(409, "application/json", out);
+            return;
+        }
         nodeProtocolTriggerSync(nodeId.c_str());
 
         JsonDocument resp;
         resp["success"] = true;
-        resp["message"] = "Sync request sent to " + nodeId;
+        resp["message"] = "Sync started (non-blocking) to " + nodeId;
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
     });

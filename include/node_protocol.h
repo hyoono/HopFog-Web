@@ -7,7 +7,7 @@
  * CRITICAL: ZigBee broadcast max payload is ~84 bytes.
  * - Broadcast: only used for PING discovery (~35 bytes)
  * - Unicast:   used for all responses (supports fragmentation, ~255 bytes)
- * - SYNC_DATA: chunked into multiple small unicast messages
+ * - SYNC_DATA: non-blocking state machine, one record per loop iteration
  */
 
 #ifndef NODE_PROTOCOL_H
@@ -22,8 +22,13 @@
 #define NODE_STALE_MS 90000  // mark stale after 90 s without heartbeat
 
 // ── Admin periodic timers ──────────────────────────────────────────
-#define ADMIN_PING_INTERVAL_MS  10000  // send PING every 10 seconds
-#define NODE_UNICAST_PACING_MS  50     // delay between unicast sends to avoid XBee overload
+#define ADMIN_PING_INTERVAL_MS  10000   // send PING every 10 seconds
+#define AUTO_SYNC_INTERVAL_MS   300000  // auto-sync every 5 minutes
+#define CLEANUP_INTERVAL_MS     600000  // message cleanup every 10 minutes
+#define NODE_UNICAST_PACING_MS  50      // delay between unicast sends
+
+// ── Message retention ──────────────────────────────────────────────
+#define MESSAGE_TTL_SECONDS     172800  // 48 hours in seconds
 
 // ── Node info stored in memory ─────────────────────────────────────
 struct NodeInfo {
@@ -51,6 +56,7 @@ void nodeProtocolGetNodes(JsonArray& arr);
 int nodeProtocolActiveCount();
 int nodeProtocolTotalCount();
 void nodeProtocolTriggerSync(const char* nodeId);
+bool nodeProtocolSyncInProgress();
 
 /// Send a message to ALL registered nodes via unicast (supports ~240 bytes).
 /// Falls back to broadcast if no nodes are registered.

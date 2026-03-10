@@ -544,6 +544,83 @@ Instead of:
 
 ---
 
+## Fix 8: Message Cleanup (48-Hour TTL)
+
+Direct messages older than 48 hours should be automatically deleted.
+Add this cleanup function and call it periodically from your main loop.
+
+**Add to `node_protocol.cpp` (or equivalent):**
+
+```cpp
+#define MESSAGE_TTL_SECONDS  172800  // 48 hours
+#define CLEANUP_INTERVAL_MS  600000  // Run cleanup every 10 minutes
+
+static unsigned long lastCleanupMs = 0;
+
+void cleanupOldMessages() {
+    JsonDocument doc;
+    readJsonArray("/db/direct_messages.json", doc);
+    if (!doc.is<JsonArray>()) return;
+
+    JsonArray arr = doc.as<JsonArray>();
+    if (arr.size() == 0) return;
+
+    // Find the latest timestamp
+    long latestTs = 0;
+    for (JsonObject m : arr) {
+        long ts = m["sent_at"] | 0L;
+        if (ts > latestTs) latestTs = ts;
+    }
+    if (latestTs == 0) return;
+
+    long cutoff = latestTs - MESSAGE_TTL_SECONDS;
+    int removed = 0;
+    int i = 0;
+    while (i < (int)arr.size()) {
+        JsonObject m = arr[i].as<JsonObject>();
+        long ts = m["sent_at"] | 0L;
+        if (ts > 0 && ts < cutoff) {
+            arr.remove(i);
+            removed++;
+        } else {
+            i++;
+        }
+    }
+
+    if (removed > 0) {
+        writeJsonArray("/db/direct_messages.json", doc);
+    }
+}
+```
+
+**Call from loop:**
+```cpp
+void loop() {
+    // ... existing code ...
+    unsigned long now = millis();
+    if (now - lastCleanupMs >= CLEANUP_INTERVAL_MS) {
+        lastCleanupMs = now;
+        cleanupOldMessages();
+    }
+}
+```
+
+---
+
+## Fix 9: WiFi Stability
+
+Add explicit WiFi TX power and power-save disable for stability:
+
+```cpp
+// In setup(), after WiFi.softAP():
+WiFi.setTxPower(WIFI_POWER_19_5dBm);    // Max power for range
+esp_wifi_set_ps(WIFI_PS_NONE);           // Disable power save
+```
+
+Requires: `#include <esp_wifi.h>`
+
+---
+
 ## Checklist
 
 - [ ] Fix 1: Replace `/create-chat` handler → return `conversation_id` + `contact_name`
@@ -553,6 +630,8 @@ Instead of:
 - [ ] Fix 5: Replace `GET /messages` → match admin format
 - [ ] Fix 6: Replace `GET /new-messages` → match admin format
 - [ ] Fix 7: Fix `/send` → use `sent_at` not `created_at`
+- [ ] Fix 8: Add message cleanup (48-hour TTL)
+- [ ] Fix 9: WiFi stability (TX power + no power save)
 - [ ] Build and verify
 
 ---
@@ -566,3 +645,13 @@ via **unicast to each registered node** instead of broadcast. This means:
 2. The node receives the exact same JSON format — no changes needed on the RX side
 3. If the node wants to forward messages to OTHER nodes, it should also use unicast
 4. The admin falls back to broadcast if no nodes are registered yet
+
+## Important: Admin Sync is Non-Blocking
+
+The admin's SYNC_DATA now uses a **non-blocking state machine**. It sends one
+record per loop iteration instead of blocking for 10+ seconds. This means:
+
+1. WiFi clients stay connected during sync
+2. DNS/web server remains responsive
+3. Auto-sync runs every 5 minutes to keep nodes up-to-date
+4. The node doesn't need to change anything — same SYNC_DATA/SC/SYNC_DONE format
