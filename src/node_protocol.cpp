@@ -521,11 +521,10 @@ static void handleRelayFogNode(JsonObject params) {
     writeJsonArray(SD_FOG_FILE, doc);
 }
 
-static void handleRelayChatMsg(const char* nodeId, JsonObject params) {
-    int convId = params["conversation_id"] | 0;
-    int senderId = params["sender_id"] | 0;
-    const char* text = params["message_text"] | "";
-    if (convId <= 0 || senderId <= 0 || strlen(text) == 0) return;
+// Save a relayed chat message to SD (used by both full and compact formats)
+static void saveRelayedChatMsg(const char* nodeId, int convId, int senderId,
+                               const char* text) {
+    if (convId <= 0 || senderId <= 0 || !text || strlen(text) == 0) return;
 
     JsonDocument doc;
     readJsonArray(SD_DMS_FILE, doc);
@@ -545,6 +544,55 @@ static void handleRelayChatMsg(const char* nodeId, JsonObject params) {
     msg["sent_at"] = (long)time(nullptr);
 
     writeJsonArray(SD_DMS_FILE, doc);
+    logMsg('S', "Saved relay msg cid=%d sid=%d from %s", convId, senderId, nodeId);
+}
+
+static void handleRelayChatMsg(const char* nodeId, JsonObject params) {
+    saveRelayedChatMsg(nodeId,
+                       params["conversation_id"] | 0,
+                       params["sender_id"] | 0,
+                       params["message_text"] | "");
+}
+
+// Compact relay chat message: {"c":"RCM","n":"node-01","ci":1,"si":4,"t":"hello"}
+static void handleCompactRelayChatMsg(const char* nodeId, JsonVariantConst doc) {
+    saveRelayedChatMsg(nodeId,
+                       doc["ci"] | 0,
+                       doc["si"] | 0,
+                       doc["t"] | "");
+}
+
+// Compact SOS alert: {"c":"SOS","n":"node-01","si":4,"sn":"Kurt","t":"Help!"}
+static void handleCompactSosAlert(const char* nodeId, JsonVariantConst doc) {
+    int senderId = doc["si"] | 0;
+    if (senderId <= 0) return;
+    const char* senderName = doc["sn"] | "Unknown";
+    const char* text = doc["t"] | "SOS";
+
+    // Create SOS broadcast
+    JsonDocument bDoc;
+    readJsonArray(SD_BCASTS_FILE, bDoc);
+    JsonArray arr = bDoc.is<JsonArray>() ? bDoc.as<JsonArray>() : bDoc.to<JsonArray>();
+
+    int newId = 1;
+    for (JsonObject b : arr) {
+        int id = b["id"] | 0;
+        if (id >= newId) newId = id + 1;
+    }
+
+    JsonObject sos = arr.add<JsonObject>();
+    sos["id"] = newId;
+    sos["subject"] = String("[SOS] ") + senderName;
+    sos["body"] = text;
+    sos["author"] = senderName;
+    sos["status"] = "sent";
+    sos["priority"] = "critical";
+    sos["severity"] = "critical";
+    sos["msg_type"] = "sos";
+    sos["created_at"] = (long)time(nullptr);
+
+    writeJsonArray(SD_BCASTS_FILE, bDoc);
+    logMsg('S', "Compact SOS from %s sid=%d", nodeId, senderId);
 }
 
 static void handleStatsResponse(const char* nodeId, JsonObject params) {
@@ -802,9 +850,44 @@ bool nodeProtocolHandleLine(const char* line, size_t len,
     DeserializationError err = deserializeJson(doc, line, len);
     if (err) return false;
 
+    // Support both full format ("cmd") and compact format ("c")
     const char* cmd = doc["cmd"];
-    if (!cmd) return false;
+    const char* compactCmd = doc["c"];
 
+    // Need at least one command key
+    if (!cmd && !compactCmd) return false;
+
+    // ── Compact format: {"c":"RCM","n":"node-01",...} ──────────────
+    if (compactCmd) {
+        const char* nodeId = doc["n"] | "unknown";
+        logMsg('S', "CMD(c)=%s from %s", compactCmd, nodeId);
+
+        if (strcmp(compactCmd, "RCM") == 0) {
+            // Compact Relay Chat Message
+            handleCompactRelayChatMsg(nodeId, doc);
+        } else if (strcmp(compactCmd, "SOS") == 0) {
+            // Compact SOS Alert
+            handleCompactSosAlert(nodeId, doc);
+        } else if (strcmp(compactCmd, "SD") == 0) {
+            // Compact SYNC_DATA (from SYNC_BACK)
+            if (sbInProgress) {
+                handleSyncBack(doc);
+            }
+        } else if (strcmp(compactCmd, "SC") == 0) {
+            // Compact Sync Continuation
+            if (sbInProgress) {
+                handleSyncBackSC(doc);
+            }
+        } else if (strcmp(compactCmd, "DONE") == 0) {
+            // Compact SYNC_BACK_DONE
+            handleSyncBackDone(nodeId);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    // ── Full format: {"cmd":"REGISTER","node_id":"node-01",...} ────
     const char* nodeId = doc["node_id"] | "unknown";
     JsonObject params = doc["params"].as<JsonObject>();
 

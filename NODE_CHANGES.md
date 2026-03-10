@@ -228,18 +228,29 @@ Same data class `SosChatResponse`. Must return `conversation_id` + `contact_name
                       ",\"contact_name\":\"Admin\"}";
         request->send(200, "application/json", resp);
 
-        // Relay SOS alert to admin via XBee
+        // Relay SOS alert to admin via XBee (compact format)
+        // Get username for the alert
+        String userName = "User";
+        for (JsonObject u : usersDoc.as<JsonArray>()) {
+            if ((u["id"] | 0) == userId) {
+                userName = u["username"] | "User";
+                break;
+            }
+        }
         JsonDocument sosCmd;
-        sosCmd["cmd"] = "SOS_ALERT";
-        sosCmd["node_id"] = NODE_ID;
-        JsonObject params = sosCmd["params"].to<JsonObject>();
-        params["user_id"] = userId;
-        params["conversation_id"] = convoId;
+        sosCmd["c"] = "SOS";
+        sosCmd["n"] = NODE_ID;
+        sosCmd["si"] = userId;
+        sosCmd["sn"] = userName;
+        sosCmd["t"] = "SOS Emergency";
         String json;
         serializeJson(sosCmd, json);
         xbeeSendBroadcast(json.c_str(), json.length());
     });
 ```
+
+**IMPORTANT:** Uses compact SOS format: `{"c":"SOS","n":"node-01","si":4,"sn":"Kurt","t":"SOS Emergency"}`
+— about 65 bytes, safely under the 72-byte broadcast limit.
 
 ---
 
@@ -424,19 +435,28 @@ Uses `sent_at` (not `created_at`). Must relay to admin via XBee.
         request->send(200, "application/json",
                       "{\"success\":true,\"message\":\"sent\",\"secondsRemaining\":0}");
 
-        // Relay to admin via XBee
+        // Relay to admin via XBee (compact format: <72 bytes for broadcast)
+        // Format: {"c":"RCM","n":"node-01","ci":1,"si":4,"t":"hello"}
         JsonDocument relayCmd;
-        relayCmd["cmd"] = "RELAY_CHAT_MSG";
-        relayCmd["node_id"] = NODE_ID;
-        JsonObject p = relayCmd["params"].to<JsonObject>();
-        p["conversation_id"] = convoId;
-        p["sender_id"] = senderId;
-        p["message_text"] = text;
+        relayCmd["c"] = "RCM";
+        relayCmd["n"] = NODE_ID;
+        relayCmd["ci"] = convoId;
+        relayCmd["si"] = senderId;
+        relayCmd["t"] = text;
         String json;
         serializeJson(relayCmd, json);
         xbeeSendBroadcast(json.c_str(), json.length());
     });
 ```
+
+**IMPORTANT:** The relay uses compact keys (`"c":"RCM"` instead of
+`"cmd":"RELAY_CHAT_MSG"`) to fit within the 72-byte broadcast limit.
+A typical message `{"c":"RCM","n":"node-01","ci":1,"si":4,"t":"hello"}`
+is ~55 bytes — safely under the limit. The admin understands both formats.
+
+If the message text is very long (>30 chars), it may exceed 72 bytes.
+That's OK — the XBee will log "OVERSIZED" but the message is still saved
+locally on the node. The next auto-sync (every 5 min) will replicate it.
 
 ---
 
@@ -762,12 +782,12 @@ serve this correctly. The mobile app's `Announcement` data class expects:
 | Fix | What | Why |
 |-----|------|-----|
 | 1 | POST /create-chat | Returns wrong format → app crashes |
-| 2 | POST /sos | Returns wrong format → app crashes |
+| 2 | POST /sos + compact SOS relay | Returns wrong format + relay uses compact `{"c":"SOS"}` (<72B) |
 | 3 | GET /conversations | Missing contact_name, last_message |
 | 4 | GET /messages | Missing sender_username, is_from_current_user |
-| 5 | POST /send | Wrong field names + no relay to admin |
+| 5 | POST /send + compact chat relay | Wrong field names + relay uses compact `{"c":"RCM"}` (<72B) |
 | 6 | GET /new-messages | Wrong format + no convo membership check |
-| 7 | Compact SYNC_DATA | Admin now sends "c":"SD" instead of "cmd":"SYNC_DATA" |
+| 7 | Compact SYNC_DATA | Admin sends "c":"SD" instead of "cmd":"SYNC_DATA" |
 | 8 | RELAY_CHAT_MSG | Live chat relay from admin not handled |
 | 9 | SOS_ALERT | SOS alerts from admin not handled |
 | 10 | WiFi stability | Max TX power + disable power save |
