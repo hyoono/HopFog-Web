@@ -64,6 +64,25 @@ static void sendBroadcast(JsonDocument& doc) {
     xbeeSendBroadcast(json.c_str(), json.length());
 }
 
+// ── Public: send to ALL registered nodes via unicast ───────────────
+// Unicast supports ~240 bytes (fragmentation). Falls back to broadcast
+// if no nodes are registered yet.
+void nodeProtocolSendToAllNodes(const char* json, size_t len) {
+    int sent = 0;
+    for (int i = 0; i < nodeCount; i++) {
+        if (nodes[i].xbeeAddr.valid) {
+            xbeeSendTo(nodes[i].xbeeAddr, json, len);
+            sent++;
+            // Pace between nodes to avoid XBee TX buffer overload
+            if (i < nodeCount - 1) delay(NODE_UNICAST_PACING_MS);
+        }
+    }
+    if (sent == 0) {
+        // No registered nodes — fall back to broadcast (may be truncated)
+        xbeeSendBroadcast(json, len);
+    }
+}
+
 // ── Command handlers ───────────────────────────────────────────────
 
 static void handleRegister(const char* nodeId, JsonObject params,

@@ -554,3 +554,15 @@ Instead of:
 - [ ] Fix 6: Replace `GET /new-messages` → match admin format
 - [ ] Fix 7: Fix `/send` → use `sent_at` not `created_at`
 - [ ] Build and verify
+
+---
+
+## Important: Admin Now Uses Unicast for All Messages
+
+The admin now sends `RELAY_CHAT_MSG`, `BROADCAST_MSG`, `SOS_ALERT`, and `GET_STATS`
+via **unicast to each registered node** instead of broadcast. This means:
+
+1. Messages up to **240 bytes** now work (was limited to 72 bytes broadcast)
+2. The node receives the exact same JSON format — no changes needed on the RX side
+3. If the node wants to forward messages to OTHER nodes, it should also use unicast
+4. The admin falls back to broadcast if no nodes are registered yet

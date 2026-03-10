@@ -660,7 +660,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         markParams["msg_type"] = msgType;
         String markJson;
         serializeJson(markCmd, markJson);
-        xbeeSendBroadcast(markJson.c_str(), markJson.length());
+        nodeProtocolSendToAllNodes(markJson.c_str(), markJson.length());
 
         // Log activity
         String logSubject = "[Sent] " + subject;
@@ -814,17 +814,11 @@ void registerApiRoutes(AsyncWebServer &server) {
             bcastParams["severity"] = severity;
             String bcastJson;
             serializeJson(bcastCmd, bcastJson);
-            uint8_t frameId = xbeeSendBroadcast(bcastJson.c_str(), bcastJson.length());
-            if (frameId > 0) {
-                updateBroadcastStatus(id, "sent");
-                updateRecipientsStatus(id, "sent");
-                addBroadcastEvent(id, "marked_sent", "Auto-sent via XBee (no dispatcher)");
-                status = "sent";
-            } else {
-                updateBroadcastStatus(id, "failed");
-                addBroadcastEvent(id, "failed", "XBee transmission failed");
-                status = "failed";
-            }
+            nodeProtocolSendToAllNodes(bcastJson.c_str(), bcastJson.length());
+            updateBroadcastStatus(id, "sent");
+            updateRecipientsStatus(id, "sent");
+            addBroadcastEvent(id, "marked_sent", "Auto-sent via XBee unicast-to-all");
+            status = "sent";
         }
 
         // Log activity
@@ -1042,7 +1036,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         sosParams["msg_type"] = escalateTo;
         String sosJson;
         serializeJson(sosCmd, sosJson);
-        xbeeSendBroadcast(sosJson.c_str(), sosJson.length());
+        nodeProtocolSendToAllNodes(sosJson.c_str(), sosJson.length());
 
         // Log activity
         String logSubject = "[SOS Escalated] " + subject;
@@ -1465,7 +1459,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         dmParams["is_sos"] = isSos;
         String dmJson;
         serializeJson(dmCmd, dmJson);
-        xbeeSendBroadcast(dmJson.c_str(), dmJson.length());
+        nodeProtocolSendToAllNodes(dmJson.c_str(), dmJson.length());
 
         // Log activity
         String logSubject = isSos ? "[SOS Message] from " + senderName : "[DM] from " + senderName;
@@ -1556,7 +1550,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         sosAlertParams["username"] = userName;
         String sosAlertJson;
         serializeJson(sosAlertCmd, sosAlertJson);
-        xbeeSendBroadcast(sosAlertJson.c_str(), sosAlertJson.length());
+        nodeProtocolSendToAllNodes(sosAlertJson.c_str(), sosAlertJson.length());
 
         // Log activity
         String logSubject = "[SOS Alert] " + userName + " triggered SOS";
@@ -1691,7 +1685,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         cmd["node_id"] = nodeId;
         String json;
         serializeJson(cmd, json);
-        xbeeSendBroadcast(json.c_str(), json.length());
+        nodeProtocolSendToAllNodes(json.c_str(), json.length());
 
         JsonDocument resp;
         resp["success"] = true;

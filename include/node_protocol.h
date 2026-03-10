@@ -23,6 +23,7 @@
 
 // ── Admin periodic timers ──────────────────────────────────────────
 #define ADMIN_PING_INTERVAL_MS  10000  // send PING every 10 seconds
+#define NODE_UNICAST_PACING_MS  50     // delay between unicast sends to avoid XBee overload
 
 // ── Node info stored in memory ─────────────────────────────────────
 struct NodeInfo {
@@ -50,5 +51,9 @@ void nodeProtocolGetNodes(JsonArray& arr);
 int nodeProtocolActiveCount();
 int nodeProtocolTotalCount();
 void nodeProtocolTriggerSync(const char* nodeId);
+
+/// Send a message to ALL registered nodes via unicast (supports ~240 bytes).
+/// Falls back to broadcast if no nodes are registered.
+void nodeProtocolSendToAllNodes(const char* json, size_t len);
 
 #endif // NODE_PROTOCOL_H
