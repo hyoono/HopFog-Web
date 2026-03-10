@@ -1,4 +1,4 @@
-# HopFog-Node — Complete Alignment Guide
+# HopFog-Node — Complete Fix Guide
 
 > **Purpose:** Give this entire file as a task to the Copilot agent working on
 > [hyoono/HopFog-Node](https://github.com/hyoono/HopFog-Node)
@@ -8,358 +8,549 @@
 
 ---
 
-## Issue 1: Login Fails (CRITICAL)
+## Context
 
-The node's POST /login does plaintext password comparison:
-```cpp
-strcmp(user["password"] | "", password) == 0  // ← WRONG
+The admin and node communicate via XBee. Data syncs from admin→node.
+The mobile app (Android/Kotlin) connects to the node's WiFi AP and calls
+REST endpoints. The app has strict Kotlin data class expectations.
+
+**Admin conversation format (synced to node):**
+```json
+{"id":1, "user1_id":1, "user2_id":2, "is_sos":false, "created_at":"12345"}
 ```
 
-But admin stores passwords as `password_hash` with format `"salt:sha256hex"`.
-After sync, users.json has `password_hash` field, not `password`. Login always fails.
+**XBee limits:** Broadcast ≤72 bytes, Unicast ≤240 bytes.
 
-### Fix: Add SHA-256 Password Verification
+---
 
-**Create `include/auth.h`:**
+## Fix 1: POST /create-chat Response Format (CRITICAL)
 
-```cpp
-#ifndef AUTH_H
-#define AUTH_H
-
-#include <Arduino.h>
-
-String hashPassword(const String& password);
-bool verifyPassword(const String& password, const String& storedHash);
-
-#endif
+The Android app's Kotlin data class `SosChatResponse` expects:
+```json
+{"conversation_id": 1, "contact_name": "John"}
 ```
 
-**Create `src/auth.cpp`:**
-
-```cpp
-#include "auth.h"
-#include <mbedtls/sha256.h>
-#include <esp_random.h>
-
-static String sha256Hex(const String& input) {
-    unsigned char hash[32];
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);
-    mbedtls_sha256_update(&ctx,
-        (const unsigned char*)input.c_str(), input.length());
-    mbedtls_sha256_finish(&ctx, hash);
-    mbedtls_sha256_free(&ctx);
-
-    String hex;
-    hex.reserve(64);
-    for (int i = 0; i < 32; i++) {
-        char buf[3];
-        snprintf(buf, sizeof(buf), "%02x", hash[i]);
-        hex += buf;
-    }
-    return hex;
-}
-
-static String generateSalt() {
-    String salt;
-    salt.reserve(16);
-    for (int i = 0; i < 8; i++) {
-        char buf[3];
-        snprintf(buf, sizeof(buf), "%02x", (uint8_t)esp_random());
-        salt += buf;
-    }
-    return salt;
-}
-
-String hashPassword(const String& password) {
-    String salt = generateSalt();
-    String hash = sha256Hex(salt + ":" + password);
-    return salt + ":" + hash;
-}
-
-bool verifyPassword(const String& password, const String& storedHash) {
-    int sep = storedHash.indexOf(':');
-    if (sep < 0) return false;
-    String salt = storedHash.substring(0, sep);
-    String expectedHash = storedHash.substring(sep + 1);
-    String computedHash = sha256Hex(salt + ":" + password);
-    return computedHash == expectedHash;
-}
+**Current node response (WRONG):**
+```json
+{"success": true, "conversation": {"id": 1, "participants": [1, 2]}}
 ```
 
-**Fix POST /login in `src/api_handlers.cpp`:**
-
-Add `#include "auth.h"` at the top, then replace the login handler body:
+**Replace the entire `/create-chat` handler in `src/api_handlers.cpp`:**
 
 ```cpp
-server.on("/login", HTTP_POST, [](AsyncWebServerRequest* request) {
-}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len,
-            size_t index, size_t total) {
-    JsonDocument reqDoc;
-    DeserializationError err = deserializeJson(reqDoc, data, len);
-    if (err) {
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        return;
-    }
-
-    const char* username = reqDoc["username"];
-    const char* password = reqDoc["password"];
-    if (!username || !password) {
-        request->send(400, "application/json",
-                      "{\"error\":\"Missing username or password\"}");
-        return;
-    }
-
-    JsonDocument usersDoc;
-    readJsonFile(SD_USERS_FILE, usersDoc);
-    JsonArray users = usersDoc.as<JsonArray>();
-
-    for (JsonObject user : users) {
-        if (strcmp(user["username"] | "", username) != 0) continue;
-
-        // Check is_active
-        int active = user["is_active"] | 1;
-        if (active == 0) {
-            request->send(403, "application/json",
-                          "{\"success\":false,\"error\":\"Account inactive\"}");
+    // ── POST /create-chat ───────────────────────────────────────────
+    server.on("/create-chat", HTTP_POST, [](AsyncWebServerRequest* request) {
+        // Body handled in onBody
+    }, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len,
+                size_t index, size_t total) {
+        JsonDocument reqDoc;
+        DeserializationError err = deserializeJson(reqDoc, data, len);
+        if (err) {
+            request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
             return;
         }
 
-        // Verify password against password_hash (salt:sha256hex format)
-        const char* storedHash = user["password_hash"] | "";
-        if (strlen(storedHash) > 0 && verifyPassword(String(password), String(storedHash))) {
-            JsonDocument respDoc;
-            respDoc["success"] = true;
-            JsonObject u = respDoc["user"].to<JsonObject>();
-            u["user_id"] = user["id"] | 0;
-            u["username"] = user["username"] | "";
-            u["email"] = user["email"] | "";
-            u["has_agreed_sos"] = (user["has_agreed_sos"] | 0) == 1;
-            String response;
-            serializeJson(respDoc, response);
-            request->send(200, "application/json", response);
+        int user1Id = reqDoc["user1_id"] | 0;
+        int user2Id = reqDoc["user2_id"] | 0;
+
+        if (user1Id <= 0 || user2Id <= 0) {
+            request->send(400, "application/json",
+                          "{\"error\":\"user1_id and user2_id required\"}");
             return;
         }
 
-        request->send(401, "application/json",
-                      "{\"success\":false,\"error\":\"Invalid credentials\"}");
-        return;
-    }
+        // Find existing or create new conversation
+        JsonDocument convDoc;
+        readJsonFile(SD_CONVOS_FILE, convDoc);
+        JsonArray convs = convDoc.is<JsonArray>()
+                          ? convDoc.as<JsonArray>() : convDoc.to<JsonArray>();
 
-    request->send(401, "application/json",
-                  "{\"success\":false,\"error\":\"Invalid credentials\"}");
-});
-```
+        int convoId = 0;
+        for (JsonObject c : convs) {
+            int u1 = c["user1_id"] | 0;
+            int u2 = c["user2_id"] | 0;
+            if ((u1 == user1Id && u2 == user2Id) ||
+                (u1 == user2Id && u2 == user1Id)) {
+                convoId = c["id"] | 0;
+                break;
+            }
+        }
 
-**Fix POST /change-password in `src/api_handlers.cpp`:**
+        if (convoId == 0) {
+            int newId = 1;
+            for (JsonObject c : convs) {
+                int id = c["id"] | 0;
+                if (id >= newId) newId = id + 1;
+            }
+            JsonObject nc = convs.add<JsonObject>();
+            nc["id"] = newId;
+            nc["user1_id"] = user1Id;
+            nc["user2_id"] = user2Id;
+            nc["is_sos"] = false;
+            nc["created_at"] = String((long)(millis() / 1000));
+            writeJsonFile(SD_CONVOS_FILE, convDoc);
+            convoId = newId;
+        }
 
-Replace the password check and storage:
+        // Look up contact name
+        int otherId = user2Id;
+        String contactName = "Unknown";
+        JsonDocument usersDoc;
+        readJsonFile(SD_USERS_FILE, usersDoc);
+        for (JsonObject u : usersDoc.as<JsonArray>()) {
+            if ((u["id"] | 0) == otherId) {
+                contactName = u["username"] | "Unknown";
+                break;
+            }
+        }
 
-```cpp
-// Old: strcmp(user["password"] | "", oldPw) != 0
-// New:
-const char* storedHash = user["password_hash"] | "";
-if (!verifyPassword(String(oldPw), String(storedHash))) {
-    request->send(401, "application/json",
-                  "{\"success\":false,\"error\":\"Wrong old password\"}");
-    return;
-}
-// Old: user["password"] = newPw;
-// New:
-user["password_hash"] = hashPassword(String(newPw));
+        // Return format matching admin's /create-chat
+        JsonDocument resp;
+        resp["conversation_id"] = convoId;
+        resp["contact_name"] = contactName;
+        String response;
+        serializeJson(resp, response);
+        request->send(200, "application/json", response);
+    });
 ```
 
 ---
 
-## Issue 2: SYNC_BACK (Node → Admin)
+## Fix 2: POST /sos Response Format (CRITICAL)
 
-The admin now handles `SYNC_BACK`, `SC`, and `SYNC_BACK_DONE` commands.
-This lets the node send its local data back to the admin for merging.
+Same `SosChatResponse` data class. Current node returns `{"success":true,"message":"..."}`.
 
-**Add `sendSyncBack()` in `src/node_client.cpp`:**
+**Replace the entire `/sos` handler:**
 
 ```cpp
-static void sendSyncBackPart(const char* partName, const char* sdFile) {
-    JsonDocument fileDoc;
-    readJsonFile(sdFile, fileDoc);
-    JsonArray arr = fileDoc.is<JsonArray>() ? fileDoc.as<JsonArray>()
-                                            : fileDoc.to<JsonArray>();
-    int sent = 0;
-    for (JsonVariant item : arr) {
-        JsonObject rec = item.as<JsonObject>();
-
-        JsonDocument msg;
-        msg["cmd"] = "SYNC_BACK";
-        msg["node_id"] = NODE_ID;
-        msg["part"] = partName;
-        msg["seq"] = sent;
-        JsonObject d = msg["d"].to<JsonObject>();
-        for (JsonPair kv : rec) {
-            d[kv.key()] = kv.value();
+    // ── POST /sos ───────────────────────────────────────────────────
+    server.on("/sos", HTTP_POST, [](AsyncWebServerRequest* request) {
+        // Body handled in onBody
+    }, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len,
+                size_t index, size_t total) {
+        JsonDocument reqDoc;
+        DeserializationError err = deserializeJson(reqDoc, data, len);
+        if (err) {
+            request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+            return;
         }
 
+        int userId = reqDoc["user_id"] | 0;
+        if (userId <= 0) {
+            request->send(400, "application/json", "{\"error\":\"user_id required\"}");
+            return;
+        }
+
+        // Find first admin user
+        JsonDocument usersDoc;
+        readJsonFile(SD_USERS_FILE, usersDoc);
+        int adminId = 0;
+        String adminName = "Admin";
+        for (JsonObject u : usersDoc.as<JsonArray>()) {
+            String role = u["role"] | "";
+            if (role == "admin" && (u["is_active"] | 1)) {
+                adminId = u["id"] | 0;
+                adminName = u["username"] | "Admin";
+                break;
+            }
+        }
+
+        if (adminId == 0) {
+            request->send(500, "application/json",
+                          "{\"error\":\"No admin user found\"}");
+            return;
+        }
+
+        // Find or create SOS conversation
+        JsonDocument convDoc;
+        readJsonFile(SD_CONVOS_FILE, convDoc);
+        JsonArray convs = convDoc.is<JsonArray>()
+                          ? convDoc.as<JsonArray>() : convDoc.to<JsonArray>();
+
+        int convoId = 0;
+        for (JsonObject c : convs) {
+            int u1 = c["user1_id"] | 0;
+            int u2 = c["user2_id"] | 0;
+            if ((u1 == userId && u2 == adminId) ||
+                (u1 == adminId && u2 == userId)) {
+                convoId = c["id"] | 0;
+                break;
+            }
+        }
+
+        if (convoId == 0) {
+            int newId = 1;
+            for (JsonObject c : convs) {
+                int id = c["id"] | 0;
+                if (id >= newId) newId = id + 1;
+            }
+            JsonObject nc = convs.add<JsonObject>();
+            nc["id"] = newId;
+            nc["user1_id"] = userId;
+            nc["user2_id"] = adminId;
+            nc["is_sos"] = true;
+            nc["created_at"] = String((long)(millis() / 1000));
+            writeJsonFile(SD_CONVOS_FILE, convDoc);
+            convoId = newId;
+        }
+
+        // Relay SOS to admin via XBee
+        JsonDocument relayDoc;
+        relayDoc["cmd"] = "SOS_ALERT";
+        JsonObject params = relayDoc["params"].to<JsonObject>();
+        params["user_id"] = userId;
+        params["conversation_id"] = convoId;
+        relayDoc["node_id"] = NODE_ID;
         String json;
-        serializeJson(msg, json);
+        serializeJson(relayDoc, json);
+        xbeeSendBroadcast(json.c_str(), json.length());
 
-        if ((int)json.length() <= 72) {
-            // Fits in broadcast
-            xbeeSendBroadcast(json.c_str(), json.length());
-        } else {
-            // Too large for broadcast — send just id, rest as SC
-            JsonDocument skelMsg;
-            skelMsg["cmd"] = "SYNC_BACK";
-            skelMsg["node_id"] = NODE_ID;
-            skelMsg["part"] = partName;
-            skelMsg["seq"] = sent;
-            JsonObject skelD = skelMsg["d"].to<JsonObject>();
-            // Copy only non-string fields (id, ints, bools)
-            for (JsonPair kv : rec) {
-                if (kv.value().is<const char*>()) {
-                    skelD[kv.key()] = "";
-                } else {
-                    skelD[kv.key()] = kv.value();
-                }
-            }
-            String skelJson;
-            serializeJson(skelMsg, skelJson);
-            xbeeSendBroadcast(skelJson.c_str(), skelJson.length());
-            delay(50);
+        // Return format matching admin's /sos
+        JsonDocument resp;
+        resp["conversation_id"] = convoId;
+        resp["contact_name"] = adminName;
+        String response;
+        serializeJson(resp, response);
+        request->send(200, "application/json", response);
+    });
+```
 
-            // Send string fields as SC
-            for (JsonPair kv : rec) {
-                if (!kv.value().is<const char*>()) continue;
-                const char* val = kv.value().as<const char*>();
-                if (strlen(val) == 0) continue;
+---
 
-                int offset = 0;
-                int fullLen = strlen(val);
-                while (offset < fullLen) {
-                    int chunkSize = 40;  // Conservative for broadcast
-                    int end = (offset + chunkSize < fullLen)
-                              ? offset + chunkSize : fullLen;
+## Fix 3: GET /conversations Response Format (CRITICAL)
 
-                    JsonDocument sc;
-                    sc["cmd"] = "SC";
-                    sc["p"] = partName;
-                    sc["s"] = sent;
-                    sc["k"] = kv.key().c_str();
-                    sc["v"] = String(val).substring(offset, end);
-                    String scJson;
-                    serializeJson(sc, scJson);
-                    if ((int)scJson.length() <= 72) {
-                        xbeeSendBroadcast(scJson.c_str(), scJson.length());
-                    }
-                    delay(50);
-                    offset = end;
-                }
-            }
+Admin syncs conversations with `user1_id`/`user2_id` format. The node's
+current handler filters by `participants` array — which doesn't exist in
+synced data! Result: all synced conversations invisible.
+
+The admin's response format is:
+```json
+[
+  {"conversation_id":1, "contact_name":"John", "last_message":"Hello", "timestamp":"12345"},
+  {"conversation_id":2, "contact_name":"Admin", "last_message":null, "timestamp":null}
+]
+```
+
+**Replace the entire `GET /conversations` handler:**
+
+```cpp
+    // ── GET /conversations ──────────────────────────────────────────
+    server.on("/conversations", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String userId = request->hasParam("user_id")
+                        ? request->getParam("user_id")->value() : "";
+
+        if (userId.length() == 0) {
+            request->send(400, "application/json",
+                          "{\"error\":\"user_id required\"}");
+            return;
         }
 
-        sent++;
-        delay(50);
-    }
+        int uid = userId.toInt();
 
-    // Count message
-    JsonDocument countMsg;
-    countMsg["cmd"] = "SYNC_BACK";
-    countMsg["node_id"] = NODE_ID;
-    countMsg["part"] = partName;
-    countMsg["n"] = sent;
-    String countJson;
-    serializeJson(countMsg, countJson);
-    xbeeSendBroadcast(countJson.c_str(), countJson.length());
-    delay(50);
-}
+        JsonDocument convoDoc;
+        readJsonFile(SD_CONVOS_FILE, convoDoc);
 
-static void sendSyncBack() {
-    // Only sync parts that the node generates locally
-    sendSyncBackPart("chat_messages", SD_DMS_FILE);
-    sendSyncBackPart("conversations", SD_CONVOS_FILE);
+        JsonDocument dmDoc;
+        readJsonFile(SD_DMS_FILE, dmDoc);
 
-    JsonDocument done;
-    done["cmd"] = "SYNC_BACK_DONE";
-    done["node_id"] = NODE_ID;
-    String doneJson;
-    serializeJson(done, doneJson);
-    xbeeSendBroadcast(doneJson.c_str(), doneJson.length());
-}
+        JsonDocument usersDoc;
+        readJsonFile(SD_USERS_FILE, usersDoc);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        for (JsonObject c : convoDoc.as<JsonArray>()) {
+            int u1 = c["user1_id"] | 0;
+            int u2 = c["user2_id"] | 0;
+            if (u1 != uid && u2 != uid) continue;
+
+            int otherId = (u1 == uid) ? u2 : u1;
+            String contactName = "Unknown";
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == otherId) {
+                    contactName = u["username"] | "Unknown";
+                    break;
+                }
+            }
+
+            // Find last message
+            int convoId = c["id"] | 0;
+            String lastMsg = "";
+            String lastTs = "";
+            unsigned long latestTime = 0;
+            for (JsonObject m : dmDoc.as<JsonArray>()) {
+                if ((m["conversation_id"] | 0) != convoId) continue;
+                unsigned long ts = m["sent_at"] | m["created_at"].as<unsigned long>();
+                if (ts >= latestTime) {
+                    latestTime = ts;
+                    lastMsg = m["message_text"] | "";
+                    lastTs = String(ts);
+                }
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["conversation_id"] = convoId;
+            o["contact_name"] = contactName;
+            o["last_message"] = lastMsg.length() > 0 ? lastMsg : JsonVariant();
+            o["timestamp"] = lastTs.length() > 0 ? lastTs : JsonVariant();
+        }
+
+        String response;
+        serializeJson(resp, response);
+        request->send(200, "application/json", response);
+    });
 ```
 
-**Add `/api/trigger/sync-back` endpoint in `src/api_handlers.cpp`:**
+---
+
+## Fix 4: WiFi / Captive Portal (Match Admin)
+
+The node's `web_server.cpp` has a captive portal domain redirect in
+`onNotFound()` that triggers the phone's captive portal browser. The admin
+does NOT do this. Also the admin has captive portal detection handlers
+that prevent the phone from showing the login page.
+
+**Replace the entire `setupWebServer()` in `src/web_server.cpp`:**
 
 ```cpp
-server.on("/api/trigger/sync-back", HTTP_POST, [](AsyncWebServerRequest* request) {
-    sendSyncBack();
-    request->send(200, "application/json",
-                  "{\"success\":true,\"message\":\"SYNC_BACK sent\"}");
-});
+#include "web_server.h"
+#include "config.h"
+#include "sd_storage.h"
+#include "xbee_comm.h"
+#include "node_client.h"
+#include <WiFi.h>
+#include <ArduinoJson.h>
+
+extern void registerApiHandlers(AsyncWebServer& server);
+
+void setupWebServer(AsyncWebServer& server) {
+    // CORS headers for mobile app
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods",
+                                         "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers",
+                                         "Content-Type, Authorization");
+
+    // ── Captive portal detection (prevents login popup) ─────────────
+    // Android
+    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+    server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(204);
+    });
+
+    // Apple / iOS
+    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/html",
+                      "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
+                      "<BODY>Success</BODY></HTML>");
+    });
+    server.on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/html",
+                      "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
+                      "<BODY>Success</BODY></HTML>");
+    });
+
+    // Windows NCSI
+    server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/plain", "Microsoft NCSI");
+    });
+    server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/plain", "Microsoft Connect Test");
+    });
+
+    // Firefox
+    server.on("/canonical.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/html",
+                      "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
+                      "<BODY>Success</BODY></HTML>");
+    });
+    server.on("/success.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/plain", "success\n");
+    });
+
+    // Register API endpoints
+    registerApiHandlers(server);
+
+    // 404 — NO captive portal redirect! Just return 404.
+    server.onNotFound([](AsyncWebServerRequest* request) {
+        if (request->method() == HTTP_OPTIONS) {
+            request->send(200);
+            return;
+        }
+        request->send(404, "application/json", "{\"error\":\"Not found\"}");
+    });
+}
 ```
 
-**Make `sendSyncBack()` accessible:**
-Either move it to a public function or declare it in node_client.h:
+---
+
+## Fix 5: GET /messages Format (Match Admin)
+
+The admin returns messages with these fields. The node should match:
+
 ```cpp
-void nodeClientTriggerSyncBack();
+    // ── GET /messages ───────────────────────────────────────────────
+    server.on("/messages", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String convId = request->hasParam("conversation_id")
+                        ? request->getParam("conversation_id")->value() : "";
+        String userId = request->hasParam("user_id")
+                        ? request->getParam("user_id")->value() : "";
+
+        if (convId.length() == 0 || userId.length() == 0) {
+            request->send(400, "application/json",
+                          "{\"error\":\"conversation_id and user_id required\"}");
+            return;
+        }
+
+        int cid = convId.toInt();
+        int uid = userId.toInt();
+
+        JsonDocument doc;
+        readJsonFile(SD_DMS_FILE, doc);
+
+        JsonDocument usersDoc;
+        readJsonFile(SD_USERS_FILE, usersDoc);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        for (JsonObject m : doc.as<JsonArray>()) {
+            if ((m["conversation_id"] | 0) != cid) continue;
+
+            int senderId = m["sender_id"] | 0;
+            String senderName = "Unknown";
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == senderId) {
+                    senderName = u["username"] | "Unknown";
+                    break;
+                }
+            }
+
+            // Use sent_at or created_at (admin uses sent_at, node uses created_at)
+            unsigned long ts = m["sent_at"] | 0UL;
+            if (ts == 0 && m["created_at"].is<const char*>()) {
+                ts = String(m["created_at"].as<const char*>()).toInt();
+            } else if (ts == 0) {
+                ts = m["created_at"] | 0UL;
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["message_id"] = m["id"];
+            o["message_text"] = m["message_text"];
+            o["sent_at"] = String(ts);
+            o["sender_id"] = senderId;
+            o["is_from_current_user"] = (senderId == uid);
+            o["sender_username"] = senderName;
+        }
+
+        String response;
+        serializeJson(resp, response);
+        request->send(200, "application/json", response);
+    });
 ```
 
 ---
 
-## Issue 3: Oversized Announcements
+## Fix 6: GET /new-messages Format (Match Admin)
 
-The admin now handles oversized records differently. Instead of skipping records
-whose base exceeds 240 bytes, it sends a skeleton with only numeric fields plus
-empty strings, then sends ALL string fields as SC continuation messages.
+The admin's `/new-messages` returns the same format as `/messages` plus
+checking conversation membership. Update the node to match:
 
-**No node-side changes needed** — the existing SC handler already works.
-Just make sure `handleSyncContinuation()` is implemented per Change 5 above.
+```cpp
+    // ── GET /new-messages ───────────────────────────────────────────
+    server.on("/new-messages", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String userId = request->hasParam("user_id")
+                        ? request->getParam("user_id")->value() : "";
+        String lastIdStr = request->hasParam("last_id")
+                           ? request->getParam("last_id")->value() : "0";
+
+        int uid = userId.toInt();
+        int lastId = lastIdStr.toInt();
+
+        JsonDocument dmDoc;
+        readJsonFile(SD_DMS_FILE, dmDoc);
+
+        JsonDocument convoDoc;
+        readJsonFile(SD_CONVOS_FILE, convoDoc);
+
+        JsonDocument usersDoc;
+        readJsonFile(SD_USERS_FILE, usersDoc);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        for (JsonObject m : dmDoc.as<JsonArray>()) {
+            if ((m["id"] | 0) <= lastId) continue;
+
+            int cid = m["conversation_id"] | 0;
+            bool userInConvo = false;
+            for (JsonObject c : convoDoc.as<JsonArray>()) {
+                if ((c["id"] | 0) != cid) continue;
+                int u1 = c["user1_id"] | 0;
+                int u2 = c["user2_id"] | 0;
+                if (u1 == uid || u2 == uid) userInConvo = true;
+                break;
+            }
+            if (uid > 0 && !userInConvo) continue;
+
+            int senderId = m["sender_id"] | 0;
+            String senderName = "Unknown";
+            for (JsonObject u : usersDoc.as<JsonArray>()) {
+                if ((u["id"] | 0) == senderId) {
+                    senderName = u["username"] | "Unknown";
+                    break;
+                }
+            }
+
+            unsigned long ts = m["sent_at"] | 0UL;
+            if (ts == 0 && m["created_at"].is<const char*>()) {
+                ts = String(m["created_at"].as<const char*>()).toInt();
+            } else if (ts == 0) {
+                ts = m["created_at"] | 0UL;
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["message_id"] = m["id"];
+            o["message_text"] = m["message_text"];
+            o["sent_at"] = String(ts);
+            o["sender_id"] = senderId;
+            o["is_from_current_user"] = (senderId == uid);
+            o["sender_username"] = senderName;
+        }
+
+        String response;
+        serializeJson(resp, response);
+        request->send(200, "application/json", response);
+    });
+```
 
 ---
 
-## Quick Reference: All Commands
+## Fix 7: POST /send — Store message with sent_at (not created_at)
 
-| Command | Direction | Purpose |
-|---------|-----------|---------|
-| PING | Admin→All | Discovery (broadcast, every 10s) |
-| PONG | Node→Admin | Response to PING (broadcast) |
-| REGISTER | Node→Admin | Register with admin (broadcast) |
-| REGISTER_ACK | Admin→Node | Confirm registration (unicast) |
-| HEARTBEAT | Node→Admin | Periodic status (broadcast, 30s) |
-| SYNC_REQUEST | Node→Admin | Request data sync (broadcast) |
-| SYNC_DATA | Admin→Node | One record at a time (unicast) |
-| SC | Admin→Node | Continuation chunk (unicast) |
-| SYNC_DONE | Admin→Node | End of sync (unicast) |
-| SYNC_BACK | Node→Admin | Node sends data to admin (broadcast) |
-| SYNC_BACK_DONE | Node→Admin | End of sync-back (broadcast) |
-| GET_STATS | Admin→Node | Request node stats (unicast) |
-| STATS_RESPONSE | Node→Admin | Stats reply (broadcast) |
-| BROADCAST_MSG | Admin→Node | Push announcement (unicast) |
-| SOS_ALERT | Node→Admin | Emergency alert (broadcast) |
-| RELAY_CHAT_MSG | Node→Admin | Chat message relay (broadcast) |
-| CHANGE_PASSWORD | Node→Admin | Password change relay (broadcast) |
+Admin uses `sent_at` field for message timestamps. Node currently uses
+`created_at`. Update to use `sent_at` for consistency:
+
+In the `/send` handler, change the message creation:
+```cpp
+        newMsg["sent_at"] = (long)(millis() / 1000);
+```
+Instead of:
+```cpp
+        newMsg["created_at"] = String((long)(millis() / 1000));
+```
 
 ---
 
-## XCTU Configuration — 2 Modules
+## Checklist
 
-### Admin XBee (Coordinator)
-
-| Parameter | Value |
-|-----------|-------|
-| CE | 1 (Coordinator) |
-| AP | 1 (API Mode 1) |
-| BD | 3 (9600 baud) |
-| ID | 1234 (PAN ID) |
-| DH | 0 |
-| DL | FFFF |
-
-### Node XBee (Router)
-
-| Parameter | Value |
-|-----------|-------|
-| CE | 0 (Router) |
-| JV | 1 (Channel Verify) |
-| AP | 1 (API Mode 1) |
-| BD | 3 (9600 baud) |
-| ID | 1234 (PAN ID) |
-| DH | 0 |
-| DL | FFFF |
+- [ ] Fix 1: Replace `/create-chat` handler → return `conversation_id` + `contact_name`
+- [ ] Fix 2: Replace `/sos` handler → return `conversation_id` + `contact_name`
+- [ ] Fix 3: Replace `GET /conversations` → use `user1_id`/`user2_id`, return expected format
+- [ ] Fix 4: Replace `web_server.cpp` → captive portal detection, no domain redirect
+- [ ] Fix 5: Replace `GET /messages` → match admin format
+- [ ] Fix 6: Replace `GET /new-messages` → match admin format
+- [ ] Fix 7: Fix `/send` → use `sent_at` not `created_at`
+- [ ] Build and verify

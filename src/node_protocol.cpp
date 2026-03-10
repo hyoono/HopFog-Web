@@ -527,14 +527,28 @@ static void handleSyncBackDone(const char* nodeId) {
 
 static unsigned long lastPingMs = 0;
 
+// ── Deferred sync — runs in loop() instead of blocking web handler ─
+static char  pendingSyncNodeId[32] = "";
+static XBeeAddr pendingSyncAddr    = {};
+static bool  syncPending           = false;
+
 void nodeProtocolInit() {
     nodeCount = 0;
     memset(nodes, 0, sizeof(nodes));
     lastPingMs = 0;
+    syncPending = false;
 }
 
 void nodeProtocolLoop() {
     unsigned long now = millis();
+
+    // ── Process deferred sync (set by web handler or XBee command) ──
+    // Running here keeps the web handler responsive and prevents the
+    // async web server from timing out (which caused "FS corruption").
+    if (syncPending) {
+        syncPending = false;
+        handleSyncRequest(pendingSyncNodeId, pendingSyncAddr);
+    }
 
     // Admin sends periodic PING via BROADCAST (small, fits in 72 bytes).
     // This is the only message that uses broadcast — for discovery.
@@ -566,7 +580,11 @@ bool nodeProtocolHandleLine(const char* line, size_t len,
     } else if (strcmp(cmd, "HEARTBEAT") == 0) {
         handleHeartbeat(nodeId, params, src);
     } else if (strcmp(cmd, "SYNC_REQUEST") == 0) {
-        handleSyncRequest(nodeId, src);
+        // Defer sync to nodeProtocolLoop() — don't block XBee processing
+        strncpy(pendingSyncNodeId, nodeId, sizeof(pendingSyncNodeId) - 1);
+        pendingSyncNodeId[sizeof(pendingSyncNodeId) - 1] = '\0';
+        pendingSyncAddr = src;
+        syncPending = true;
     } else if (strcmp(cmd, "SOS_ALERT") == 0) {
         handleSosAlert(nodeId, params);
     } else if (strcmp(cmd, "CHANGE_PASSWORD") == 0) {
@@ -647,14 +665,14 @@ int nodeProtocolTotalCount() {
 }
 
 void nodeProtocolTriggerSync(const char* nodeId) {
-    // Find node's XBee address for unicast
+    // Defer to nodeProtocolLoop() — prevents async web server timeout
     NodeInfo* n = findNode(nodeId);
-    XBeeAddr dest = {};
     if (n && n->xbeeAddr.valid) {
-        dest = n->xbeeAddr;
+        pendingSyncAddr = n->xbeeAddr;
     } else {
-        // Fallback: use last received source address
-        dest = xbeeGetLastSource();
+        pendingSyncAddr = xbeeGetLastSource();
     }
-    handleSyncRequest(nodeId, dest);
+    strncpy(pendingSyncNodeId, nodeId, sizeof(pendingSyncNodeId) - 1);
+    pendingSyncNodeId[sizeof(pendingSyncNodeId) - 1] = '\0';
+    syncPending = true;
 }
