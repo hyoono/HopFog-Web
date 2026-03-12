@@ -137,7 +137,7 @@ void loop() {
 
     // LED status: show connection and battery state
     static unsigned long lastLedUpdate = 0;
-    if (millis() - lastLedUpdate > 200) {  // update 5x/sec
+    if (millis() - lastLedUpdate > 200) {  // every 200ms (5 Hz)
         lastLedUpdate = millis();
         ConnectionStatus conn;
         if (nodeProtocolActiveCount() > 0) {

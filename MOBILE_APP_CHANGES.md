@@ -180,3 +180,17 @@ This prevents false "Network error" toasts when the ESP32 is busy.
 3. [ ] During admin sync (press "Send SYNC_DATA") → app stays connected
 4. [ ] Leave phone idle for 5+ minutes → app does NOT show disconnected
 5. [ ] All API endpoints work (login, conversations, messages, announcements)
+
+---
+
+## Note: No Changes Needed for New Admin Features
+
+The following admin-side features are **web dashboard only** and do not affect the mobile app:
+
+- SD card capacity display (used/total in GB)
+- Active alerts carousel
+- Battery monitoring (INA219)
+- LED status indicators
+- Sync watchdog timeout
+
+The mobile app's API endpoints remain unchanged.

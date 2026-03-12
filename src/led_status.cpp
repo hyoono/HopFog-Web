@@ -13,6 +13,10 @@ static unsigned long lastPulseMs = 0;
 static bool pulseUp = true;
 static uint8_t pulseVal = 0;
 
+static uint8_t capBrightness(uint8_t val) {
+    return (val > 0) ? min((uint8_t)LED_BRIGHTNESS, val) : 0;
+}
+
 void ledStatusInit() {
     // Configure LEDC PWM channels
     ledcSetup(LED_R_CH, LED_PWM_FREQ, LED_PWM_RES);
@@ -30,15 +34,10 @@ void ledStatusInit() {
 
 void ledSetColor(uint8_t r, uint8_t g, uint8_t b) {
     if (!ledInitialized) return;
-    // Cap brightness
-    r = (r > 0) ? min((uint8_t)LED_BRIGHTNESS, r) : 0;
-    g = (g > 0) ? min((uint8_t)LED_BRIGHTNESS, g) : 0;
-    b = (b > 0) ? min((uint8_t)LED_BRIGHTNESS, b) : 0;
-
-    ledcWrite(LED_R_CH, r);
-    ledcWrite(LED_G_CH, g);
+    ledcWrite(LED_R_CH, capBrightness(r));
+    ledcWrite(LED_G_CH, capBrightness(g));
     // GPIO 33 is active LOW on ESP32-CAM
-    ledcWrite(LED_B_CH, 255 - b);
+    ledcWrite(LED_B_CH, 255 - capBrightness(b));
 }
 
 void ledOff() {

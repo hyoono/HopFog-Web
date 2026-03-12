@@ -28,9 +28,11 @@ static int voltageToPercent(float mv) {
 
 bool batteryInit() {
     // ESP32-CAM: use GPIO 14 (SDA) and GPIO 15 (SCL) for I2C
-    // These are the same as SD SPI CLK/MOSI, but after SD init
-    // we can reconfigure them for I2C if the INA219 is on a separate bus.
-    // Default I2C address: 0x40
+    // WARNING: These pins overlap with SD SPI (CLK=14, MOSI=15).
+    // I2C reads are brief (~1ms) and only happen when batteryRead() is called.
+    // SD operations use SPI mode which releases the bus between transactions.
+    // If you experience conflicts, ensure SD operations and battery reads
+    // are not called simultaneously (they currently aren't — both run in loop()).
     Wire.begin(14, 15);
 
     if (!ina219.begin(&Wire)) {

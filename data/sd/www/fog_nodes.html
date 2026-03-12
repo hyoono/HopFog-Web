@@ -132,7 +132,7 @@
                         : Math.floor(n.seconds_since_heartbeat / 60) + 'm ago';
                     var heap = n.free_heap ? (n.free_heap / 1024).toFixed(0) + ' KB' : 'N/A';
                     var uptime = n.uptime ? formatUptime(n.uptime) : 'N/A';
-                    var addr = n.xbee_addr ? n.xbee_addr.substring(0, 8) + '...' : 'N/A';
+                    var addr = n.xbee_addr ? n.xbee_addr.substring(0, 4) + '..' + n.xbee_addr.slice(-4) : 'N/A';
                     tr.innerHTML = '<td>' + esc(n.node_id || '') + '</td>'
                         + '<td>' + esc(n.device_name || '') + '</td>'
                         + '<td>' + esc(n.ip_address || 'N/A') + '</td>'

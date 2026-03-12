@@ -793,3 +793,107 @@ serve this correctly. The mobile app's `Announcement` data class expects:
 | 10 | WiFi stability | Max TX power + disable power save |
 | 11 | Captive portal | Phones show login popup without detection endpoints |
 | 12 | GET /announcements | Already correct (no changes needed) |
+| 13 | Battery monitoring (INA219) | Report battery level to admin via HEARTBEAT |
+| 14 | LED status indicators | RGB LED for connection and battery status |
+| 15 | Sync watchdog | Abort sync if stuck for 30 seconds |
+
+---
+
+## Fix 13: Battery Monitoring (INA219)
+
+**What:** Add INA219 battery sensor support. Report battery data in HEARTBEAT messages.
+
+**Why:** The admin dashboard shows battery status for both admin and nodes. Without this, the node battery panel shows "N/A".
+
+### platformio.ini
+Add to `lib_deps`:
+```ini
+adafruit/Adafruit INA219@^1.2.1
+```
+
+### Node HEARTBEAT format — add battery fields
+When the node sends HEARTBEAT, include battery data:
+```json
+{"cmd":"HEARTBEAT","node_id":"node-01","free_heap":180000,"uptime":3600,"bat_v":3.85,"bat_pct":72,"bat_s":"normal"}
+```
+
+Where:
+- `bat_v` = voltage in volts (float)
+- `bat_pct` = percentage (0-100)
+- `bat_s` = status string: "full", "normal", "low", "critical", "charging", "unknown"
+
+### Battery code
+Copy `include/battery.h` and `src/battery.cpp` from the admin repo — they are identical and work on both admin and node.
+
+### I2C pins for ESP32-CAM
+```cpp
+Wire.begin(14, 15);  // SDA=GPIO14, SCL=GPIO15
+```
+
+If INA219 is not connected, `batteryInit()` returns false and all reads return safe defaults. The dashboard shows "N/A".
+
+---
+
+## Fix 14: LED Status Indicators
+
+**What:** Add RGB LED indicators for connection and battery status.
+
+**Why:** Visual feedback for device status without needing WiFi/web dashboard.
+
+### LED behavior
+| Condition | LED Color |
+|-----------|-----------|
+| Device on, no admin connected | RED constant |
+| Searching for admin (PING sent, no PONG received) | YELLOW pulsing |
+| Admin connected (PONG received within 30s) | GREEN constant |
+| Critically low battery (<5%) | RED quick pulse |
+| Low battery (<15%) | YELLOW constant |
+| Charging | ORANGE constant |
+| Full battery | GREEN constant |
+
+### Code
+Copy `include/led_status.h` and `src/led_status.cpp` from the admin repo.
+
+In node's `loop()`:
+```cpp
+static unsigned long lastLedMs = 0;
+if (millis() - lastLedMs > 200) {
+    lastLedMs = millis();
+    ConnectionStatus conn;
+    if (lastPongReceivedMs > 0 && millis() - lastPongReceivedMs < 30000) {
+        conn = CONN_CONNECTED;
+    } else if (lastPingSentMs > 0) {
+        conn = CONN_SEARCHING;
+    } else {
+        conn = CONN_DISCONNECTED;
+    }
+    BatteryInfo bat = batteryRead();
+    ledStatusUpdate(conn, bat.percentage, bat.status == BAT_CHARGING);
+}
+```
+
+### Pin assignment
+```
+LED_R = GPIO 12  (external red LED)
+LED_G = GPIO 16  (external green LED)  
+LED_B = GPIO 33  (built-in status LED, active LOW)
+```
+
+---
+
+## Fix 15: Sync Watchdog
+
+**What:** Add a 30-second timeout to the sync state machine.
+
+**Why:** If sync gets stuck (e.g., XBee failure mid-sync), the node should abort and return to normal operation instead of hanging forever.
+
+In the node's sync receive handler, track `lastSyncRxMs`. If no SYNC_DATA message received for 30 seconds while expecting more data, reset the sync state:
+
+```cpp
+// In the sync receive loop
+if (syncInProgress && millis() - lastSyncRxMs > 30000) {
+    syncInProgress = false;
+    // Write whatever data was accumulated so far
+    // Log warning
+}
+```
