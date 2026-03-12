@@ -24,4 +24,7 @@ void removeToken(const String &token);
 // Extract token from cookie header value ("access_token=Bearer <token>")
 String extractTokenFromCookie(const String &cookieHeader);
 
+// Count currently active sessions (logged-in users)
+int countActiveSessions();
+
 #endif // AUTH_H

@@ -8,6 +8,7 @@
 #include "config.h"
 #include "xbee_comm.h"
 #include "node_protocol.h"
+#include "battery.h"
 
 #include <ArduinoJson.h>
 #include <SD.h>
@@ -269,45 +270,70 @@ void registerApiRoutes(AsyncWebServer &server) {
         int uid = authenticateRequest(request);
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
+        // --- XBee-connected fog nodes ---
+        int xbeeNodeCount = nodeProtocolTotalCount();
+        int xbeeActiveCount = nodeProtocolActiveCount();
+
+        // --- Registered fog devices (database) ---
         JsonDocument fogDoc;
         readJsonArray(SD_FOG_FILE, fogDoc);
         JsonArray fogArr = fogDoc.as<JsonArray>();
         int fogCount = fogArr.size();
-        int activeCount = 0;
+        int fogActiveCount = 0;
         int totalConnected = 0;
-        float storageUsed = 0, storageTotal = 0;
         for (JsonObject d : fogArr) {
-            if (strcmp(d["status"] | "", "active") == 0) activeCount++;
+            if (strcmp(d["status"] | "", "active") == 0) fogActiveCount++;
             totalConnected += d["connected_users"] | 0;
-            // Simple numeric parse
-            String su = d["storage_used"] | "0";
-            String st = d["storage_total"] | "0";
-            su.replace("GB", ""); su.replace("MB", ""); su.trim();
-            st.replace("GB", ""); st.replace("MB", ""); st.trim();
-            storageUsed  += su.toFloat();
-            storageTotal += st.toFloat();
         }
 
+        // --- SD card capacity (admin's own card) ---
+        uint64_t sdTotalBytes = SD.totalBytes();
+        uint64_t sdUsedBytes  = SD.usedBytes();
+        float sdTotalGB = sdTotalBytes / (1024.0 * 1024.0 * 1024.0);
+        float sdUsedGB  = sdUsedBytes  / (1024.0 * 1024.0 * 1024.0);
+
+        // --- Active SOS/Alert broadcasts ---
         JsonDocument bcDoc;
         readJsonArray(SD_BCASTS_FILE, bcDoc);
         int totalSosAlerts = 0;
+        JsonDocument alertsListDoc;
+        JsonArray alertsList = alertsListDoc.to<JsonArray>();
         for (JsonObject b : bcDoc.as<JsonArray>()) {
             const char* mt = b["msg_type"] | "";
-            if (strcmp(mt, "alert") == 0 || strcmp(mt, "sos") == 0)
+            if (strcmp(mt, "alert") == 0 || strcmp(mt, "sos") == 0) {
                 totalSosAlerts++;
+                JsonObject al = alertsList.add<JsonObject>();
+                al["id"]       = b["id"] | 0;
+                al["subject"]  = b["subject"] | "";
+                al["body"]     = b["body"] | "";
+                al["severity"] = b["severity"] | "normal";
+                al["msg_type"] = mt;
+                al["status"]   = b["status"] | "";
+                al["created_at"] = b["created_at"] | "";
+            }
         }
+
+        // --- People connected (active sessions on this admin) ---
+        int activeSessions = countActiveSessions();
 
         JsonDocument userDoc = getUserById(uid);
 
         JsonDocument resp;
-        resp["fog_nodes_count"]  = fogCount;
-        resp["active_fog_nodes"] = activeCount;
-        resp["inactive_fog_nodes"] = fogCount - activeCount;
-        resp["people_connected"]   = totalConnected;
+        resp["fog_nodes_count"]  = xbeeNodeCount > 0 ? xbeeNodeCount : fogCount;
+        resp["active_fog_nodes"] = xbeeActiveCount > 0 ? xbeeActiveCount : fogActiveCount;
+        resp["inactive_fog_nodes"] = resp["fog_nodes_count"].as<int>() - resp["active_fog_nodes"].as<int>();
+        resp["people_connected"]   = activeSessions;
         resp["total_sos_alerts"]   = totalSosAlerts;
-        resp["storage_display"]    = (storageTotal > 0)
-            ? String(storageUsed, 1) + "GB / " + String(storageTotal, 1) + "GB"
-            : "N/A";
+        resp["storage_display"]    = String(sdUsedGB, 2) + " GB / " + String(sdTotalGB, 2) + " GB";
+        resp["sd_used_bytes"]      = (double)sdUsedBytes;
+        resp["sd_total_bytes"]     = (double)sdTotalBytes;
+
+        // Active alerts list for carousel
+        resp["active_alerts"] = alertsList;
+
+        // Uptime
+        resp["uptime_seconds"] = (unsigned long)(millis() / 1000);
+
         JsonObject cu = resp["current_user"].to<JsonObject>();
         cu["id"]         = userDoc["id"];
         cu["username"]   = userDoc["username"];
@@ -1698,6 +1724,27 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument resp;
         resp["success"] = true;
         resp["message"] = "Stats request sent to " + nodeId;
+        String out; serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
+    // │  BATTERY: GET /api/battery                                    │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/battery", HTTP_GET, [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        BatteryInfo bat = batteryRead();
+
+        JsonDocument resp;
+        resp["available"]  = bat.available;
+        resp["voltage_V"]  = bat.voltage_V;
+        resp["current_mA"] = bat.current_mA;
+        resp["power_mW"]   = bat.power_mW;
+        resp["percentage"] = bat.percentage;
+        resp["status"]     = batteryStatusStr(bat.status);
+
         String out; serializeJson(resp, out);
         request->send(200, "application/json", out);
     });

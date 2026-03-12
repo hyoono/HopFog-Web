@@ -231,6 +231,13 @@ static void syncStart(const char* nodeId, const XBeeAddr& dest) {
 static void syncTick() {
     if (syncState == SYNC_IDLE) return;
 
+    // Sync watchdog: abort if no progress for 30 seconds
+    if (millis() - syncLastSendMs > 30000) {
+        logMsg('E', "SYNC timeout — aborting (stuck in state %d)", (int)syncState);
+        syncState = SYNC_IDLE;
+        return;
+    }
+
     // Pacing: wait at least SYNC_CHUNK_DELAY_MS between sends
     if (millis() - syncLastSendMs < SYNC_CHUNK_DELAY_MS) return;
 

@@ -95,12 +95,18 @@
                             <div class="card bg-success text-white mb-4">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-center">
-                                        <span>Storage</span>
+                                        <div>
+                                            <span>Storage</span>
+                                            <div class="small mt-1" id="storageDetail" style="font-size:0.75rem;opacity:0.85"></div>
+                                        </div>
                                         <h2 class="mb-0" id="storage">0</h2>
+                                    </div>
+                                    <div class="progress mt-2" style="height:6px;background:rgba(255,255,255,0.3)">
+                                        <div class="progress-bar bg-white" id="storageBar" style="width:0%"></div>
                                     </div>
                                 </div>
                                 <div class="card-footer d-flex align-items-center justify-content-between">
-                                    <a class="small text-white stretched-link" href="#">View Details</a>
+                                    <span class="small text-white" id="storagePercent">0% used</span>
                                     <div class="small text-white"><i class="fas fa-angle-right"></i></div>
                                 </div>
                             </div>
@@ -120,6 +126,33 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Battery Report Row -->
+                    <div class="row mb-4">
+                        <div class="col-xl-6">
+                            <div class="card">
+                                <div class="card-header"><i class="fas fa-battery-half me-1"></i> Admin Battery</div>
+                                <div class="card-body" id="adminBatteryCard">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3" style="font-size:2.5rem" id="adminBatIcon"><i class="fas fa-battery-empty text-muted"></i></div>
+                                        <div style="flex:1">
+                                            <div class="d-flex justify-content-between"><span>Voltage</span><strong id="adminBatV">--</strong></div>
+                                            <div class="d-flex justify-content-between"><span>Current</span><strong id="adminBatA">--</strong></div>
+                                            <div class="progress mt-2" style="height:10px"><div class="progress-bar" id="adminBatBar" style="width:0%"></div></div>
+                                            <div class="text-center small mt-1" id="adminBatPct">N/A</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-xl-6">
+                            <div class="card">
+                                <div class="card-header"><i class="fas fa-battery-half me-1"></i> Node Battery</div>
+                                <div class="card-body" id="nodeBatteryCard">
+                                    <div class="text-center text-muted py-3"><i class="fas fa-plug me-1"></i> Node battery data will appear when a node reports stats</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="row">
                         <div class="col-xl-6">
                             <div class="card mb-4">
@@ -132,11 +165,19 @@
                         </div>
                         <div class="col-xl-6">
                             <div class="card mb-4">
-                                <div class="card-header">
-                                    <i class="fas fa-chart-bar me-1"></i>
-                                    Active Alerts
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-exclamation-triangle me-1"></i> Active Alerts</span>
+                                    <span id="alertPagination" class="small"></span>
                                 </div>
-                                <div class="card-body"><canvas id="myBarChart" width="100%" height="40"></canvas></div>
+                                <div class="card-body">
+                                    <div id="alertCarousel" style="min-height:150px">
+                                        <div class="text-center text-muted py-5">No active alerts</div>
+                                    </div>
+                                    <div class="d-flex justify-content-between mt-2" id="alertNav" style="display:none!important">
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="prevAlert()"><i class="fas fa-chevron-left"></i> Prev</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="nextAlert()">Next <i class="fas fa-chevron-right"></i></button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -186,18 +227,84 @@
     <script src="/static/vendor/chart.min.js"></script>
     <script src="/static/vendor/simple-datatables/simple-datatables.min.js"></script>
     <script>
+        var alerts = [];
+        var alertIdx = 0;
+
+        function showAlert(idx) {
+            var c = document.getElementById('alertCarousel');
+            var p = document.getElementById('alertPagination');
+            var n = document.getElementById('alertNav');
+            if (!alerts || alerts.length === 0) {
+                c.innerHTML = '<div class="text-center text-muted py-5">No active alerts</div>';
+                p.textContent = '';
+                n.style.display = 'none';
+                return;
+            }
+            if (idx < 0) idx = alerts.length - 1;
+            if (idx >= alerts.length) idx = 0;
+            alertIdx = idx;
+            var a = alerts[idx];
+            var sev = a.severity || 'normal';
+            var sevBadge = sev === 'critical' ? 'bg-danger' : sev === 'high' ? 'bg-warning text-dark' : 'bg-info';
+            var typeBadge = a.msg_type === 'sos' ? '<span class="badge bg-danger me-1">SOS</span>' : '<span class="badge bg-warning text-dark me-1">Alert</span>';
+            c.innerHTML = '<div class="border rounded p-3">'
+                + '<div class="d-flex justify-content-between align-items-start mb-2">'
+                + '<div>' + typeBadge + '<span class="badge ' + sevBadge + '">' + sev + '</span></div>'
+                + '<small class="text-muted">' + (a.created_at || '') + '</small></div>'
+                + '<h5>' + escHtml(a.subject || 'Untitled') + '</h5>'
+                + '<p class="mb-0">' + escHtml(a.body || '') + '</p></div>';
+            p.textContent = (idx + 1) + ' / ' + alerts.length;
+            n.style.display = alerts.length > 1 ? 'flex' : 'none';
+        }
+        function nextAlert() { showAlert(alertIdx + 1); }
+        function prevAlert() { showAlert(alertIdx - 1); }
+        function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        function updateBattery(id, data) {
+            if (!data || !data.available) return;
+            var pct = data.percentage;
+            var icon = pct > 75 ? 'fa-battery-full text-success' : pct > 50 ? 'fa-battery-three-quarters text-success' : pct > 25 ? 'fa-battery-half text-warning' : pct > 10 ? 'fa-battery-quarter text-warning' : 'fa-battery-empty text-danger';
+            if (data.status === 'charging') icon = 'fa-bolt text-info';
+            document.getElementById(id + 'Icon').innerHTML = '<i class="fas ' + icon + '"></i>';
+            document.getElementById(id + 'V').textContent = data.voltage_V.toFixed(2) + ' V';
+            document.getElementById(id + 'A').textContent = data.current_mA.toFixed(1) + ' mA';
+            document.getElementById(id + 'Bar').style.width = Math.max(0, pct) + '%';
+            document.getElementById(id + 'Bar').className = 'progress-bar ' + (pct > 25 ? 'bg-success' : pct > 10 ? 'bg-warning' : 'bg-danger');
+            document.getElementById(id + 'Pct').textContent = pct + '%' + (data.status === 'charging' ? ' (Charging)' : '');
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/dashboard')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     document.getElementById('fogNodesCount').textContent = data.fog_nodes_count || 0;
                     document.getElementById('peopleConnected').textContent = data.people_connected || 0;
-                    document.getElementById('storage').textContent = data.storage_display || '0 MB';
+                    document.getElementById('storage').textContent = data.storage_display || 'N/A';
                     document.getElementById('sosAlerts').textContent = data.total_sos_alerts || 0;
                     if (data.current_user) {
                         document.getElementById('sidebarUsername').textContent = data.current_user.username || 'HopFog User';
                     }
+                    // Storage progress bar
+                    if (data.sd_total_bytes && data.sd_total_bytes > 0) {
+                        var pct = Math.round((data.sd_used_bytes / data.sd_total_bytes) * 100);
+                        document.getElementById('storageBar').style.width = pct + '%';
+                        document.getElementById('storagePercent').textContent = pct + '% used';
+                        var usedGB = (data.sd_used_bytes / (1024*1024*1024)).toFixed(2);
+                        var totalGB = (data.sd_total_bytes / (1024*1024*1024)).toFixed(2);
+                        document.getElementById('storageDetail').textContent = usedGB + ' / ' + totalGB + ' GB';
+                    }
+                    // Active alerts carousel
+                    if (data.active_alerts && data.active_alerts.length > 0) {
+                        alerts = data.active_alerts;
+                        showAlert(0);
+                    }
                 });
+            // Battery
+            fetch('/api/battery')
+                .then(function(r) { return r.json(); })
+                .then(function(data) { updateBattery('adminBat', data); })
+                .catch(function() {});
+            // Messages table
             fetch('/api/messages')
                 .then(function(r) { return r.json(); })
                 .then(function(messages) {
@@ -209,14 +316,13 @@
                     function fmtDate(v) {
                         if (!v) return 'N/A';
                         var n = Number(v);
-                        // Unix epoch > 1e9 means after Sep 2001 = valid timestamp
                         if (n > 1000000000) { var d = new Date(n * 1000); return d.toLocaleString(); }
                         return String(v);
                     }
                     messages.forEach(function(m) {
                         var tr = document.createElement('tr');
                         var to = Array.isArray(m.to) ? m.to.join(', ') : (m.to || '');
-                        tr.innerHTML = '<td>' + m.id + '</td><td>' + (m.from || '') + '</td><td>' + to + '</td><td>' + (m.body || '') + '</td><td>' + fmtDate(m.created_at) + '</td>';
+                        tr.innerHTML = '<td>' + m.id + '</td><td>' + escHtml(m.from || '') + '</td><td>' + escHtml(to) + '</td><td>' + escHtml(m.body || '') + '</td><td>' + fmtDate(m.created_at) + '</td>';
                         tbody.appendChild(tr);
                     });
                     var dt = document.getElementById('datatablesSimple');

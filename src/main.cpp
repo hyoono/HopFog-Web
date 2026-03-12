@@ -32,18 +32,20 @@
 #include "api_handlers.h"
 #include "xbee_comm.h"
 #include "node_protocol.h"
+#include "battery.h"
+#include "led_status.h"
 
 AsyncWebServer server(HTTP_PORT);
 DNSServer     dnsServer;
 
 // ── LED helpers (match test project) ────────────────────────────────
-#define LED_PIN       33   // ESP32-CAM built-in red LED (active LOW)
-#define FLASH_LED_PIN  4   // ESP32-CAM flash LED
+#define BUILTIN_LED_PIN  33   // ESP32-CAM built-in red LED (active LOW)
+#define FLASH_LED_PIN     4   // ESP32-CAM flash LED
 
-static void ledOn()  { digitalWrite(LED_PIN, LOW); }
-static void ledOff() { digitalWrite(LED_PIN, HIGH); }
-static void blinkLed(int n, int ms) {
-    for (int i = 0; i < n; i++) { ledOn(); delay(ms); ledOff(); delay(ms); }
+static void builtinLedOn()  { digitalWrite(BUILTIN_LED_PIN, LOW); }
+static void builtinLedOff() { digitalWrite(BUILTIN_LED_PIN, HIGH); }
+static void blinkBuiltinLed(int n, int ms) {
+    for (int i = 0; i < n; i++) { builtinLedOn(); delay(ms); builtinLedOff(); delay(ms); }
 }
 
 // ── No-op putc to silence ets_printf ────────────────────────────────
@@ -69,9 +71,9 @@ void setup() {
     //         This delay matches the test project EXACTLY.
     //         It gives the bootloader time to finish ALL UART0 output
     //         before we reconfigure UART0 to 9600 baud for XBee.
-    pinMode(LED_PIN, OUTPUT);
-    ledOff();
-    blinkLed(3, 300);
+    pinMode(BUILTIN_LED_PIN, OUTPUT);
+    builtinLedOff();
+    blinkBuiltinLed(3, 300);
 
     // Step 3: XBee — Serial.begin(9600)
     xbeeInit();
@@ -92,6 +94,12 @@ void setup() {
 
     // Step 6: Auth
     authInit();
+
+    // Step 6b: Battery monitor (INA219 via I2C — optional)
+    batteryInit();
+
+    // Step 6c: LED status indicators
+    ledStatusInit();
 
     // Step 7: WiFi AP (simple — matches test project style)
     WiFi.mode(WIFI_AP);
@@ -116,7 +124,7 @@ void setup() {
 
     // Step 9: Wait for XBee network (matches test project)
     delay(3000);
-    blinkLed(5, 100);
+    blinkBuiltinLed(5, 100);
 
     logMsg('S', "Setup complete. Waiting for XBee traffic...");
 }
@@ -126,6 +134,23 @@ void loop() {
     dnsServer.processNextRequest();
     xbeeProcessIncoming();
     nodeProtocolLoop();
+
+    // LED status: show connection and battery state
+    static unsigned long lastLedUpdate = 0;
+    if (millis() - lastLedUpdate > 200) {  // update 5x/sec
+        lastLedUpdate = millis();
+        ConnectionStatus conn;
+        if (nodeProtocolActiveCount() > 0) {
+            conn = CONN_CONNECTED;
+        } else if (nodeProtocolTotalCount() > 0) {
+            conn = CONN_SEARCHING;
+        } else {
+            conn = CONN_DISCONNECTED;
+        }
+        BatteryInfo bat = batteryRead();
+        ledStatusUpdate(conn, bat.percentage, bat.status == BAT_CHARGING);
+    }
+
     delay(10);  // Match test project. yield() alone doesn't provide enough
                 // time for the WiFi/TCP stack on Core 0 to process packets.
 }

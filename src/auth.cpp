@@ -144,3 +144,11 @@ String extractTokenFromCookie(const String &cookieHeader) {
     if (end < 0) end = cookieHeader.length();
     return cookieHeader.substring(start, end);
 }
+
+int countActiveSessions() {
+    int count = 0;
+    for (int i = 0; i < MAX_ACTIVE_TOKENS; i++) {
+        if (sessions[i].used) count++;
+    }
+    return count;
+}

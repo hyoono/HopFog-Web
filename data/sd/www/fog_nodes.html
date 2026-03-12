@@ -80,8 +80,8 @@
                         <div class="card-body">
                             <div class="table-responsive">
                             <table class="table table-bordered table-hover">
-                                <thead><tr><th>Node ID</th><th>Device Name</th><th>IP Address</th><th>Status</th><th>Last Heartbeat</th><th>Free Heap</th><th>Actions</th></tr></thead>
-                                <tbody id="nodesTableBody"><tr><td colspan="7" class="text-center">Loading…</td></tr></tbody>
+                                <thead><tr><th>Node ID</th><th>Device Name</th><th>IP Address</th><th>Status</th><th>Last Heartbeat</th><th>Free Heap</th><th>Uptime</th><th>XBee Addr</th><th>Actions</th></tr></thead>
+                                <tbody id="nodesTableBody"><tr><td colspan="9" class="text-center">Loading…</td></tr></tbody>
                             </table>
                             </div>
                         </div>
@@ -119,7 +119,7 @@
                 var tbody = document.getElementById('nodesTableBody');
                 tbody.innerHTML = '';
                 if (!data.nodes || data.nodes.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No XBee nodes connected</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No XBee nodes connected</td></tr>';
                     return;
                 }
                 data.nodes.forEach(function(n) {
@@ -130,22 +130,33 @@
                     var hb = n.seconds_since_heartbeat < 60
                         ? n.seconds_since_heartbeat + 's ago'
                         : Math.floor(n.seconds_since_heartbeat / 60) + 'm ago';
-                    tr.innerHTML = '<td>' + (n.node_id || '') + '</td>'
-                        + '<td>' + (n.device_name || '') + '</td>'
-                        + '<td>' + (n.ip_address || 'N/A') + '</td>'
+                    var heap = n.free_heap ? (n.free_heap / 1024).toFixed(0) + ' KB' : 'N/A';
+                    var uptime = n.uptime ? formatUptime(n.uptime) : 'N/A';
+                    var addr = n.xbee_addr ? n.xbee_addr.substring(0, 8) + '...' : 'N/A';
+                    tr.innerHTML = '<td>' + esc(n.node_id || '') + '</td>'
+                        + '<td>' + esc(n.device_name || '') + '</td>'
+                        + '<td>' + esc(n.ip_address || 'N/A') + '</td>'
                         + '<td>' + statusBadge + '</td>'
                         + '<td>' + hb + '</td>'
-                        + '<td>' + (n.free_heap || 'N/A') + '</td>'
+                        + '<td>' + heap + '</td>'
+                        + '<td>' + uptime + '</td>'
+                        + '<td><small>' + addr + '</small></td>'
                         + '<td>'
-                        + '<button class="btn btn-sm btn-outline-info me-1" onclick="syncNode(\'' + n.node_id + '\')"><i class="fas fa-sync"></i></button>'
-                        + '<button class="btn btn-sm btn-outline-secondary" onclick="getStats(\'' + n.node_id + '\')"><i class="fas fa-chart-bar"></i></button>'
+                        + '<button class="btn btn-sm btn-outline-info me-1" onclick="syncNode(\'' + esc(n.node_id) + '\')"><i class="fas fa-sync"></i></button>'
+                        + '<button class="btn btn-sm btn-outline-secondary" onclick="getStats(\'' + esc(n.node_id) + '\')"><i class="fas fa-chart-bar"></i></button>'
                         + '</td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function() {
-                document.getElementById('nodesTableBody').innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load nodes</td></tr>';
+                document.getElementById('nodesTableBody').innerHTML = '<tr><td colspan="9" class="text-center text-danger">Failed to load nodes</td></tr>';
             });
         }
+        function formatUptime(s) {
+            if (s < 60) return s + 's';
+            if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+            return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+        }
+        function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
         function syncNode(id) {
             fetch('/api/nodes/' + id + '/sync', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
                 alert(d.message || 'Sync sent');
