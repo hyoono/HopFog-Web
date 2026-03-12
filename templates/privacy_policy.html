@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>HopFog - Privacy Policy</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='images/HopFog-Logo.png') }}">
+    <link href="static/css/styles.css" rel="stylesheet" />
+    <style>
+        h5 i { color: #222222 !important; }
+    </style>
+    <script src="https://use.fontawesome.com/releases/v6.3.0/js/all.js" crossorigin="anonymous"></script>
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card shadow-sm border-0 rounded-lg">
+                    <div class="card-header text-white" style="background-color: #222222;">
+                        <div class="d-flex align-items-center">
+                            <img src="{{ url_for('static', path='images/HopFog-Logo.png') }}" alt="HopFog Logo" style="height:35px; margin-right:10px;">
+                            <h4 class="mb-0">Privacy Policy</h4>
+                        </div>
+                    </div>
+                    <div class="card-body p-4">
+                        <p class="text-muted small">Last updated: March 9, 2026</p>
+                        <hr>
+
+                        <h5><i class="fas fa-info-circle me-2"></i>Introduction</h5>
+                        <p>HopFog ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our mobile application and web platform.</p>
+
+                        <h5><i class="fas fa-database me-2"></i>Information We Collect</h5>
+                        <ul>
+                            <li><strong>Account Information:</strong> Username, email address, and password when you register.</li>
+                            <li><strong>Usage Data:</strong> Messages sent and received through the HopFog network.</li>
+                            <li><strong>Device Information:</strong> Device type, operating system, and connection data.</li>
+                            <li><strong>Location Data:</strong> General network location via connected Fog Nodes.</li>
+                        </ul>
+
+                        <h5><i class="fas fa-cogs me-2"></i>How We Use Your Information</h5>
+                        <ul>
+                            <li>To provide and maintain the HopFog service</li>
+                            <li>To manage your account and authenticate your identity</li>
+                            <li>To monitor network connectivity and deliver messages</li>
+                            <li>To send system alerts and SOS notifications</li>
+                            <li>To improve our platform and user experience</li>
+                        </ul>
+
+                        <h5><i class="fas fa-shield-alt me-2"></i>Data Security</h5>
+                        <p>We implement industry-standard security measures to protect your data. All passwords are hashed and stored securely. Communication over the HopFog network is managed through our ESP32 Fog Node infrastructure.</p>
+
+                        <h5><i class="fas fa-share-alt me-2"></i>Data Sharing</h5>
+                        <p>We do not sell, trade, or share your personal information with third parties. Data is only accessible to authorized HopFog administrators.</p>
+
+                        <h5><i class="fas fa-user-cog me-2"></i>Your Rights</h5>
+                        <ul>
+                            <li>Request access to your personal data</li>
+                            <li>Request correction or deletion of your data</li>
+                            <li>Contact your administrator to deactivate your account</li>
+                        </ul>
+
+                        <h5><i class="fas fa-envelope me-2"></i>Contact Us</h5>
+                        <p>If you have any questions about this Privacy Policy, please contact your HopFog administrator.</p>
+                    </div>
+                    <div class="card-footer text-center py-3">
+                        <a href="{{ url_for('login_page') }}" class="btn btn-outline-primary btn-sm">
+                            <i class="fas fa-arrow-left me-2"></i>Back to Login
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+</body>
+</html>

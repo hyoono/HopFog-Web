@@ -20,7 +20,6 @@
         <button class="btn btn-link btn-sm order-1 order-lg-0 me-4" id="sidebarToggle">
             <i class="fas fa-bars"></i>
         </button>
-
         <a class="navbar-brand ps-3" href="{{ url_for('dashboard') }}">
     <img src="{{ url_for('static', path='images/HopFog-Logo.png') }}" 
          alt="HopFog Logo" 
@@ -36,7 +35,6 @@
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end">
                     <li><a class="dropdown-item" href="{{ url_for('settings') }}">Settings</a></li>
-                    <li><a class="dropdown-item" href="#">Activity Log</a></li>
                     <li><hr class="dropdown-divider" /></li>
                     <li><a class="dropdown-item" href="{{ url_for('login_page') }}">Logout</a></li>
                 </ul>

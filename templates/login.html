@@ -52,17 +52,10 @@
                                             </div>
                                         </form>
                                         <hr class="my-4">
-                                        <div class="text-center">
-                                            <div class="small"><a href="{{ url_for('register') }}">Need an account? Sign
-                                                    up!</a></div>
                                         </div>
-                                    </div>
 
                                     <!-- Right Side - Download -->
                                     <div class="col-md-6 notebook-right">
-                                        <!-- <div class="download-icon">
-                                            <i class="fab fa-android"></i>
-                                        </div> -->
                                         <img src="{{ url_for('static', path='images/HopFog-Logo.png') }}"
                                             alt="HopFog Logo" class="notebook-logo">
                                         <h4 class="fw-bold mb-2">HopFog App</h4>
@@ -90,9 +83,9 @@
                     <div class="d-flex align-items-center justify-content-between small">
                         <div class="text-muted">Copyright &copy; HopFog 2026</div>
                         <div>
-                            <a href="#">Privacy Policy</a>
+                            <a href="{{ url_for('privacy_policy') }}"> Privacy Policy</a>
                             &middot;
-                            <a href="#">Terms &amp; Conditions</a>
+                            <a href="{{ url_for('terms') }}">Terms &amp; Conditions</a>
                         </div>
                     </div>
                 </div>
