@@ -14,15 +14,15 @@
  *
  * Uses low-power PWM for energy efficiency.
  *
- * Pin assignment (shared with available GPIOs):
- *   LED_R = GPIO 12  (Red)
- *   LED_G = GPIO 16  (Green — onboard on some ESP32-CAM boards)
- *   LED_B = GPIO 33  (Blue  — onboard status LED on ESP32-CAM)
+ * Pin assignment (using free camera pins — camera is NOT used):
+ *   LED_R = GPIO 25  (Red  — was camera VSYNC, now free)
+ *   LED_G = GPIO 26  (Green — was camera SIOD, now free)
+ *   LED_B = GPIO 33  (Blue  — built-in status LED, active LOW)
  *
- * Note: On ESP32-CAM, available GPIO pins are very limited.
- *       GPIO 33 is the built-in status LED (active LOW).
- *       GPIO 12 and GPIO 16 may need external LEDs.
- *       If pins are not available, LED functions are no-ops.
+ * CRITICAL: On ESP32-CAM with PSRAM:
+ *   - GPIO 16/17 are PSRAM CS/CLK — NEVER use them!
+ *   - GPIO 12/14/15 are SD card — NEVER use them!
+ *   - GPIO 25/26/27 are camera pins, safe when camera not initialized.
  */
 
 #ifndef LED_STATUS_H
@@ -30,10 +30,11 @@
 
 #include <Arduino.h>
 
-// LED GPIO pins — adjust for your wiring
-#define LED_R_PIN  12   // Red LED
-#define LED_G_PIN  16   // Green LED
-#define LED_B_PIN  33   // Blue/Status LED (ESP32-CAM built-in, active LOW)
+// LED GPIO pins — using free camera pins (camera not used in this project)
+// CRITICAL: GPIO 16 = PSRAM CS, GPIO 12/14/15 = SD card — NEVER use!
+#define LED_R_PIN  25   // Red   (was camera VSYNC)
+#define LED_G_PIN  26   // Green (was camera SIOD)
+#define LED_B_PIN  33   // Blue  (ESP32-CAM built-in, active LOW)
 
 // PWM settings for low power
 #define LED_PWM_FREQ  1000

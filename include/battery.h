@@ -1,9 +1,13 @@
 /*
  * battery.h — INA219 battery monitoring for HopFog admin/node
  *
- * Uses I2C on GPIO 14 (SDA) and GPIO 15 (SCL).
- * NOTE: These pins are shared with SD SPI on ESP32-CAM.
- * The INA219 is initialized AFTER SD card init completes.
+ * Uses I2C on GPIO 21 (SDA) and GPIO 22 (SCL) — standard ESP32 I2C.
+ * On ESP32-CAM these are camera D3/PCLK pins, which are free because
+ * this project does NOT use the camera module.
+ *
+ * CRITICAL: Do NOT use GPIO 14/15 for I2C — those are SD card CLK/CS!
+ *           Do NOT use GPIO 16/17 — those are PSRAM CS/CLK!
+ *
  * If INA219 is not detected, all functions return safe defaults.
  */
 

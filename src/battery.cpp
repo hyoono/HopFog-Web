@@ -1,10 +1,11 @@
 /*
  * battery.cpp — INA219 battery monitoring for HopFog admin/node
  *
- * I2C on default Wire (GPIO 21 SDA, GPIO 22 SCL) — but on ESP32-CAM
- * these aren't broken out. We use GPIO 14 (SDA) + GPIO 15 (SCL)
- * with Wire.begin() override. These must be initialized AFTER
- * SD SPI completes to avoid bus contention.
+ * I2C on GPIO 21 (SDA) + GPIO 22 (SCL) — standard ESP32 I2C pins.
+ * On ESP32-CAM, these are camera D3/PCLK which are free (camera not used).
+ *
+ * CRITICAL: GPIO 14/15 = SD card CLK/CS — using them for I2C crashes SD!
+ *           GPIO 16/17 = PSRAM CS/CLK — using them crashes the system!
  *
  * If no INA219 is found, all reads return safe defaults and
  * batteryInit() returns false. The dashboard shows "N/A".
@@ -27,13 +28,10 @@ static int voltageToPercent(float mv) {
 }
 
 bool batteryInit() {
-    // ESP32-CAM: use GPIO 14 (SDA) and GPIO 15 (SCL) for I2C
-    // WARNING: These pins overlap with SD SPI (CLK=14, MOSI=15).
-    // I2C reads are brief (~1ms) and only happen when batteryRead() is called.
-    // SD operations use SPI mode which releases the bus between transactions.
-    // If you experience conflicts, ensure SD operations and battery reads
-    // are not called simultaneously (they currently aren't — both run in loop()).
-    Wire.begin(14, 15);
+    // ESP32-CAM: use GPIO 21 (SDA) and GPIO 22 (SCL) — standard I2C pins.
+    // These are camera D3/PCLK pins which are free (camera not used).
+    // CRITICAL: Do NOT use GPIO 14/15 (SD card) or GPIO 16/17 (PSRAM)!
+    Wire.begin(21, 22);
 
     if (!ina219.begin(&Wire)) {
         dbgprintln("[BAT] INA219 not found — battery monitoring disabled");

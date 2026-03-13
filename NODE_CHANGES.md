@@ -825,9 +825,11 @@ Where:
 ### Battery code
 Copy `include/battery.h` and `src/battery.cpp` from the admin repo — they are identical and work on both admin and node.
 
-### I2C pins for ESP32-CAM
+### I2C pins for ESP32-CAM (CRITICAL — use these exact pins!)
 ```cpp
-Wire.begin(14, 15);  // SDA=GPIO14, SCL=GPIO15
+Wire.begin(21, 22);  // SDA=GPIO21, SCL=GPIO22 (standard I2C, camera D3/PCLK - free)
+// DANGER: Do NOT use GPIO 14/15 — those are SD card CLK/CS!
+// DANGER: Do NOT use GPIO 16/17 — those are PSRAM CS/CLK!
 ```
 
 If INA219 is not connected, `batteryInit()` returns false and all reads return safe defaults. The dashboard shows "N/A".
@@ -872,11 +874,15 @@ if (millis() - lastLedMs > 200) {
 }
 ```
 
-### Pin assignment
+### Pin assignment (CRITICAL — must match these exactly!)
 ```
-LED_R = GPIO 12  (external red LED)
-LED_G = GPIO 16  (external green LED)  
+LED_R = GPIO 25  (external red LED — was camera VSYNC, now free)
+LED_G = GPIO 26  (external green LED — was camera SIOD, now free)  
 LED_B = GPIO 33  (built-in status LED, active LOW)
+
+DANGER — NEVER use these pins for LED or I2C:
+  GPIO 16/17 = PSRAM CS/CLK — will crash system!
+  GPIO 12/14/15 = SD card — will corrupt SD!
 ```
 
 ---
