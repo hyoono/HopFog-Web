@@ -1,14 +1,21 @@
 /*
  * led_status.cpp — RGB LED status indicators for HopFog
  *
- * Uses LEDC PWM for smooth pulsing and low power consumption.
- * All brightness values capped at LED_BRIGHTNESS for energy efficiency.
+ * DISABLED BY DEFAULT on ESP32-CAM: GPIO 25/26 are camera pins
+ * not broken out on the AI-Thinker ESP32-CAM header.
+ *
+ * To enable: set -DENABLE_LED=1 in platformio.ini build_flags
+ * and wire RGB LED to GPIO 25 (R), GPIO 26 (G), GPIO 33 (B).
+ *
+ * When disabled, all LED functions are safe no-ops.
  */
 
 #include "led_status.h"
 #include "config.h"
 
 static bool ledInitialized = false;
+
+#if ENABLE_LED
 static unsigned long lastPulseMs = 0;
 static bool pulseUp = true;
 static uint8_t pulseVal = 0;
@@ -16,9 +23,10 @@ static uint8_t pulseVal = 0;
 static uint8_t capBrightness(uint8_t val) {
     return (val > 0) ? min((uint8_t)LED_BRIGHTNESS, val) : 0;
 }
+#endif
 
 void ledStatusInit() {
-    // Configure LEDC PWM channels
+#if ENABLE_LED
     ledcSetup(LED_R_CH, LED_PWM_FREQ, LED_PWM_RES);
     ledcSetup(LED_G_CH, LED_PWM_FREQ, LED_PWM_RES);
     ledcSetup(LED_B_CH, LED_PWM_FREQ, LED_PWM_RES);
@@ -30,31 +38,41 @@ void ledStatusInit() {
     ledOff();
     ledInitialized = true;
     dbgprintln("[LED] Status LEDs initialized");
+#else
+    // No LED hardware available on this board
+    ledInitialized = false;
+#endif
 }
 
 void ledSetColor(uint8_t r, uint8_t g, uint8_t b) {
+#if ENABLE_LED
     if (!ledInitialized) return;
     ledcWrite(LED_R_CH, capBrightness(r));
     ledcWrite(LED_G_CH, capBrightness(g));
     // GPIO 33 is active LOW on ESP32-CAM
     ledcWrite(LED_B_CH, 255 - capBrightness(b));
+#else
+    (void)r; (void)g; (void)b;
+#endif
 }
 
 void ledOff() {
+#if ENABLE_LED
     if (!ledInitialized) return;
     ledcWrite(LED_R_CH, 0);
     ledcWrite(LED_G_CH, 0);
     ledcWrite(LED_B_CH, 255); // active LOW
+#endif
 }
 
 void ledStatusUpdate(ConnectionStatus connStatus, int batteryPercent, bool charging) {
+#if ENABLE_LED
     if (!ledInitialized) return;
 
     unsigned long now = millis();
 
     // Battery takes priority if critical
     if (batteryPercent >= 0 && batteryPercent < 5) {
-        // Quick pulsing red for critically low battery
         if (now - lastPulseMs > 100) {
             lastPulseMs = now;
             pulseUp = !pulseUp;
@@ -64,26 +82,20 @@ void ledStatusUpdate(ConnectionStatus connStatus, int batteryPercent, bool charg
     }
 
     if (charging) {
-        // Orange constant = charging
         ledSetColor(LED_BRIGHTNESS, LED_BRIGHTNESS / 3, 0);
         return;
     }
 
     if (batteryPercent >= 0 && batteryPercent < 15) {
-        // Yellow constant = low battery
         ledSetColor(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
         return;
     }
 
-    // Connection status
     switch (connStatus) {
         case CONN_DISCONNECTED:
-            // RED constant
             ledSetColor(LED_BRIGHTNESS, 0, 0);
             break;
-
         case CONN_SEARCHING:
-            // YELLOW pulsing
             if (now - lastPulseMs > 30) {
                 lastPulseMs = now;
                 if (pulseUp) {
@@ -96,10 +108,11 @@ void ledStatusUpdate(ConnectionStatus connStatus, int batteryPercent, bool charg
                 ledSetColor(pulseVal, pulseVal / 2, 0);
             }
             break;
-
         case CONN_CONNECTED:
-            // GREEN constant
             ledSetColor(0, LED_BRIGHTNESS, 0);
             break;
     }
+#else
+    (void)connStatus; (void)batteryPercent; (void)charging;
+#endif
 }

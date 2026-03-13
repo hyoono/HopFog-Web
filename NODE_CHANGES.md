@@ -797,18 +797,30 @@ serve this correctly. The mobile app's `Announcement` data class expects:
 | 14 | LED status indicators | RGB LED for connection and battery status |
 | 15 | Sync watchdog | Abort sync if stuck for 30 seconds |
 
+> **NOTE:** Fixes 13 and 14 are DISABLED BY DEFAULT on ESP32-CAM because
+> GPIO 25, 26, 21, 22 are not exposed on the AI-Thinker board header.
+> To enable, add `-DENABLE_BATTERY=1` and/or `-DENABLE_LED=1` to
+> `platformio.ini` build_flags. Only do this if you have a breakout board
+> or have soldered wires to the camera connector pads.
+
 ---
 
-## Fix 13: Battery Monitoring (INA219)
+## Fix 13: Battery Monitoring (INA219) — OPTIONAL
 
 **What:** Add INA219 battery sensor support. Report battery data in HEARTBEAT messages.
 
 **Why:** The admin dashboard shows battery status for both admin and nodes. Without this, the node battery panel shows "N/A".
 
-### platformio.ini
-Add to `lib_deps`:
+**Status:** DISABLED by default. GPIO 21/22 (I2C) are not broken out on the ESP32-CAM header.
+
+### To enable
+In `platformio.ini`:
 ```ini
-adafruit/Adafruit INA219@^1.2.1
+build_flags =
+    -DENABLE_BATTERY=1
+
+lib_deps =
+    adafruit/Adafruit INA219@^1.2.1
 ```
 
 ### Node HEARTBEAT format — add battery fields
@@ -836,11 +848,20 @@ If INA219 is not connected, `batteryInit()` returns false and all reads return s
 
 ---
 
-## Fix 14: LED Status Indicators
+## Fix 14: LED Status Indicators — OPTIONAL
 
 **What:** Add RGB LED indicators for connection and battery status.
 
 **Why:** Visual feedback for device status without needing WiFi/web dashboard.
+
+**Status:** DISABLED by default. GPIO 25/26 are not broken out on the ESP32-CAM header.
+
+### To enable
+In `platformio.ini`:
+```ini
+build_flags =
+    -DENABLE_LED=1
+```
 
 ### LED behavior
 | Condition | LED Color |
@@ -876,8 +897,8 @@ if (millis() - lastLedMs > 200) {
 
 ### Pin assignment (CRITICAL — must match these exactly!)
 ```
-LED_R = GPIO 25  (external red LED — was camera VSYNC, now free)
-LED_G = GPIO 26  (external green LED — was camera SIOD, now free)  
+LED_R = GPIO 25  (external red LED — camera VSYNC pad on camera connector)
+LED_G = GPIO 26  (external green LED — camera SIOD pad on camera connector)  
 LED_B = GPIO 33  (built-in status LED, active LOW)
 
 DANGER — NEVER use these pins for LED or I2C:

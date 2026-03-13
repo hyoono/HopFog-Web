@@ -1,6 +1,12 @@
 /*
  * led_status.h — RGB LED status indicators for HopFog admin/node
  *
+ * DISABLED BY DEFAULT: ESP32-CAM (AI-Thinker) does not expose the
+ * required GPIO pins (25, 26) on its header.
+ *
+ * To enable: add -DENABLE_LED=1 to platformio.ini build_flags
+ * and wire an RGB LED to GPIO 25 (R), 26 (G), 33 (B).
+ *
  * Activity Status:
  *   RED constant   = device on, no node connected
  *   YELLOW pulsing = connecting/searching
@@ -12,17 +18,10 @@
  *   GREEN constant  = full / done charging
  *   ORANGE constant = charging
  *
- * Uses low-power PWM for energy efficiency.
- *
- * Pin assignment (using free camera pins — camera is NOT used):
- *   LED_R = GPIO 25  (Red  — was camera VSYNC, now free)
- *   LED_G = GPIO 26  (Green — was camera SIOD, now free)
- *   LED_B = GPIO 33  (Blue  — built-in status LED, active LOW)
- *
- * CRITICAL: On ESP32-CAM with PSRAM:
- *   - GPIO 16/17 are PSRAM CS/CLK — NEVER use them!
- *   - GPIO 12/14/15 are SD card — NEVER use them!
- *   - GPIO 25/26/27 are camera pins, safe when camera not initialized.
+ * Pin assignment (when enabled — uses free camera pins):
+ *   LED_R = GPIO 25  (Red)
+ *   LED_G = GPIO 26  (Green)
+ *   LED_B = GPIO 33  (Blue — built-in status LED, active LOW)
  */
 
 #ifndef LED_STATUS_H

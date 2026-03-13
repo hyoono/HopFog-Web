@@ -1,14 +1,15 @@
 /*
  * battery.h — INA219 battery monitoring for HopFog admin/node
  *
- * Uses I2C on GPIO 21 (SDA) and GPIO 22 (SCL) — standard ESP32 I2C.
- * On ESP32-CAM these are camera D3/PCLK pins, which are free because
- * this project does NOT use the camera module.
+ * DISABLED BY DEFAULT: ESP32-CAM (AI-Thinker) does not expose
+ * GPIO 21/22 (standard I2C) on its header pins.
  *
- * CRITICAL: Do NOT use GPIO 14/15 for I2C — those are SD card CLK/CS!
- *           Do NOT use GPIO 16/17 — those are PSRAM CS/CLK!
+ * To enable: add -DENABLE_BATTERY=1 to platformio.ini build_flags
+ * and wire INA219 to GPIO 21 (SDA) + GPIO 22 (SCL) via the camera
+ * connector or an ESP32 breakout board.
  *
- * If INA219 is not detected, all functions return safe defaults.
+ * When disabled, batteryInit() returns false and batteryRead()
+ * returns safe defaults. The dashboard shows "N/A".
  */
 
 #ifndef BATTERY_H
