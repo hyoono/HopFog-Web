@@ -170,8 +170,9 @@
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <form id="createAdminForm" method="POST" action="/register">
+            <form id="createAdminForm">
                 <div class="modal-body">
+                    <div id="createAdminMessage" style="display: none;"></div>
                     <div class="mb-3">
                         <label for="adminEmail" class="form-label">Email Address</label>
                         <input type="email" class="form-control" id="adminEmail" name="email" placeholder="name@example.com" required>
@@ -182,7 +183,11 @@
                     </div>
                     <div class="mb-3">
                         <label for="adminPassword" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="adminPassword" name="password" placeholder="Create a password" required>
+                        <input type="password" class="form-control" id="adminPassword" name="password" placeholder="Create a password" required minlength="6">
+                    </div>
+                    <div class="mb-3">
+                        <label for="adminConfirmPassword" class="form-label">Confirm Password</label>
+                        <input type="password" class="form-control" id="adminConfirmPassword" name="confirmPassword" placeholder="Confirm password" required minlength="6">
                     </div>
                     <div class="alert alert-warning mb-0">
                         <i class="fas fa-exclamation-triangle me-2"></i>
@@ -191,7 +196,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-secondary">
+                    <button type="submit" class="btn btn-secondary" id="createAdminBtn">
                         <i class="fas fa-user-shield me-2"></i>Create Admin
                     </button>
                 </div>
@@ -260,6 +265,63 @@
         .finally(() => {
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<i class="fas fa-user-plus me-2"></i>Create User';
+        });
+    });
+
+    // Create Admin User Form
+    document.getElementById('createAdminForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const email = document.getElementById('adminEmail').value;
+        const username = document.getElementById('adminUsername').value;
+        const password = document.getElementById('adminPassword').value;
+        const confirmPassword = document.getElementById('adminConfirmPassword').value;
+        const messageDiv = document.getElementById('createAdminMessage');
+        const submitBtn = document.getElementById('createAdminBtn');
+
+        if (password !== confirmPassword) {
+            messageDiv.className = 'alert alert-danger';
+            messageDiv.innerHTML = '<i class="fas fa-exclamation-circle me-2"></i>Passwords do not match!';
+            messageDiv.style.display = 'block';
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating...';
+
+        const formData = new FormData();
+        formData.append('username', username);
+        formData.append('email', email);
+        formData.append('password', password);
+
+        fetch('/api/admin/create-admin-user', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) return response.json().then(err => { throw err; });
+            return response.json();
+        })
+        .then(data => {
+            messageDiv.className = 'alert alert-success';
+            messageDiv.innerHTML = '<i class="fas fa-check-circle me-2"></i>Admin user created successfully!';
+            messageDiv.style.display = 'block';
+            document.getElementById('createAdminForm').reset();
+            setTimeout(() => { window.location.reload(); }, 1500);
+        })
+        .catch(error => {
+            messageDiv.className = 'alert alert-danger';
+            const errorText = error.detail || 'Error creating admin user.';
+            messageDiv.textContent = '';
+            const icon = document.createElement('i');
+            icon.className = 'fas fa-exclamation-circle me-2';
+            messageDiv.appendChild(icon);
+            messageDiv.appendChild(document.createTextNode(errorText));
+            messageDiv.style.display = 'block';
+        })
+        .finally(() => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-user-shield me-2"></i>Create Admin';
         });
     });
 

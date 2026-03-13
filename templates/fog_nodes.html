@@ -19,37 +19,48 @@
         </div>
     </div>
 
-    <!-- System Logs Table -->
+    <!-- Registered Fog Devices -->
     <div class="card mb-4">
         <div class="card-header">
             <i class="fas fa-server me-1"></i>
-            System Logs
+            Registered Fog Devices
         </div>
         <div class="card-body">
             <table class="table table-bordered">
                 <thead>
                     <tr>
-                        <th>Fog Nodes</th>
-                        <th>People Connected</th>
+                        <th>Fog Node</th>
+                        <th>IP Address</th>
+                        <th>Connected Users</th>
                         <th>Storage</th>
+                        <th>Messages</th>
                         <th>Status</th>
-                        <th>Average Latency</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for node in fog_nodes %}
                     <tr>
                         <td>{{ node.name }}</td>
-                        <td>{{ node.people_connected }}</td>
-                        <td><span class="text-success">{{ node.storage_used }}</span> {{ node.storage_free }}</td>
+                        <td>{{ node.ip_address }}</td>
+                        <td>{{ node.connected_users }}</td>
                         <td>
-                            {% if node.status == 'online' %}
-                                <span class="badge bg-success">● Online</span>
-                            {% else %}
-                                <span class="badge bg-danger">● Offline</span>
+                            <span class="text-success">{{ node.storage_used }}</span>
+                            {% if node.storage_total != 'N/A' %}
+                                / {{ node.storage_total }}
                             {% endif %}
                         </td>
-                        <td><span class="text-success">{{ node.latency }}</span></td>
+                        <td>{{ node.message_count }}</td>
+                        <td>
+                            {% if node.status == 'active' %}
+                                <span class="badge bg-success">● Active</span>
+                            {% else %}
+                                <span class="badge bg-danger">● Inactive</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">No fog devices registered yet</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -494,6 +494,50 @@ def create_mobile_user(
         }
     }
 
+# Web Admin - Create Admin User
+@app.post("/api/admin/create-admin-user")
+def create_admin_user(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(verify_token)
+):
+    # Only admins can create admin users
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create admin users")
+    
+    # Check if email exists
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Check if username exists
+    if db.query(User).filter(User.username == username).first():
+        raise HTTPException(status_code=400, detail="Username already taken")
+    
+    # Create user with admin role
+    new_user = User(
+        username=username,
+        email=email,
+        password_hash=get_password_hash(password),
+        role="admin",
+        is_active=True
+    )
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {
+        "message": "Admin user created successfully",
+        "user": {
+            "id": new_user.id,
+            "username": new_user.username,
+            "email": new_user.email,
+            "role": new_user.role
+        }
+    }
+
 # Toggle User Status (Activate/Deactivate)
 @app.put("/api/users/{user_id}/toggle-status")
 def toggle_user_status(
