@@ -905,7 +905,9 @@
                 var ok = (endDiag.tx_status_ok || 0) - (baseDiag.tx_status_ok || 0);
                 var failed = (endDiag.tx_status_fail || 0) - (baseDiag.tx_status_fail || 0);
                 var loss = sent > 0 ? (failed / sent * 100) : 0;
-                var throughput = duration > 0 ? (ok * 12 / duration) : 0;
+                // 12 = byte length of test payload "TEST_PKT_XXX"
+                var BYTES_PER_PACKET = 12;
+                var throughput = duration > 0 ? (ok * BYTES_PER_PACKET / duration) : 0;
 
                 allRuns.push({ run: run + 1, sent: sent, ok: ok, failed: failed, loss: loss, duration: duration, throughput: throughput });
 
@@ -974,7 +976,9 @@
         ];
 
         var results = [];
-        var PT = 5; // estimated processing time (ms)
+        // PT = estimated ESP32 processing time (JSON parse + HTTP response).
+        // Measured ~3-7ms on ESP32-CAM; 5ms is the midpoint.
+        var PT = 5;
 
         try {
             for (var i = 0; i < payloads.length; i++) {
@@ -1054,6 +1058,10 @@
             { label: 'Large (70B)', size: 70, data: 'X'.repeat(70) }
         ];
 
+        // Max acceptable rate difference (%) between programmed and actual send rate.
+        // HTTP round-trip overhead means actual rate is always lower than programmed.
+        var MAX_RATE_DIFF_PCT = 50;
+
         var results = [];
         var totalSteps = payloads.length * msgCount;
         var stepDone = 0;
@@ -1108,7 +1116,7 @@
             html += '<tr><th>Payload</th><th>Programmed Rate</th><th>Sent</th><th>OK</th><th>Failed</th>';
             html += '<th>Duration (s)</th><th>Actual Rate (m/s)</th><th>% Difference</th><th>Result</th></tr></thead><tbody>';
             results.forEach(function(r) {
-                var pass = r.pctDiff < 50;
+                var pass = r.pctDiff < MAX_RATE_DIFF_PCT;
                 var badge = pass ? '<span class="badge bg-success">PASS</span>' : '<span class="badge bg-warning text-dark">DEGRADED</span>';
                 html += '<tr><td>' + escHtml(r.label) + '</td><td>' + r.programmedRate + ' m/s</td>';
                 html += '<td>' + r.sent + '</td><td>' + r.ok + '</td><td>' + r.failed + '</td>';
@@ -1118,7 +1126,7 @@
             html += '</tbody></table>';
 
             var avgDiff = results.reduce(function(s, r) { return s + r.pctDiff; }, 0) / results.length;
-            html += '<div class="alert py-1 ' + (avgDiff < 50 ? 'alert-success' : 'alert-warning') + '">';
+            html += '<div class="alert py-1 ' + (avgDiff < MAX_RATE_DIFF_PCT ? 'alert-success' : 'alert-warning') + '">';
             html += '<strong>Average Rate Difference: ' + avgDiff.toFixed(1) + '%</strong>';
             html += '<br><small class="text-muted">Note: HTTP overhead adds latency per request. Actual XBee throughput is higher than measured HTTP round-trip rate.</small>';
             html += '</div>';
