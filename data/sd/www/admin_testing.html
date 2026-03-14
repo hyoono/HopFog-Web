@@ -294,6 +294,130 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- ═══════════════════════════════════════════════════════════
+                         Automated Network Tests
+                         ═══════════════════════════════════════════════════════════ -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-warning text-dark">
+                            <i class="fas fa-robot me-1"></i>Automated Network Tests
+                            <span class="badge bg-dark ms-2">One-Click</span>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted mb-3">
+                                Run automated test suites directly from this page. Tests use the existing XBee diagnostics and send endpoints.
+                                Results are displayed below each test with PASS/FAIL criteria.
+                            </p>
+
+                            <!-- Test 1: Quick Health Check -->
+                            <div class="card mb-3 border-info">
+                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-heartbeat me-1 text-info"></i><strong>Test 1: Quick Health Check</strong></span>
+                                    <button class="btn btn-sm btn-info" id="btnHealthCheck" onclick="runHealthCheck()">
+                                        <i class="fas fa-play me-1"></i>Run
+                                    </button>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="small text-muted mb-2">Verifies XBee TX/RX are working and a node is reachable.</div>
+                                    <div id="healthCheckResult" style="display:none;"></div>
+                                </div>
+                            </div>
+
+                            <!-- Test 2: Network Performance (Packet Loss) -->
+                            <div class="card mb-3 border-success">
+                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-chart-line me-1 text-success"></i><strong>Test 2: Network Performance</strong></span>
+                                    <div>
+                                        <label class="me-2 small">Packets:
+                                            <select id="perfPacketCount" class="form-select form-select-sm d-inline-block" style="width:auto;">
+                                                <option value="10">10</option>
+                                                <option value="25">25</option>
+                                                <option value="50" selected>50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                        </label>
+                                        <label class="me-2 small">Runs:
+                                            <select id="perfRunCount" class="form-select form-select-sm d-inline-block" style="width:auto;">
+                                                <option value="1">1</option>
+                                                <option value="3">3</option>
+                                                <option value="5" selected>5</option>
+                                            </select>
+                                        </label>
+                                        <button class="btn btn-sm btn-success" id="btnPerfTest" onclick="runPerfTest()">
+                                            <i class="fas fa-play me-1"></i>Run
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="small text-muted mb-2">Sends packets via XBee and measures packet loss rate and throughput. Pass criteria: &lt;2% loss.</div>
+                                    <div id="perfProgress" style="display:none;">
+                                        <div class="progress mb-2" style="height:20px;">
+                                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="perfBar" style="width:0%">0%</div>
+                                        </div>
+                                        <div class="small text-muted" id="perfStatus">Preparing...</div>
+                                    </div>
+                                    <div id="perfResult" style="display:none;"></div>
+                                </div>
+                            </div>
+
+                            <!-- Test 3: One-Way Delay -->
+                            <div class="card mb-3 border-primary">
+                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-stopwatch me-1 text-primary"></i><strong>Test 3: One-Way Delay</strong></span>
+                                    <button class="btn btn-sm btn-primary" id="btnDelayTest" onclick="runDelayTest()">
+                                        <i class="fas fa-play me-1"></i>Run
+                                    </button>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="small text-muted mb-2">Measures round-trip time with different payload sizes (1B, 10B, 30B, 50B, 70B). One-way delay ≈ (RT - PT) / 2.</div>
+                                    <div id="delayProgress" style="display:none;">
+                                        <div class="progress mb-2" style="height:20px;">
+                                            <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated" id="delayBar" style="width:0%">0%</div>
+                                        </div>
+                                        <div class="small text-muted" id="delayStatus">Preparing...</div>
+                                    </div>
+                                    <div id="delayResult" style="display:none;"></div>
+                                </div>
+                            </div>
+
+                            <!-- Test 4: Payload Size / Load Test -->
+                            <div class="card mb-3 border-danger">
+                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-weight-hanging me-1 text-danger"></i><strong>Test 4: Payload Size &amp; Load Test</strong></span>
+                                    <div>
+                                        <label class="me-2 small">Messages:
+                                            <select id="loadMsgCount" class="form-select form-select-sm d-inline-block" style="width:auto;">
+                                                <option value="20">20</option>
+                                                <option value="50" selected>50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                        </label>
+                                        <label class="me-2 small">Rate:
+                                            <select id="loadRate" class="form-select form-select-sm d-inline-block" style="width:auto;">
+                                                <option value="2">2 m/s</option>
+                                                <option value="5" selected>5 m/s</option>
+                                                <option value="10">10 m/s</option>
+                                            </select>
+                                        </label>
+                                        <button class="btn btn-sm btn-danger" id="btnLoadTest" onclick="runLoadTest()">
+                                            <i class="fas fa-play me-1"></i>Run
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="small text-muted mb-2">Tests message rate at 3 payload sizes (10B, 40B, 70B). Measures actual send rate vs programmed rate.</div>
+                                    <div id="loadProgress" style="display:none;">
+                                        <div class="progress mb-2" style="height:20px;">
+                                            <div class="progress-bar bg-danger progress-bar-striped progress-bar-animated" id="loadBar" style="width:0%">0%</div>
+                                        </div>
+                                        <div class="small text-muted" id="loadStatus">Preparing...</div>
+                                    </div>
+                                    <div id="loadResult" style="display:none;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </main>
             <footer class="py-4 bg-light mt-auto">
@@ -673,6 +797,343 @@
             alertDiv.className = 'alert alert-danger py-2';
             textDiv.innerHTML = '<strong>Error:</strong> ' + err.message;
         });
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // Automated Test Suite
+    // ══════════════════════════════════════════════════════════════
+
+    // ── Test 1: Quick Health Check ──
+    async function runHealthCheck() {
+        var btn = document.getElementById('btnHealthCheck');
+        var out = document.getElementById('healthCheckResult');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Checking...';
+        out.style.display = 'block';
+        out.innerHTML = '<div class="text-muted">Running diagnostics...</div>';
+
+        try {
+            var resp = await fetch('/api/xbee/diagnostics', { credentials: 'same-origin' });
+            var d = await resp.json();
+
+            var checks = [
+                { name: 'XBee TX', pass: d.tx_bytes > 0, detail: d.tx_bytes + ' bytes sent' },
+                { name: 'TX Status OK', pass: d.tx_status_ok > 0, detail: d.tx_status_ok + ' ACKs received' },
+                { name: 'TX Failures', pass: d.tx_status_fail === 0, detail: d.tx_status_fail + ' failures' },
+                { name: 'RX Frames', pass: d.rx_frames_parsed > 0, detail: d.rx_frames_parsed + ' frames parsed' },
+                { name: 'RX Bytes', pass: d.rx_bytes > 0, detail: d.rx_bytes + ' bytes received' },
+                { name: 'No Oversized Drops', pass: (d.oversized_drops || 0) === 0, detail: (d.oversized_drops || 0) + ' dropped' }
+            ];
+
+            var allPass = checks.every(function(c) { return c.pass; });
+            var html = '<table class="table table-sm table-bordered mb-2"><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+            checks.forEach(function(c) {
+                var badge = c.pass ? '<span class="badge bg-success">PASS</span>' : '<span class="badge bg-danger">FAIL</span>';
+                html += '<tr><td>' + escHtml(c.name) + '</td><td>' + badge + '</td><td class="small">' + escHtml(c.detail) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+            html += '<div class="alert py-1 ' + (allPass ? 'alert-success' : 'alert-warning') + '">';
+            html += '<strong>Overall: ' + (allPass ? 'PASS ✓' : 'FAIL ✗') + '</strong> — ';
+            html += escHtml(d.assessment || 'No assessment');
+            html += '</div>';
+            out.innerHTML = html;
+        } catch(err) {
+            out.innerHTML = '<div class="alert alert-danger py-1"><strong>Error:</strong> ' + escHtml(err.message) + '</div>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play me-1"></i>Run';
+        }
+    }
+
+    // ── Test 2: Network Performance (Packet Loss) ──
+    async function runPerfTest() {
+        var btn = document.getElementById('btnPerfTest');
+        var prog = document.getElementById('perfProgress');
+        var bar = document.getElementById('perfBar');
+        var status = document.getElementById('perfStatus');
+        var out = document.getElementById('perfResult');
+        var packetCount = parseInt(document.getElementById('perfPacketCount').value);
+        var runCount = parseInt(document.getElementById('perfRunCount').value);
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running...';
+        prog.style.display = 'block';
+        out.style.display = 'none';
+
+        var allRuns = [];
+        var totalSteps = runCount * (packetCount + 2); // +2 for diag fetch per run
+        var step = 0;
+
+        try {
+            for (var run = 0; run < runCount; run++) {
+                // Get baseline diagnostics
+                status.textContent = 'Run ' + (run + 1) + '/' + runCount + ': Reading baseline...';
+                var baseResp = await fetch('/api/xbee/diagnostics', { credentials: 'same-origin' });
+                var baseDiag = await baseResp.json();
+                step++;
+                bar.style.width = Math.round(step / totalSteps * 100) + '%';
+                bar.textContent = Math.round(step / totalSteps * 100) + '%';
+
+                var startTime = Date.now();
+
+                // Send packets
+                for (var i = 0; i < packetCount; i++) {
+                    status.textContent = 'Run ' + (run + 1) + '/' + runCount + ': Sending packet ' + (i + 1) + '/' + packetCount;
+                    var formData = new FormData();
+                    formData.append('text', 'TEST_PKT_' + String(i).padStart(3, '0'));
+                    await fetch('/api/xbee/send-raw', { method: 'POST', credentials: 'same-origin', body: formData });
+                    step++;
+                    bar.style.width = Math.round(step / totalSteps * 100) + '%';
+                    bar.textContent = Math.round(step / totalSteps * 100) + '%';
+                    await new Promise(function(r) { setTimeout(r, 200); });
+                }
+
+                // Wait for TX status responses
+                status.textContent = 'Run ' + (run + 1) + '/' + runCount + ': Waiting for TX status responses...';
+                await new Promise(function(r) { setTimeout(r, 3000); });
+
+                // Get final diagnostics
+                var endResp = await fetch('/api/xbee/diagnostics', { credentials: 'same-origin' });
+                var endDiag = await endResp.json();
+                step++;
+                bar.style.width = Math.round(step / totalSteps * 100) + '%';
+                bar.textContent = Math.round(step / totalSteps * 100) + '%';
+
+                var endTime = Date.now();
+                var duration = (endTime - startTime) / 1000;
+                var sent = (endDiag.tx_frames_sent || 0) - (baseDiag.tx_frames_sent || 0);
+                var ok = (endDiag.tx_status_ok || 0) - (baseDiag.tx_status_ok || 0);
+                var failed = (endDiag.tx_status_fail || 0) - (baseDiag.tx_status_fail || 0);
+                var loss = sent > 0 ? (failed / sent * 100) : 0;
+                var throughput = duration > 0 ? (ok * 12 / duration) : 0;
+
+                allRuns.push({ run: run + 1, sent: sent, ok: ok, failed: failed, loss: loss, duration: duration, throughput: throughput });
+
+                // Short pause between runs
+                if (run < runCount - 1) {
+                    status.textContent = 'Pausing between runs...';
+                    await new Promise(function(r) { setTimeout(r, 2000); });
+                }
+            }
+
+            // Calculate averages
+            var avgLoss = allRuns.reduce(function(s, r) { return s + r.loss; }, 0) / allRuns.length;
+            var avgThroughput = allRuns.reduce(function(s, r) { return s + r.throughput; }, 0) / allRuns.length;
+
+            // Build results table
+            var html = '<table class="table table-sm table-bordered mb-2"><thead class="table-dark">';
+            html += '<tr><th>Run</th><th>Sent</th><th>OK</th><th>Failed</th><th>Loss %</th><th>Duration (s)</th><th>Throughput (B/s)</th><th>Result</th></tr></thead><tbody>';
+            allRuns.forEach(function(r) {
+                var pass = r.loss < 2;
+                var badge = pass ? '<span class="badge bg-success">PASS</span>' : '<span class="badge bg-danger">FAIL</span>';
+                html += '<tr><td>' + r.run + '</td><td>' + r.sent + '</td><td>' + r.ok + '</td><td>' + r.failed + '</td>';
+                html += '<td>' + r.loss.toFixed(1) + '%</td><td>' + r.duration.toFixed(1) + '</td>';
+                html += '<td>' + r.throughput.toFixed(1) + '</td><td>' + badge + '</td></tr>';
+            });
+            html += '<tr class="table-secondary fw-bold"><td>Avg</td><td>—</td><td>—</td><td>—</td>';
+            html += '<td>' + avgLoss.toFixed(1) + '%</td><td>—</td><td>' + avgThroughput.toFixed(1) + '</td>';
+            html += '<td>' + (avgLoss < 2 ? '<span class="badge bg-success">PASS</span>' : '<span class="badge bg-danger">FAIL</span>') + '</td></tr>';
+            html += '</tbody></table>';
+            html += '<div class="alert py-1 ' + (avgLoss < 2 ? 'alert-success' : 'alert-danger') + '">';
+            html += '<strong>Average Packet Loss: ' + avgLoss.toFixed(1) + '%</strong> — Threshold: &lt;2% — ';
+            html += (avgLoss < 2 ? 'PASS ✓' : 'FAIL ✗');
+            html += '</div>';
+
+            out.innerHTML = html;
+            out.style.display = 'block';
+            prog.style.display = 'none';
+        } catch(err) {
+            out.innerHTML = '<div class="alert alert-danger py-1"><strong>Error:</strong> ' + escHtml(err.message) + '</div>';
+            out.style.display = 'block';
+            prog.style.display = 'none';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play me-1"></i>Run';
+        }
+    }
+
+    // ── Test 3: One-Way Delay ──
+    async function runDelayTest() {
+        var btn = document.getElementById('btnDelayTest');
+        var prog = document.getElementById('delayProgress');
+        var bar = document.getElementById('delayBar');
+        var status = document.getElementById('delayStatus');
+        var out = document.getElementById('delayResult');
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running...';
+        prog.style.display = 'block';
+        out.style.display = 'none';
+
+        var payloads = [
+            { size: 1, data: 'A' },
+            { size: 10, data: 'ABCDEFGHIJ' },
+            { size: 30, data: 'A'.repeat(30) },
+            { size: 50, data: 'A'.repeat(50) },
+            { size: 70, data: 'A'.repeat(70) }
+        ];
+
+        var results = [];
+        var PT = 5; // estimated processing time (ms)
+
+        try {
+            for (var i = 0; i < payloads.length; i++) {
+                var p = payloads[i];
+                status.textContent = 'Testing payload: ' + p.size + ' bytes...';
+                bar.style.width = Math.round((i + 1) / payloads.length * 100) + '%';
+                bar.textContent = Math.round((i + 1) / payloads.length * 100) + '%';
+
+                // Measure 3 samples per payload size for accuracy
+                var rts = [];
+                for (var s = 0; s < 3; s++) {
+                    var t0 = Date.now();
+                    var formData = new FormData();
+                    formData.append('text', p.data);
+                    await fetch('/api/xbee/send-raw', { method: 'POST', credentials: 'same-origin', body: formData });
+                    var t3 = Date.now();
+                    rts.push(t3 - t0);
+                    await new Promise(function(r) { setTimeout(r, 500); });
+                }
+
+                var avgRT = rts.reduce(function(a, b) { return a + b; }, 0) / rts.length;
+                var oneWay = Math.max(0, (avgRT - PT) / 2);
+
+                results.push({ size: p.size, rt: avgRT, pt: PT, oneWay: oneWay });
+            }
+
+            var avgOneWay = results.reduce(function(s, r) { return s + r.oneWay; }, 0) / results.length;
+
+            var html = '<table class="table table-sm table-bordered mb-2"><thead class="table-dark">';
+            html += '<tr><th>Payload (bytes)</th><th>Avg RT (ms)</th><th>PT (ms)</th><th>One-Way Delay (ms)</th><th>Result</th></tr></thead><tbody>';
+            results.forEach(function(r) {
+                html += '<tr><td>' + r.size + '</td><td>' + r.rt.toFixed(1) + '</td><td>' + r.pt + '</td>';
+                html += '<td>' + r.oneWay.toFixed(1) + '</td>';
+                html += '<td><span class="badge bg-success">DONE</span></td></tr>';
+            });
+            html += '<tr class="table-secondary fw-bold"><td>Average</td><td>—</td><td>—</td>';
+            html += '<td>' + avgOneWay.toFixed(1) + '</td><td>—</td></tr>';
+            html += '</tbody></table>';
+            html += '<div class="alert alert-info py-1">';
+            html += '<strong>Average One-Way Delay: ' + avgOneWay.toFixed(1) + ' ms</strong>';
+            html += '<br><small class="text-muted">Note: RT includes HTTP overhead (browser → ESP32 → XBee → TX status → response). ';
+            html += 'Actual RF one-way delay is lower. For precise measurement, compare XBee serial log TX/RX timestamps.</small>';
+            html += '</div>';
+
+            out.innerHTML = html;
+            out.style.display = 'block';
+            prog.style.display = 'none';
+        } catch(err) {
+            out.innerHTML = '<div class="alert alert-danger py-1"><strong>Error:</strong> ' + escHtml(err.message) + '</div>';
+            out.style.display = 'block';
+            prog.style.display = 'none';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play me-1"></i>Run';
+        }
+    }
+
+    // ── Test 4: Payload Size & Load Test ──
+    async function runLoadTest() {
+        var btn = document.getElementById('btnLoadTest');
+        var prog = document.getElementById('loadProgress');
+        var bar = document.getElementById('loadBar');
+        var status = document.getElementById('loadStatus');
+        var out = document.getElementById('loadResult');
+        var msgCount = parseInt(document.getElementById('loadMsgCount').value);
+        var ratePerSec = parseInt(document.getElementById('loadRate').value);
+        var delayMs = 1000 / ratePerSec;
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running...';
+        prog.style.display = 'block';
+        out.style.display = 'none';
+
+        var payloads = [
+            { label: 'Small (10B)', size: 10, data: 'X'.repeat(10) },
+            { label: 'Medium (40B)', size: 40, data: 'X'.repeat(40) },
+            { label: 'Large (70B)', size: 70, data: 'X'.repeat(70) }
+        ];
+
+        var results = [];
+        var totalSteps = payloads.length * msgCount;
+        var stepDone = 0;
+
+        try {
+            for (var p = 0; p < payloads.length; p++) {
+                var payload = payloads[p];
+                status.textContent = 'Testing ' + payload.label + '...';
+
+                var sent = 0, ok = 0, failed = 0;
+                var startTime = Date.now();
+
+                for (var i = 0; i < msgCount; i++) {
+                    try {
+                        var formData = new FormData();
+                        formData.append('text', payload.data);
+                        var resp = await fetch('/api/xbee/send-raw', { method: 'POST', credentials: 'same-origin', body: formData });
+                        var result = await resp.json();
+                        sent++;
+                        if (result.success) ok++; else failed++;
+                    } catch(e) { sent++; failed++; }
+
+                    stepDone++;
+                    bar.style.width = Math.round(stepDone / totalSteps * 100) + '%';
+                    bar.textContent = Math.round(stepDone / totalSteps * 100) + '%';
+                    status.textContent = 'Testing ' + payload.label + ': ' + (i + 1) + '/' + msgCount;
+                    await new Promise(function(r) { setTimeout(r, delayMs); });
+                }
+
+                var endTime = Date.now();
+                var duration = (endTime - startTime) / 1000;
+                var actualRate = sent / duration;
+                var pctDiff = Math.abs(ratePerSec - actualRate) / ratePerSec * 100;
+
+                results.push({
+                    label: payload.label, size: payload.size,
+                    sent: sent, ok: ok, failed: failed,
+                    duration: duration,
+                    programmedRate: ratePerSec,
+                    actualRate: actualRate,
+                    pctDiff: pctDiff
+                });
+
+                // Pause between payload sizes
+                if (p < payloads.length - 1) {
+                    status.textContent = 'Pausing...';
+                    await new Promise(function(r) { setTimeout(r, 2000); });
+                }
+            }
+
+            var html = '<table class="table table-sm table-bordered mb-2"><thead class="table-dark">';
+            html += '<tr><th>Payload</th><th>Programmed Rate</th><th>Sent</th><th>OK</th><th>Failed</th>';
+            html += '<th>Duration (s)</th><th>Actual Rate (m/s)</th><th>% Difference</th><th>Result</th></tr></thead><tbody>';
+            results.forEach(function(r) {
+                var pass = r.pctDiff < 50;
+                var badge = pass ? '<span class="badge bg-success">PASS</span>' : '<span class="badge bg-warning text-dark">DEGRADED</span>';
+                html += '<tr><td>' + escHtml(r.label) + '</td><td>' + r.programmedRate + ' m/s</td>';
+                html += '<td>' + r.sent + '</td><td>' + r.ok + '</td><td>' + r.failed + '</td>';
+                html += '<td>' + r.duration.toFixed(1) + '</td><td>' + r.actualRate.toFixed(2) + '</td>';
+                html += '<td>' + r.pctDiff.toFixed(1) + '%</td><td>' + badge + '</td></tr>';
+            });
+            html += '</tbody></table>';
+
+            var avgDiff = results.reduce(function(s, r) { return s + r.pctDiff; }, 0) / results.length;
+            html += '<div class="alert py-1 ' + (avgDiff < 50 ? 'alert-success' : 'alert-warning') + '">';
+            html += '<strong>Average Rate Difference: ' + avgDiff.toFixed(1) + '%</strong>';
+            html += '<br><small class="text-muted">Note: HTTP overhead adds latency per request. Actual XBee throughput is higher than measured HTTP round-trip rate.</small>';
+            html += '</div>';
+
+            out.innerHTML = html;
+            out.style.display = 'block';
+            prog.style.display = 'none';
+        } catch(err) {
+            out.innerHTML = '<div class="alert alert-danger py-1"><strong>Error:</strong> ' + escHtml(err.message) + '</div>';
+            out.style.display = 'block';
+            prog.style.display = 'none';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play me-1"></i>Run';
+        }
     }
 
     function refreshNodes() {

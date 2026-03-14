@@ -22,6 +22,25 @@
     </div>
   </div>
 
+  <div class="card mb-4">
+    <div class="card-header"><i class="fas fa-robot me-1"></i>Automated Network Tests</div>
+    <div class="card-body">
+      <p class="text-muted">One-click automated tests are available on the ESP32 admin dashboard:</p>
+      <ol class="mb-2">
+        <li><strong>Quick Health Check</strong> — Verifies XBee TX/RX counters and link assessment</li>
+        <li><strong>Network Performance</strong> — Sends N packets, measures packet loss % and throughput (pass: &lt;2% loss)</li>
+        <li><strong>One-Way Delay</strong> — Measures round-trip time at 5 payload sizes (1B, 10B, 30B, 50B, 70B)</li>
+        <li><strong>Payload Size &amp; Load</strong> — Tests message rate at different payload sizes vs programmed rate</li>
+      </ol>
+      <div class="alert alert-info py-2 mb-0">
+        <i class="fas fa-info-circle me-1"></i>
+        Connect to <code>HopFog-Network</code> WiFi and open
+        <a href="http://192.168.4.1/admin/messaging/testing" target="_blank">http://192.168.4.1/admin/messaging/testing</a>
+        to run automated tests.
+      </div>
+    </div>
+  </div>
+
   <div class="card">
     <div class="card-header"><i class="fas fa-screwdriver-wrench me-1"></i>Integration Tests (Later)</div>
     <div class="card-body">
