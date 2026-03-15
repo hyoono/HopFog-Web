@@ -131,11 +131,11 @@ void loop() {
 
     // Battery read every 5 seconds (~2ms I2C, imperceptible LED pause)
     static unsigned long lastBatRead = 0;
-    static BatteryInfo cachedBat = {false, 0, 0, 0, -1, BAT_UNKNOWN};
     if (millis() - lastBatRead > 5000) {
         lastBatRead = millis();
-        cachedBat = batteryRead();
+        batteryRead();  // updates internal cache
     }
+    BatteryInfo cachedBat = batteryGetCached();
 
     // Flash LED status update every 200ms (5 Hz)
     static unsigned long lastLedUpdate = 0;
