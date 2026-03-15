@@ -63,6 +63,7 @@
                         <li class="breadcrumb-item"><a href="/admin/messaging">Admin Messaging</a></li>
                         <li class="breadcrumb-item active">Testing</li>
                     </ol>
+                    <!-- XBee Serial Monitor -->
                     <div class="card mb-4">
                         <div class="card-header bg-dark text-white">
                             <i class="fas fa-terminal me-1"></i>XBee Serial Monitor
@@ -72,6 +73,7 @@
                             </button>
                         </div>
                         <div class="card-body p-0">
+                            <!-- Diagnostics summary bar -->
                             <div class="px-3 py-2 bg-light border-bottom">
                                 <div class="row small">
                                     <div class="col-md-4">
@@ -116,10 +118,12 @@
                                 </div>
                             </div>
 
+                            <!-- Console output -->
                             <div id="xbeeConsole" style="height:300px; overflow-y:auto; background:#1e1e1e; color:#d4d4d4; font-family:'Courier New',monospace; font-size:13px; padding:8px;">
                                 <div class="text-muted">[Waiting for data... click Refresh or enable Auto-Refresh]</div>
                             </div>
 
+                            <!-- Send bar -->
                             <div class="p-2 border-top d-flex gap-2">
                                 <input type="text" class="form-control form-control-sm font-monospace" id="rawSendText"
                                        placeholder='Send raw text via XBee (e.g. {"cmd":"REGISTER","node_id":"test"})' maxlength="400">
@@ -136,6 +140,7 @@
                         </div>
                     </div>
 
+                    <!-- Node Protocol Commands (Manual Triggers) -->
                     <div class="card mb-4">
                         <div class="card-header bg-success text-white">
                             <i class="fas fa-gamepad me-1"></i>Node Protocol Commands
@@ -147,6 +152,7 @@
                                 Check the <strong>XBee Serial Monitor</strong> above (enable Auto-Refresh) to see TX/RX activity.
                             </p>
 
+                            <!-- Target Node ID -->
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label class="form-label fw-bold">Target Node ID</label>
@@ -161,6 +167,7 @@
                                 </div>
                             </div>
 
+                            <!-- Protocol Step Buttons -->
                             <div class="row g-2 mb-3">
                                 <div class="col-6 col-md-3">
                                     <button class="btn btn-outline-primary w-100" onclick="sendProtoCmd('PING')">
@@ -206,6 +213,7 @@
                                 </div>
                             </div>
 
+                            <!-- Protocol Flow Guide -->
                             <div class="alert alert-info py-2 mb-0 small">
                                 <strong>Expected flow:</strong>
                                 <ol class="mb-0 ps-3">
@@ -216,6 +224,7 @@
                                 </ol>
                             </div>
 
+                            <!-- Last command result -->
                             <div id="protoCmdResult" class="mt-2" style="display:none;">
                                 <div class="alert py-2" id="protoCmdAlert">
                                     <span id="protoCmdText"></span>
@@ -224,6 +233,7 @@
                         </div>
                     </div>
 
+                    <!-- XBee Communication Test -->
                     <div class="card mb-4">
                         <div class="card-header bg-primary text-white">
                             <i class="fas fa-satellite-dish me-1"></i>XBee S2C Communication Test
@@ -234,6 +244,7 @@
                                 Open <strong>XCTU</strong> on a second XBee to see incoming frames.
                             </p>
 
+                            <!-- XBee Status -->
                             <div class="row mb-3">
                                 <div class="col-md-4">
                                     <div class="card bg-light">
@@ -261,6 +272,7 @@
                                 </div>
                             </div>
 
+                            <!-- Test Message Form -->
                             <div class="mb-3">
                                 <label for="xbeeTestMsg" class="form-label fw-bold">Test Message</label>
                                 <div class="input-group">
@@ -274,6 +286,7 @@
                                 <i class="fas fa-paper-plane me-1"></i>Send Test Message
                             </button>
 
+                            <!-- Result -->
                             <div id="xbeeResult" class="mt-3" style="display:none;">
                                 <div class="alert" id="xbeeResultAlert">
                                     <div id="xbeeResultText"></div>
@@ -282,6 +295,9 @@
                         </div>
                     </div>
 
+                    <!-- ═══════════════════════════════════════════════════════════
+                         Automated Network Tests
+                         ═══════════════════════════════════════════════════════════ -->
                     <div class="card mb-4">
                         <div class="card-header bg-warning text-dark">
                             <i class="fas fa-robot me-1"></i>Automated Network Tests
@@ -293,6 +309,7 @@
                                 Results are displayed below each test with PASS/FAIL criteria.
                             </p>
 
+                            <!-- Test 1: Quick Health Check -->
                             <div class="card mb-3 border-info">
                                 <div class="card-header bg-light d-flex justify-content-between align-items-center">
                                     <span><i class="fas fa-heartbeat me-1 text-info"></i><strong>Test 1: Quick Health Check</strong></span>
@@ -306,6 +323,7 @@
                                 </div>
                             </div>
 
+                            <!-- Test 2: Network Performance (Packet Loss) -->
                             <div class="card mb-3 border-success">
                                 <div class="card-header bg-light d-flex justify-content-between align-items-center">
                                     <span><i class="fas fa-chart-line me-1 text-success"></i><strong>Test 2: Network Performance</strong></span>
@@ -325,17 +343,6 @@
                                                 <option value="5" selected>5</option>
                                             </select>
                                         </label>
-                                        <label class="me-2 small">Delay:
-                                            <select id="perfPacketDelay" class="form-select form-select-sm d-inline-block" style="width:auto;">
-                                                <option value="0">0ms</option>
-                                                <option value="50">50ms</option>
-                                                <option value="100">100ms</option>
-                                                <option value="200" selected>200ms</option>
-                                                <option value="500">500ms</option>
-                                                <option value="1000">1000ms</option>
-                                                <option value="2000">2000ms</option>
-                                            </select>
-                                        </label>
                                         <button class="btn btn-sm btn-success" id="btnPerfTest" onclick="runPerfTest()">
                                             <i class="fas fa-play me-1"></i>Run
                                         </button>
@@ -353,20 +360,16 @@
                                 </div>
                             </div>
 
+                            <!-- Test 3: One-Way Delay -->
                             <div class="card mb-3 border-primary">
                                 <div class="card-header bg-light d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-stopwatch me-1 text-primary"></i><strong>Test 3: One-Way Delay (RF)</strong></span>
-                                    <div>
-                                        <label class="me-2 small">HTTP Overhead (ms):
-                                            <input type="number" id="delayHttpTare" class="form-control form-control-sm d-inline-block" style="width:70px;" value="45">
-                                        </label>
-                                        <button class="btn btn-sm btn-primary" id="btnDelayTest" onclick="runDelayTest()">
-                                            <i class="fas fa-play me-1"></i>Run
-                                        </button>
-                                    </div>
+                                    <span><i class="fas fa-stopwatch me-1 text-primary"></i><strong>Test 3: One-Way Delay</strong></span>
+                                    <button class="btn btn-sm btn-primary" id="btnDelayTest" onclick="runDelayTest()">
+                                        <i class="fas fa-play me-1"></i>Run
+                                    </button>
                                 </div>
                                 <div class="card-body py-2">
-                                    <div class="small text-muted mb-2">Measures RF round-trip time by subtracting HTTP overhead. Formula: <code>((Total RT - HTTP Tare) - PT) / 2</code></div>
+                                    <div class="small text-muted mb-2">Measures round-trip time with different payload sizes (1B, 10B, 30B, 50B, 70B). One-way delay ≈ (RT - PT) / 2.</div>
                                     <div id="delayProgress" style="display:none;">
                                         <div class="progress mb-2" style="height:20px;">
                                             <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated" id="delayBar" style="width:0%">0%</div>
@@ -376,6 +379,8 @@
                                     <div id="delayResult" style="display:none;"></div>
                                 </div>
                             </div>
+
+                            <!-- Test 4: Payload Size / Load Test -->
                             <div class="card mb-3 border-danger">
                                 <div class="card-header bg-light d-flex justify-content-between align-items-center">
                                     <span><i class="fas fa-weight-hanging me-1 text-danger"></i><strong>Test 4: Payload Size &amp; Load Test</strong></span>
@@ -408,42 +413,6 @@
                                         <div class="small text-muted" id="loadStatus">Preparing...</div>
                                     </div>
                                     <div id="loadResult" style="display:none;"></div>
-                                </div>
-                            </div>
-                            <div class="card mb-3 border-dark">
-                                <div class="card-header bg-light d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-network-wired me-1 text-dark"></i><strong>Test 5: Concurrent Load (Scenario B)</strong></span>
-                                    <div>
-                                        <label class="me-2 small">Simulated Senders:
-                                            <select id="concSenders" class="form-select form-select-sm d-inline-block" style="width:auto;">
-                                                <option value="2" selected>2</option>
-                                                <option value="3">3</option>
-                                                <option value="4">4</option>
-                                            </select>
-                                        </label>
-                                        <label class="me-2 small">Messages per Sender:
-                                            <input type="number" id="concMsgs" class="form-control form-control-sm d-inline-block" style="width:70px;" value="50">
-                                        </label>
-                                        <label class="me-2 small">Rate per Sender:
-                                            <select id="concRate" class="form-select form-select-sm d-inline-block" style="width:auto;">
-                                                <option value="2">2 m/s</option>
-                                                <option value="5" selected>5 m/s</option>
-                                            </select>
-                                        </label>
-                                        <button class="btn btn-sm btn-dark" id="btnConcurrentTest" onclick="runConcurrentTest()">
-                                            <i class="fas fa-play me-1"></i>Run
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="card-body py-2">
-                                    <div class="small text-muted mb-2">Simulates multiple nodes firing simultaneously using parallel async browser threads. Calculates Aggregate Rate and Degradation %.</div>
-                                    <div id="concProgress" style="display:none;">
-                                        <div class="progress mb-2" style="height:20px;">
-                                            <div class="progress-bar bg-dark progress-bar-striped progress-bar-animated" id="concBar" style="width:100%">Simulating concurrent load...</div>
-                                        </div>
-                                        <div class="small text-muted" id="concStatus">Firing threads...</div>
-                                    </div>
-                                    <div id="concResult" style="display:none;"></div>
                                 </div>
                             </div>
                         </div>
@@ -885,9 +854,6 @@
         var out = document.getElementById('perfResult');
         var packetCount = parseInt(document.getElementById('perfPacketCount').value);
         var runCount = parseInt(document.getElementById('perfRunCount').value);
-        
-        // Dynamic packet delay from the UI
-        var packetDelay = parseInt(document.getElementById('perfPacketDelay').value) || 200;
 
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running...';
@@ -919,62 +885,31 @@
                     step++;
                     bar.style.width = Math.round(step / totalSteps * 100) + '%';
                     bar.textContent = Math.round(step / totalSteps * 100) + '%';
-                    
-                    // Implementing the dynamic delay
-                    await new Promise(function(r) { setTimeout(r, packetDelay); });
+                    await new Promise(function(r) { setTimeout(r, 200); });
                 }
 
-                // Smart Wait for delayed TX status responses
-                status.textContent = 'Run ' + (run + 1) + '/' + runCount + ': Waiting for delayed ACKs...';
-                
-                var maxWaitMs = 60000; // 60 seconds max wait for multi-hop delays
-                var pollInterval = 500; // Check every 500 milliseconds
-                var elapsed = 0;
-                var endDiag = null;
-                var sent = 0;
-                var ok = 0;
-                var explicitFailed = 0;
+                // Wait for TX status responses
+                status.textContent = 'Run ' + (run + 1) + '/' + runCount + ': Waiting for TX status responses...';
+                await new Promise(function(r) { setTimeout(r, 3000); });
 
-                while (elapsed < maxWaitMs) {
-                    await new Promise(function(r) { setTimeout(r, pollInterval); });
-                    elapsed += pollInterval;
-
-                    var endResp = await fetch('/api/xbee/diagnostics', { credentials: 'same-origin' });
-                    endDiag = await endResp.json();
-
-                    sent = (endDiag.tx_frames_sent || 0) - (baseDiag.tx_frames_sent || 0);
-                    ok = (endDiag.tx_status_ok || 0) - (baseDiag.tx_status_ok || 0);
-                    explicitFailed = (endDiag.tx_status_fail || 0) - (baseDiag.tx_status_fail || 0);
-
-                    // Update UI to show polling progress
-                    status.textContent = 'Run ' + (run + 1) + '/' + runCount + ': Waiting... (' + ok + '/' + packetCount + ' ACKs) - Timeout in ' + ((maxWaitMs - elapsed)/1000).toFixed(0) + 's';
-
-                    // If we have accounted for every packet via OK or explicit hardware FAIL, stop waiting early!
-                    if ((ok + explicitFailed) >= packetCount) {
-                        break; 
-                    }
-                }
-
+                // Get final diagnostics
+                var endResp = await fetch('/api/xbee/diagnostics', { credentials: 'same-origin' });
+                var endDiag = await endResp.json();
                 step++;
                 bar.style.width = Math.round(step / totalSteps * 100) + '%';
                 bar.textContent = Math.round(step / totalSteps * 100) + '%';
 
                 var endTime = Date.now();
                 var duration = (endTime - startTime) / 1000;
-                
-                // Final safety check on counts
-                sent = (endDiag.tx_frames_sent || 0) - (baseDiag.tx_frames_sent || 0);
-                ok = (endDiag.tx_status_ok || 0) - (baseDiag.tx_status_ok || 0);
-                
-                // True lost packet calculation
-                var true_lost = sent - ok;
-                var loss = sent > 0 ? (true_lost / sent * 100) : 0;
-                
+                var sent = (endDiag.tx_frames_sent || 0) - (baseDiag.tx_frames_sent || 0);
+                var ok = (endDiag.tx_status_ok || 0) - (baseDiag.tx_status_ok || 0);
+                var failed = (endDiag.tx_status_fail || 0) - (baseDiag.tx_status_fail || 0);
+                var loss = sent > 0 ? (failed / sent * 100) : 0;
                 // 12 = byte length of test payload "TEST_PKT_XXX"
                 var BYTES_PER_PACKET = 12;
                 var throughput = duration > 0 ? (ok * BYTES_PER_PACKET / duration) : 0;
 
-                allRuns.push({ run: run + 1, sent: sent, ok: ok, failed: true_lost, loss: loss, duration: duration, throughput: throughput });
+                allRuns.push({ run: run + 1, sent: sent, ok: ok, failed: failed, loss: loss, duration: duration, throughput: throughput });
 
                 // Short pause between runs
                 if (run < runCount - 1) {
@@ -1019,16 +954,13 @@
         }
     }
 
-// ── Test 3: One-Way Delay ──
+    // ── Test 3: One-Way Delay ──
     async function runDelayTest() {
         var btn = document.getElementById('btnDelayTest');
         var prog = document.getElementById('delayProgress');
         var bar = document.getElementById('delayBar');
         var status = document.getElementById('delayStatus');
         var out = document.getElementById('delayResult');
-        
-        // Grab the HTTP overhead to subtract from t3-t0
-        var httpTare = parseFloat(document.getElementById('delayHttpTare').value) || 0;
 
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running...';
@@ -1044,8 +976,9 @@
         ];
 
         var results = [];
-        // PT = t2 - t1 (Processing time at the remote node)
-        var PT = 5; 
+        // PT = estimated ESP32 processing time (JSON parse + HTTP response).
+        // Measured ~3-7ms on ESP32-CAM; 5ms is the midpoint.
+        var PT = 5;
 
         try {
             for (var i = 0; i < payloads.length; i++) {
@@ -1054,41 +987,40 @@
                 bar.style.width = Math.round((i + 1) / payloads.length * 100) + '%';
                 bar.textContent = Math.round((i + 1) / payloads.length * 100) + '%';
 
+                // Measure 3 samples per payload size for accuracy
                 var rts = [];
                 for (var s = 0; s < 3; s++) {
-                    var t0 = Date.now(); 
+                    var t0 = Date.now();
                     var formData = new FormData();
                     formData.append('text', p.data);
                     await fetch('/api/xbee/send-raw', { method: 'POST', credentials: 'same-origin', body: formData });
-                    var t3 = Date.now(); 
+                    var t3 = Date.now();
                     rts.push(t3 - t0);
                     await new Promise(function(r) { setTimeout(r, 500); });
                 }
 
-                var avgTotalRT = rts.reduce(function(a, b) { return a + b; }, 0) / rts.length;
-                var trueRfRT = Math.max(0, avgTotalRT - httpTare);
-                var oneWay = Math.max(0, (trueRfRT - PT) / 2);
+                var avgRT = rts.reduce(function(a, b) { return a + b; }, 0) / rts.length;
+                var oneWay = Math.max(0, (avgRT - PT) / 2);
 
-                results.push({ size: p.size, totalRt: avgTotalRT, rfRt: trueRfRT, pt: PT, oneWay: oneWay });
+                results.push({ size: p.size, rt: avgRT, pt: PT, oneWay: oneWay });
             }
 
             var avgOneWay = results.reduce(function(s, r) { return s + r.oneWay; }, 0) / results.length;
 
-            // Updated HTML string building to match Table 12
-            var html = '<table class="table table-sm table-bordered mb-2 text-center"><thead class="table-dark align-middle">';
-            html += '<tr><th>Payload Size<br><small>(bytes)</small></th><th>Message Size<br><small>(bits)</small></th><th>t<sub>3</sub> - t<sub>0</sub> / RT<br><small>(ms)</small></th><th>t<sub>2</sub> - t<sub>1</sub> / PT<br><small>(ms)</small></th><th>One-Way<br>Delay (ms)</th><th>Remarks</th></tr></thead><tbody>';
+            var html = '<table class="table table-sm table-bordered mb-2"><thead class="table-dark">';
+            html += '<tr><th>Payload (bytes)</th><th>Avg RT (ms)</th><th>PT (ms)</th><th>One-Way Delay (ms)</th><th>Result</th></tr></thead><tbody>';
             results.forEach(function(r) {
-                var bits = r.size * 8; // Calculate bits for column 2
-                html += '<tr><td>' + r.size + '</td><td>' + bits + '</td><td>' + r.rfRt.toFixed(1) + '</td><td>' + r.pt + '</td>';
-                html += '<td><strong>' + r.oneWay.toFixed(1) + '</strong></td>';
-                html += '<td>PASSED</td></tr>'; // Matches document remarks
+                html += '<tr><td>' + r.size + '</td><td>' + r.rt.toFixed(1) + '</td><td>' + r.pt + '</td>';
+                html += '<td>' + r.oneWay.toFixed(1) + '</td>';
+                html += '<td><span class="badge bg-success">DONE</span></td></tr>';
             });
-            html += '<tr class="table-secondary fw-bold"><td>Average</td><td>—</td><td>—</td><td>—</td>';
+            html += '<tr class="table-secondary fw-bold"><td>Average</td><td>—</td><td>—</td>';
             html += '<td>' + avgOneWay.toFixed(1) + '</td><td>—</td></tr>';
             html += '</tbody></table>';
             html += '<div class="alert alert-info py-1">';
-            html += '<strong>Calculated Average RF One-Way Delay: ' + avgOneWay.toFixed(1) + ' ms</strong>';
-            html += '<br><small class="text-muted">Calculated by stripping an estimated ' + httpTare + 'ms of HTTP overhead. The formula on screen is exactly ((RT - PT) / 2).</small>';
+            html += '<strong>Average One-Way Delay: ' + avgOneWay.toFixed(1) + ' ms</strong>';
+            html += '<br><small class="text-muted">Note: RT includes HTTP overhead (browser → ESP32 → XBee → TX status → response). ';
+            html += 'Actual RF one-way delay is lower. For precise measurement, compare XBee serial log TX/RX timestamps.</small>';
             html += '</div>';
 
             out.innerHTML = html;
@@ -1104,7 +1036,7 @@
         }
     }
 
-// ── Test 4: Payload Size & Single-Stream Load Test (Scenario A) ──
+    // ── Test 4: Payload Size & Load Test ──
     async function runLoadTest() {
         var btn = document.getElementById('btnLoadTest');
         var prog = document.getElementById('loadProgress');
@@ -1121,12 +1053,15 @@
         out.style.display = 'none';
 
         var payloads = [
-            { label: 'Small', size: 10, data: 'X'.repeat(10) },
-            { label: 'Medium', size: 40, data: 'X'.repeat(40) },
-            { label: 'Large', size: 70, data: 'X'.repeat(70) }
+            { label: 'Small (10B)', size: 10, data: 'X'.repeat(10) },
+            { label: 'Medium (40B)', size: 40, data: 'X'.repeat(40) },
+            { label: 'Large (70B)', size: 70, data: 'X'.repeat(70) }
         ];
 
-        var MAX_RATE_DIFF_PCT = 50; // Threshold for PASSED/DEGRADED remarks
+        // Max acceptable rate difference (%) between programmed and actual send rate.
+        // HTTP round-trip overhead means actual rate is always lower than programmed.
+        var MAX_RATE_DIFF_PCT = 50;
+
         var results = [];
         var totalSteps = payloads.length * msgCount;
         var stepDone = 0;
@@ -1134,204 +1069,71 @@
         try {
             for (var p = 0; p < payloads.length; p++) {
                 var payload = payloads[p];
-                status.textContent = 'Testing ' + payload.label + ' (' + payload.size + ' bytes)...';
+                status.textContent = 'Testing ' + payload.label + '...';
 
-var sent = 0, ok = 0;
-                var rtts = []; 
+                var sent = 0, ok = 0, failed = 0;
                 var startTime = Date.now();
 
                 for (var i = 0; i < msgCount; i++) {
-                    var t0 = Date.now();
                     try {
                         var formData = new FormData();
                         formData.append('text', payload.data);
                         var resp = await fetch('/api/xbee/send-raw', { method: 'POST', credentials: 'same-origin', body: formData });
                         var result = await resp.json();
                         sent++;
-                        if (result.success) ok++; 
-                    } catch(e) { sent++; }
-                    
-                    var t1 = Date.now();
-                    var fetchTime = t1 - t0;
-                    rtts.push(fetchTime); 
+                        if (result.success) ok++; else failed++;
+                    } catch(e) { sent++; failed++; }
 
                     stepDone++;
                     bar.style.width = Math.round(stepDone / totalSteps * 100) + '%';
                     bar.textContent = Math.round(stepDone / totalSteps * 100) + '%';
                     status.textContent = 'Testing ' + payload.label + ': ' + (i + 1) + '/' + msgCount;
-                    
-                    // THE FIX: Delay Compensation
-                    // Subtract the time it took to process the request from the target delay.
-                    var remainingDelay = Math.max(0, delayMs - fetchTime);
-                    await new Promise(function(r) { setTimeout(r, remainingDelay); });
+                    await new Promise(function(r) { setTimeout(r, delayMs); });
                 }
 
                 var endTime = Date.now();
                 var duration = (endTime - startTime) / 1000;
-                
-                // Manuscript Math
-                var actualSendRate = sent / duration;
-                var actualRcvRate = ok / duration;
-                var pctDiff = Math.abs(ratePerSec - actualRcvRate) / ratePerSec * 100;
-
-                // Variance Math (Equation 5: σ² = Σ(xi - x̄)² / n)
-                var meanRtt = rtts.reduce(function(a,b) { return a+b; }, 0) / rtts.length;
-                var variance = rtts.reduce(function(a,b) { return a + Math.pow(b - meanRtt, 2); }, 0) / rtts.length;
+                var actualRate = sent / duration;
+                var pctDiff = Math.abs(ratePerSec - actualRate) / ratePerSec * 100;
 
                 results.push({
-                    label: payload.label, 
-                    size: payload.size,
-                    sent: sent,
+                    label: payload.label, size: payload.size,
+                    sent: sent, ok: ok, failed: failed,
                     duration: duration,
                     programmedRate: ratePerSec,
-                    actualSendRate: actualSendRate,
-                    actualRcvRate: actualRcvRate,
-                    variance: variance,
+                    actualRate: actualRate,
                     pctDiff: pctDiff
                 });
 
+                // Pause between payload sizes
                 if (p < payloads.length - 1) {
-                    status.textContent = 'Pausing to clear network buffer...';
+                    status.textContent = 'Pausing...';
                     await new Promise(function(r) { setTimeout(r, 2000); });
                 }
             }
 
-            // Build HTML matching Table 13 layout
-            var html = '<table class="table table-sm table-bordered mb-2 text-center align-middle"><thead class="table-dark">';
-            html += '<tr><th>Payload Size</th><th>Messages Sent</th><th>Duration (s)</th><th>Programmed Rate (m/s)</th>';
-            html += '<th>Actual Send Rate (m/s)</th><th>Actual Receive Rate (m/s)</th><th>Variance (σ²)</th><th>% Difference</th><th>Remarks</th></tr></thead><tbody>';
-            
+            var html = '<table class="table table-sm table-bordered mb-2"><thead class="table-dark">';
+            html += '<tr><th>Payload</th><th>Programmed Rate</th><th>Sent</th><th>OK</th><th>Failed</th>';
+            html += '<th>Duration (s)</th><th>Actual Rate (m/s)</th><th>% Difference</th><th>Result</th></tr></thead><tbody>';
             results.forEach(function(r) {
                 var pass = r.pctDiff < MAX_RATE_DIFF_PCT;
-                var remark = pass ? '<span class="fw-bold text-success">PASSED</span>' : '<span class="fw-bold text-danger">DEGRADED</span>';
-                
-                html += '<tr>';
-                html += '<td>' + escHtml(r.label) + '<br><small>(' + r.size + ' bytes)</small></td>';
-                html += '<td>' + r.sent + '</td>';
-                html += '<td>' + r.duration.toFixed(2) + '</td>';
-                html += '<td>' + r.programmedRate + '</td>';
-                html += '<td>' + r.actualSendRate.toFixed(2) + '</td>';
-                html += '<td>' + r.actualRcvRate.toFixed(2) + '</td>';
-                html += '<td>' + r.variance.toFixed(1) + '</td>';
-                html += '<td>' + r.pctDiff.toFixed(1) + '%</td>';
-                html += '<td>' + remark + '</td>';
-                html += '</tr>';
+                var badge = pass ? '<span class="badge bg-success">PASS</span>' : '<span class="badge bg-warning text-dark">DEGRADED</span>';
+                html += '<tr><td>' + escHtml(r.label) + '</td><td>' + r.programmedRate + ' m/s</td>';
+                html += '<td>' + r.sent + '</td><td>' + r.ok + '</td><td>' + r.failed + '</td>';
+                html += '<td>' + r.duration.toFixed(1) + '</td><td>' + r.actualRate.toFixed(2) + '</td>';
+                html += '<td>' + r.pctDiff.toFixed(1) + '%</td><td>' + badge + '</td></tr>';
             });
             html += '</tbody></table>';
 
-            out.innerHTML = html;
-            out.style.display = 'block';
-            prog.style.display = 'none';
-        } catch(err) {
-            out.innerHTML = '<div class="alert alert-danger py-1"><strong>Error:</strong> ' + escHtml(err.message) + '</div>';
-            out.style.display = 'block';
-            prog.style.display = 'none';
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-play me-1"></i>Run';
-        }
-    }
-
-// ── Test 5: Concurrent Load Simulation (Scenario B) ──
-    async function runConcurrentTest() {
-        var btn = document.getElementById('btnConcurrentTest');
-        var prog = document.getElementById('concProgress');
-        var status = document.getElementById('concStatus');
-        var out = document.getElementById('concResult');
-        
-        var senders = parseInt(document.getElementById('concSenders').value);
-        var msgsPerSender = parseInt(document.getElementById('concMsgs').value);
-        var ratePerSender = parseInt(document.getElementById('concRate').value);
-        var delayMs = 1000 / ratePerSender;
-        
-        // Expected Aggregate Rate = (Rate per sender) * (Number of senders)
-        var expectedAggRate = ratePerSender * senders;
-        var totalExpectedMsgs = msgsPerSender * senders;
-
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Running...';
-        prog.style.display = 'block';
-        out.style.display = 'none';
-
-        var totalSent = 0;
-        var totalOk = 0;
-        var startTime = Date.now();
-
-        try {
-            status.textContent = 'Executing ' + senders + ' concurrent threads...';
-            
-            // Array to hold the parallel threads
-            var promises = [];
-
-            // Spin up a thread for each simulated sender
-            for (var s = 0; s < senders; s++) {
-                var threadPromise = (async function(threadId) {
-                    for (var i = 0; i < msgsPerSender; i++) {
-                        var t0 = Date.now(); // Start thread timer
-                        
-                        var payload = 'CONC_NODE_' + threadId + '_MSG_' + i;
-                        var formData = new FormData();
-                        formData.append('text', payload);
-                        
-                        // Fire the request
-                        try {
-                            var resp = await fetch('/api/xbee/send-raw', { method: 'POST', credentials: 'same-origin', body: formData });
-                            var result = await resp.json();
-                            totalSent++;
-                            if (result.success) totalOk++;
-                        } catch(e) { totalSent++; }
-                        
-                        var t1 = Date.now(); // End thread timer
-                        var fetchTime = t1 - t0;
-                        
-                        // THE FIX: Delay Compensation for parallel threads
-                        var remainingDelay = Math.max(0, delayMs - fetchTime);
-                        await new Promise(function(r) { setTimeout(r, remainingDelay); });
-                    }
-                })(s); // Pass the thread ID into the async closure
-                
-                promises.push(threadPromise);
-            }
-
-            // Wait for ALL concurrent threads to finish
-            await Promise.all(promises);
-
-            var endTime = Date.now();
-            var duration = (endTime - startTime) / 1000;
-            
-            // Scenario B Math Calculations
-            var actualAggRate = totalOk / duration;
-            var degradation = ((expectedAggRate - actualAggRate) / expectedAggRate) * 100;
-            
-            // Clamp degradation at 0% in case the network is faster than the browser timer
-            if (degradation < 0) degradation = 0; 
-            
-            var pass = degradation < 20; // Example threshold: <20% degradation is a pass
-            var remark = pass ? '<span class="fw-bold text-success">PASSED</span>' : '<span class="fw-bold text-danger">DEGRADED</span>';
-
-            // Build HTML matching Table 14
-            var html = '<table class="table table-sm table-bordered mb-2 text-center align-middle"><thead class="table-dark">';
-            html += '<tr><th>Senders</th><th>Messages per<br>Sender</th><th>Total<br>Expected</th><th>Total<br>Received</th><th>Duration<br>(s)</th>';
-            html += '<th>Expected<br>Aggregate Rate (m/s)</th><th>Actual<br>Aggregate Rate (m/s)</th><th>Throughput<br>Degradation (%)</th><th>Remarks</th></tr></thead><tbody>';
-            
-            html += '<tr>';
-            html += '<td><strong>' + senders + '</strong></td>';
-            html += '<td>' + msgsPerSender + '</td>';
-            html += '<td>' + totalExpectedMsgs + '</td>';
-            html += '<td>' + totalOk + '</td>';
-            html += '<td>' + duration.toFixed(2) + '</td>';
-            html += '<td>' + expectedAggRate.toFixed(1) + '</td>';
-            html += '<td>' + actualAggRate.toFixed(2) + '</td>';
-            html += '<td><strong>' + degradation.toFixed(1) + '%</strong></td>';
-            html += '<td>' + remark + '</td>';
-            html += '</tr>';
-            
-            html += '</tbody></table>';
+            var avgDiff = results.reduce(function(s, r) { return s + r.pctDiff; }, 0) / results.length;
+            html += '<div class="alert py-1 ' + (avgDiff < MAX_RATE_DIFF_PCT ? 'alert-success' : 'alert-warning') + '">';
+            html += '<strong>Average Rate Difference: ' + avgDiff.toFixed(1) + '%</strong>';
+            html += '<br><small class="text-muted">Note: HTTP overhead adds latency per request. Actual XBee throughput is higher than measured HTTP round-trip rate.</small>';
+            html += '</div>';
 
             out.innerHTML = html;
             out.style.display = 'block';
             prog.style.display = 'none';
-
         } catch(err) {
             out.innerHTML = '<div class="alert alert-danger py-1"><strong>Error:</strong> ' + escHtml(err.message) + '</div>';
             out.style.display = 'block';
