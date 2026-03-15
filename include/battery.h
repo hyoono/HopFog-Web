@@ -1,21 +1,35 @@
 /*
- * battery.h — INA219 battery monitoring for HopFog admin/node
+ * battery.h — INA219 battery monitoring for HopFog ESP32-CAM
  *
- * DISABLED BY DEFAULT: ESP32-CAM (AI-Thinker) does not expose
- * GPIO 21/22 (standard I2C) on its header pins.
+ * I2C wiring (uses available exposed GPIO pins):
+ *   INA219 SDA → GPIO 4 (flash LED pin — time-shared with LED PWM)
+ *   INA219 SCL → GPIO 0 (free after boot)
+ *   INA219 VCC → 3.3V
+ *   INA219 GND → GND
  *
- * To enable: add -DENABLE_BATTERY=1 to platformio.ini build_flags
- * and wire INA219 to GPIO 21 (SDA) + GPIO 22 (SCL) via the camera
- * connector or an ESP32 breakout board.
+ * GPIO 4 (SDA) is time-shared with the flash LED:
+ *   - Flash LED PWM runs 99.99% of the time for status indication
+ *   - Every 5 seconds, LED briefly suspends (~2ms) for I2C read
+ *   - Imperceptible to human eye
  *
- * When disabled, batteryInit() returns false and batteryRead()
- * returns safe defaults. The dashboard shows "N/A".
+ * GPIO 0 notes:
+ *   - Strapping pin (HIGH = normal boot, LOW = download mode)
+ *   - INA219 module's I2C pull-up keeps it HIGH → helps normal boot
+ *   - Free for I2C use after boot completes
+ *
+ * When INA219 is not connected: batteryInit() returns false,
+ * batteryRead() returns safe defaults. No I2C activity occurs.
+ * The flash LED works normally for connection status indication.
  */
 
 #ifndef BATTERY_H
 #define BATTERY_H
 
 #include <Arduino.h>
+
+// I2C pins for INA219 — time-shared with flash LED on GPIO 4
+#define BAT_SDA_PIN  4   // GPIO 4 (shared with flash LED)
+#define BAT_SCL_PIN  0   // GPIO 0 (free after boot, pull-up = normal boot)
 
 // Battery thresholds (for a 1S LiPo / 18650 cell)
 #define BATTERY_FULL_MV       4200  // 4.2V = 100%
@@ -38,16 +52,21 @@ struct BatteryInfo {
     float    voltage_V;     // bus voltage in volts
     float    current_mA;    // current in mA (positive = discharging)
     float    power_mW;      // power in mW
-    int      percentage;    // 0-100%
+    int      percentage;    // 0-100% (-1 = not available)
     BatteryStatus status;
 };
 
-/// Initialize INA219 sensor. Call AFTER SD card init.
+/// Initialize INA219 sensor. Call AFTER ledStatusInit().
+/// Briefly suspends flash LED for I2C probe (~5ms).
 /// Returns true if sensor detected.
 bool batteryInit();
 
-/// Read current battery state. Fast (~1ms I2C read).
+/// Read current battery state. Briefly suspends flash LED (~2ms).
+/// Only call from main loop (not from web server callbacks).
 BatteryInfo batteryRead();
+
+/// Get the last cached battery reading. Thread-safe — call from anywhere.
+BatteryInfo batteryGetCached();
 
 /// Get a human-readable status string
 const char* batteryStatusStr(BatteryStatus s);

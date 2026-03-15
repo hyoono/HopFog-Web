@@ -1,27 +1,19 @@
 /*
- * led_status.h — RGB LED status indicators for HopFog admin/node
+ * led_status.h — Flash LED status indicator for HopFog ESP32-CAM
  *
- * DISABLED BY DEFAULT: ESP32-CAM (AI-Thinker) does not expose the
- * required GPIO pins (25, 26) on its header.
+ * Uses the built-in flash LED on GPIO 4 for status indication.
+ * No external LED required — works on every ESP32-CAM board.
  *
- * To enable: add -DENABLE_LED=1 to platformio.ini build_flags
- * and wire an RGB LED to GPIO 25 (R), 26 (G), 33 (B).
+ * GPIO 4 is time-shared with INA219 I2C SDA (see battery.h).
+ * When a battery read occurs (~2ms every 5s), the LED briefly suspends.
  *
- * Activity Status:
- *   RED constant   = device on, no node connected
- *   YELLOW pulsing = connecting/searching
- *   GREEN constant = admin and node connected
- *
- * Battery Status:
- *   RED quick pulse = critically low battery
- *   YELLOW constant = low battery
- *   GREEN constant  = full / done charging
- *   ORANGE constant = charging
- *
- * Pin assignment (when enabled — uses free camera pins):
- *   LED_R = GPIO 25  (Red)
- *   LED_G = GPIO 26  (Green)
- *   LED_B = GPIO 33  (Blue — built-in status LED, active LOW)
+ * Patterns (single white LED):
+ *   OFF              = no nodes registered (idle)
+ *   Slow pulse       = searching for nodes
+ *   Solid dim glow   = connected to node(s)
+ *   Fast blink (10Hz)= critical battery (<5%)
+ *   Double blink     = low battery (5-15%)
+ *   Slow breathe     = charging
  */
 
 #ifndef LED_STATUS_H
@@ -29,38 +21,31 @@
 
 #include <Arduino.h>
 
-// LED GPIO pins — using free camera pins (camera not used in this project)
-// CRITICAL: GPIO 16 = PSRAM CS, GPIO 12/14/15 = SD card — NEVER use!
-#define LED_R_PIN  25   // Red   (was camera VSYNC)
-#define LED_G_PIN  26   // Green (was camera SIOD)
-#define LED_B_PIN  33   // Blue  (ESP32-CAM built-in, active LOW)
-
-// PWM settings for low power
-#define LED_PWM_FREQ  1000
-#define LED_PWM_RES   8     // 8-bit (0-255)
-#define LED_BRIGHTNESS 30   // low brightness for energy efficiency (0-255)
-
-// LED channels
-#define LED_R_CH  4
-#define LED_G_CH  5
-#define LED_B_CH  6
+// Flash LED on GPIO 4 (built-in on ESP32-CAM, active HIGH via MOSFET)
+#define FLASH_LED_PIN     4
+#define FLASH_LED_CHANNEL 4   // LEDC channel
+#define FLASH_LED_FREQ    1000
+#define FLASH_LED_RES     8   // 8-bit (0-255)
+#define FLASH_LED_DIM     8   // Very dim glow (~3% duty)
+#define FLASH_LED_MED     20  // Medium for blink patterns
+#define FLASH_LED_BRIGHT  40  // Brighter for attention (still low)
 
 enum ConnectionStatus {
-    CONN_DISCONNECTED,   // RED constant
-    CONN_SEARCHING,      // YELLOW pulsing
-    CONN_CONNECTED       // GREEN constant
+    CONN_DISCONNECTED,   // OFF
+    CONN_SEARCHING,      // Slow pulse
+    CONN_CONNECTED       // Solid dim glow
 };
 
-/// Initialize LED pins with PWM. Call in setup().
+/// Initialize flash LED with PWM. Call in setup().
 void ledStatusInit();
 
-/// Update connection status LED. Call from loop() for pulsing effects.
+/// Update flash LED pattern. Call from loop() every ~200ms.
 void ledStatusUpdate(ConnectionStatus connStatus, int batteryPercent, bool charging);
 
-/// Set a solid LED color (r, g, b each 0-255)
-void ledSetColor(uint8_t r, uint8_t g, uint8_t b);
+/// Set flash LED brightness (0-255). Active HIGH.
+void ledSetBrightness(uint8_t val);
 
-/// Turn off all LEDs
+/// Turn off flash LED
 void ledOff();
 
 #endif // LED_STATUS_H

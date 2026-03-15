@@ -10,9 +10,10 @@
  *   5. Receive callback
  *   6. SD card init
  *   7. Auth
- *   8. WiFi AP
- *   9. DNS + Web server
- *  10. delay(3000) — XBee network formation
+ *   8. Flash LED status + Battery monitor (INA219)
+ *   9. WiFi AP
+ *  10. DNS + Web server
+ *  11. delay(3000) — XBee network formation
  */
 
 #include <Arduino.h>
@@ -38,9 +39,8 @@
 AsyncWebServer server(HTTP_PORT);
 DNSServer     dnsServer;
 
-// ── LED helpers (match test project) ────────────────────────────────
+// ── Boot LED helpers (built-in red LED on GPIO 33) ──────────────────
 #define BUILTIN_LED_PIN  33   // ESP32-CAM built-in red LED (active LOW)
-#define FLASH_LED_PIN     4   // ESP32-CAM flash LED
 
 static void builtinLedOn()  { digitalWrite(BUILTIN_LED_PIN, LOW); }
 static void builtinLedOff() { digitalWrite(BUILTIN_LED_PIN, HIGH); }
@@ -54,22 +54,15 @@ static void nullPutc(char c) { (void)c; }
 // ── Setup ───────────────────────────────────────────────────────────
 void setup() {
     // STEP 0: SILENCE ALL UART0 OUTPUT
-    //
-    // ets_printf() — used internally by WiFi driver, SPI driver, and
-    // AsyncTCP — bypasses both CORE_DEBUG_LEVEL and esp_log_level_set().
-    // These prints corrupt XBee API frames on shared UART0.
-    // This is the key fix that the working test project didn't need
-    // because it had no SD card or complex WiFi configuration.
     ets_install_putc1(nullPutc);
     esp_log_level_set("*", ESP_LOG_NONE);
 
-    // Step 1: Flash LED off (GPIO 4)
+    // Step 1: Flash LED off (GPIO 4) — later used for status via PWM
     pinMode(FLASH_LED_PIN, OUTPUT);
     digitalWrite(FLASH_LED_PIN, LOW);
 
-    // Step 2: Status LED blink — 3×300ms = ~1.8 seconds
-    //         This delay matches the test project EXACTLY.
-    //         It gives the bootloader time to finish ALL UART0 output
+    // Step 2: Boot blink on built-in red LED (GPIO 33) — 3×300ms = ~1.8s
+    //         This delay gives the bootloader time to finish ALL UART0 output
     //         before we reconfigure UART0 to 9600 baud for XBee.
     pinMode(BUILTIN_LED_PIN, OUTPUT);
     builtinLedOff();
@@ -89,29 +82,30 @@ void setup() {
     // Step 5: SD card
     if (!initSDCard()) {
         logMsg('E', "SD card init failed!");
-        // Don't halt — admin can still work without SD for XBee testing
     }
 
     // Step 6: Auth
     authInit();
 
-    // Step 6b: Battery monitor (INA219 via I2C — optional)
-    batteryInit();
-
-    // Step 6c: LED status indicators
+    // Step 7: Flash LED status indicator (GPIO 4 PWM)
     ledStatusInit();
 
-    // Step 7: WiFi AP (simple — matches test project style)
+    // Step 8: Battery monitor — INA219 on GPIO 4 (SDA) + GPIO 0 (SCL)
+    //         Auto-detects: if no INA219, returns false and system runs
+    //         with flash LED status only (no battery indicators).
+    bool hasBattery = batteryInit();
+    logMsg('S', "Battery: %s", hasBattery ? "INA219 detected" : "not available");
+
+    // Step 9: WiFi AP
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONN);
     delay(100);
-    // Max TX power + disable power save for WiFi stability
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
     esp_wifi_set_ps(WIFI_PS_NONE);
 
     logMsg('S', "WiFi AP: %s  IP: 192.168.4.1", AP_SSID);
 
-    // Step 8: DNS captive portal + Web server
+    // Step 10: DNS captive portal + Web server
     dnsServer.setTTL(300);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
@@ -122,22 +116,30 @@ void setup() {
 
     logMsg('S', "Web server on port %d", HTTP_PORT);
 
-    // Step 9: Wait for XBee network (matches test project)
+    // Step 11: Wait for XBee network (matches test project)
     delay(3000);
     blinkBuiltinLed(5, 100);
 
     logMsg('S', "Setup complete. Waiting for XBee traffic...");
 }
 
-// ── Loop (matches test project + calls nodeProtocolLoop for PING) ────
+// ── Loop ────────────────────────────────────────────────────────────
 void loop() {
     dnsServer.processNextRequest();
     xbeeProcessIncoming();
     nodeProtocolLoop();
 
-    // LED status: show connection and battery state
+    // Battery read every 5 seconds (~2ms I2C, imperceptible LED pause)
+    static unsigned long lastBatRead = 0;
+    static BatteryInfo cachedBat = {false, 0, 0, 0, -1, BAT_UNKNOWN};
+    if (millis() - lastBatRead > 5000) {
+        lastBatRead = millis();
+        cachedBat = batteryRead();
+    }
+
+    // Flash LED status update every 200ms (5 Hz)
     static unsigned long lastLedUpdate = 0;
-    if (millis() - lastLedUpdate > 200) {  // every 200ms (5 Hz)
+    if (millis() - lastLedUpdate > 200) {
         lastLedUpdate = millis();
         ConnectionStatus conn;
         if (nodeProtocolActiveCount() > 0) {
@@ -147,10 +149,8 @@ void loop() {
         } else {
             conn = CONN_DISCONNECTED;
         }
-        BatteryInfo bat = batteryRead();
-        ledStatusUpdate(conn, bat.percentage, bat.status == BAT_CHARGING);
+        ledStatusUpdate(conn, cachedBat.percentage, cachedBat.status == BAT_CHARGING);
     }
 
-    delay(10);  // Match test project. yield() alone doesn't provide enough
-                // time for the WiFi/TCP stack on Core 0 to process packets.
+    delay(10);
 }

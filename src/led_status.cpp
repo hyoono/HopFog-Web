@@ -1,118 +1,102 @@
 /*
- * led_status.cpp — RGB LED status indicators for HopFog
+ * led_status.cpp — Flash LED status indicator for HopFog ESP32-CAM
  *
- * DISABLED BY DEFAULT on ESP32-CAM: GPIO 25/26 are camera pins
- * not broken out on the AI-Thinker ESP32-CAM header.
+ * Single white LED on GPIO 4 with PWM brightness control.
+ * Active HIGH (MOSFET driver on ESP32-CAM board).
  *
- * To enable: set -DENABLE_LED=1 in platformio.ini build_flags
- * and wire RGB LED to GPIO 25 (R), GPIO 26 (G), GPIO 33 (B).
- *
- * When disabled, all LED functions are safe no-ops.
+ * GPIO 4 is time-shared with INA219 I2C SDA — the battery module
+ * briefly detaches/reattaches LEDC every 5 seconds for I2C reads.
  */
 
 #include "led_status.h"
-#include "config.h"
 
 static bool ledInitialized = false;
-
-#if ENABLE_LED
 static unsigned long lastPulseMs = 0;
 static bool pulseUp = true;
 static uint8_t pulseVal = 0;
 
-static uint8_t capBrightness(uint8_t val) {
-    return (val > 0) ? min((uint8_t)LED_BRIGHTNESS, val) : 0;
-}
-#endif
-
 void ledStatusInit() {
-#if ENABLE_LED
-    ledcSetup(LED_R_CH, LED_PWM_FREQ, LED_PWM_RES);
-    ledcSetup(LED_G_CH, LED_PWM_FREQ, LED_PWM_RES);
-    ledcSetup(LED_B_CH, LED_PWM_FREQ, LED_PWM_RES);
-
-    ledcAttachPin(LED_R_PIN, LED_R_CH);
-    ledcAttachPin(LED_G_PIN, LED_G_CH);
-    ledcAttachPin(LED_B_PIN, LED_B_CH);
-
+    ledcSetup(FLASH_LED_CHANNEL, FLASH_LED_FREQ, FLASH_LED_RES);
+    ledcAttachPin(FLASH_LED_PIN, FLASH_LED_CHANNEL);
     ledOff();
     ledInitialized = true;
-    dbgprintln("[LED] Status LEDs initialized");
-#else
-    // No LED hardware available on this board
-    ledInitialized = false;
-#endif
 }
 
-void ledSetColor(uint8_t r, uint8_t g, uint8_t b) {
-#if ENABLE_LED
+void ledSetBrightness(uint8_t val) {
     if (!ledInitialized) return;
-    ledcWrite(LED_R_CH, capBrightness(r));
-    ledcWrite(LED_G_CH, capBrightness(g));
-    // GPIO 33 is active LOW on ESP32-CAM
-    ledcWrite(LED_B_CH, 255 - capBrightness(b));
-#else
-    (void)r; (void)g; (void)b;
-#endif
+    ledcWrite(FLASH_LED_CHANNEL, val);  // Active HIGH: 0=off, 255=full
 }
 
 void ledOff() {
-#if ENABLE_LED
     if (!ledInitialized) return;
-    ledcWrite(LED_R_CH, 0);
-    ledcWrite(LED_G_CH, 0);
-    ledcWrite(LED_B_CH, 255); // active LOW
-#endif
+    ledcWrite(FLASH_LED_CHANNEL, 0);
 }
 
 void ledStatusUpdate(ConnectionStatus connStatus, int batteryPercent, bool charging) {
-#if ENABLE_LED
     if (!ledInitialized) return;
 
     unsigned long now = millis();
 
-    // Battery takes priority if critical
+    // Battery critical: fast blink (10Hz) — highest priority
     if (batteryPercent >= 0 && batteryPercent < 5) {
-        if (now - lastPulseMs > 100) {
+        if (now - lastPulseMs > 50) {  // 50ms on/off = 10Hz
             lastPulseMs = now;
             pulseUp = !pulseUp;
-            ledSetColor(pulseUp ? LED_BRIGHTNESS : 0, 0, 0);
+            ledSetBrightness(pulseUp ? FLASH_LED_BRIGHT : 0);
         }
         return;
     }
 
+    // Charging: slow breathe effect
     if (charging) {
-        ledSetColor(LED_BRIGHTNESS, LED_BRIGHTNESS / 3, 0);
+        if (now - lastPulseMs > 40) {
+            lastPulseMs = now;
+            if (pulseUp) {
+                pulseVal += 1;
+                if (pulseVal >= FLASH_LED_MED) pulseUp = false;
+            } else {
+                if (pulseVal == 0) pulseUp = true;
+                else pulseVal -= 1;
+            }
+            ledSetBrightness(pulseVal);
+        }
         return;
     }
 
+    // Low battery: double blink pattern (1-second cycle)
     if (batteryPercent >= 0 && batteryPercent < 15) {
-        ledSetColor(LED_BRIGHTNESS, LED_BRIGHTNESS / 2, 0);
+        unsigned long phase = (now / 100) % 10;
+        if (phase == 0 || phase == 1 || phase == 3 || phase == 4) {
+            ledSetBrightness(FLASH_LED_MED);
+        } else {
+            ledOff();
+        }
         return;
     }
 
+    // Connection status
     switch (connStatus) {
         case CONN_DISCONNECTED:
-            ledSetColor(LED_BRIGHTNESS, 0, 0);
+            ledOff();
             break;
+
         case CONN_SEARCHING:
+            // Slow pulse (breathe): ~2-second cycle
             if (now - lastPulseMs > 30) {
                 lastPulseMs = now;
                 if (pulseUp) {
-                    pulseVal += 2;
-                    if (pulseVal >= LED_BRIGHTNESS) pulseUp = false;
+                    pulseVal += 1;
+                    if (pulseVal >= FLASH_LED_DIM) pulseUp = false;
                 } else {
-                    if (pulseVal < 2) { pulseVal = 0; pulseUp = true; }
-                    else pulseVal -= 2;
+                    if (pulseVal == 0) pulseUp = true;
+                    else pulseVal -= 1;
                 }
-                ledSetColor(pulseVal, pulseVal / 2, 0);
+                ledSetBrightness(pulseVal);
             }
             break;
+
         case CONN_CONNECTED:
-            ledSetColor(0, LED_BRIGHTNESS, 0);
+            ledSetBrightness(FLASH_LED_DIM);
             break;
     }
-#else
-    (void)connStatus; (void)batteryPercent; (void)charging;
-#endif
 }

@@ -1735,7 +1735,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         int uid = authenticateRequest(request);
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
-        BatteryInfo bat = batteryRead();
+        BatteryInfo bat = batteryGetCached();
 
         JsonDocument resp;
         resp["available"]  = bat.available;

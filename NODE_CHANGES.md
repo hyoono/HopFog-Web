@@ -794,33 +794,39 @@ serve this correctly. The mobile app's `Announcement` data class expects:
 | 11 | Captive portal | Phones show login popup without detection endpoints |
 | 12 | GET /announcements | Already correct (no changes needed) |
 | 13 | Battery monitoring (INA219) | Report battery level to admin via HEARTBEAT |
-| 14 | LED status indicators | RGB LED for connection and battery status |
+| 14 | Flash LED status indicator | Built-in flash LED for connection and battery status |
 | 15 | Sync watchdog | Abort sync if stuck for 30 seconds |
 
-> **NOTE:** Fixes 13 and 14 are DISABLED BY DEFAULT on ESP32-CAM because
-> GPIO 25, 26, 21, 22 are not exposed on the AI-Thinker board header.
-> To enable, add `-DENABLE_BATTERY=1` and/or `-DENABLE_LED=1` to
-> `platformio.ini` build_flags. Only do this if you have a breakout board
-> or have soldered wires to the camera connector pads.
+> **NOTE:** The admin now uses the built-in flash LED (GPIO 4) for status
+> indication — no external LED needed. Battery monitoring uses INA219 on
+> GPIO 4 (SDA, time-shared with flash LED) + GPIO 0 (SCL, free after boot).
+> INA219 auto-detects: if not connected, system runs with flash LED status only.
 
 ---
 
-## Fix 13: Battery Monitoring (INA219) — OPTIONAL
+## Fix 13: Battery Monitoring (INA219)
 
 **What:** Add INA219 battery sensor support. Report battery data in HEARTBEAT messages.
 
 **Why:** The admin dashboard shows battery status for both admin and nodes. Without this, the node battery panel shows "N/A".
 
-**Status:** DISABLED by default. GPIO 21/22 (I2C) are not broken out on the ESP32-CAM header.
+**Status:** ALWAYS ENABLED. INA219 auto-detects at startup. If not connected, `batteryInit()` returns false and all reads return safe defaults.
 
-### To enable
-In `platformio.ini`:
-```ini
-build_flags =
-    -DENABLE_BATTERY=1
+### I2C pins for ESP32-CAM (time-shared with flash LED)
+```
+INA219 SDA → GPIO 4 (flash LED pin — time-shared with LED PWM)
+INA219 SCL → GPIO 0 (free after boot, pull-up helps normal boot)
+INA219 VCC → 3.3V
+INA219 GND → GND
+```
 
-lib_deps =
-    adafruit/Adafruit INA219@^1.2.1
+GPIO 4 is time-shared: flash LED PWM runs 99.99% of the time, with a brief ~2ms I2C read every 5 seconds. GPIO 0 is a boot strapping pin (HIGH = normal boot); the INA219 module's I2C pull-up keeps it HIGH, which actually helps normal boot.
+
+```
+DANGER — NEVER use these pins for I2C:
+  GPIO 16/17 = PSRAM CS/CLK — will crash system!
+  GPIO 12    = VDD_SDIO strapping pin — I2C pull-up causes 1.8V boot!
+  GPIO 2/13/14/15 = SD card (SPI mode) — will corrupt SD!
 ```
 
 ### Node HEARTBEAT format — add battery fields
@@ -835,50 +841,44 @@ Where:
 - `bat_s` = status string: "full", "normal", "low", "critical", "charging", "unknown"
 
 ### Battery code
-Copy `include/battery.h` and `src/battery.cpp` from the admin repo — they are identical and work on both admin and node.
-
-### I2C pins for ESP32-CAM (CRITICAL — use these exact pins!)
-```cpp
-Wire.begin(21, 22);  // SDA=GPIO21, SCL=GPIO22 (standard I2C, camera D3/PCLK - free)
-// DANGER: Do NOT use GPIO 14/15 — those are SD card CLK/CS!
-// DANGER: Do NOT use GPIO 16/17 — those are PSRAM CS/CLK!
-```
+Copy `include/battery.h` and `src/battery.cpp` from the admin repo. The INA219 library is always included in `lib_deps`.
 
 If INA219 is not connected, `batteryInit()` returns false and all reads return safe defaults. The dashboard shows "N/A".
 
 ---
 
-## Fix 14: LED Status Indicators — OPTIONAL
+## Fix 14: Flash LED Status Indicator
 
-**What:** Add RGB LED indicators for connection and battery status.
+**What:** Use the built-in flash LED (GPIO 4) for connection and battery status indication.
 
-**Why:** Visual feedback for device status without needing WiFi/web dashboard.
+**Why:** Visual feedback for device status without needing WiFi/web dashboard. No external LED or wiring required — the flash LED is built into every ESP32-CAM board.
 
-**Status:** DISABLED by default. GPIO 25/26 are not broken out on the ESP32-CAM header.
+**Status:** ALWAYS ENABLED. The flash LED is available on all ESP32-CAM boards.
 
-### To enable
-In `platformio.ini`:
-```ini
-build_flags =
-    -DENABLE_LED=1
-```
-
-### LED behavior
-| Condition | LED Color |
-|-----------|-----------|
-| Device on, no admin connected | RED constant |
-| Searching for admin (PING sent, no PONG received) | YELLOW pulsing |
-| Admin connected (PONG received within 30s) | GREEN constant |
-| Critically low battery (<5%) | RED quick pulse |
-| Low battery (<15%) | YELLOW constant |
-| Charging | ORANGE constant |
-| Full battery | GREEN constant |
+### LED behavior (single white LED on GPIO 4)
+| Condition | Flash LED Pattern |
+|-----------|-------------------|
+| No nodes registered (idle) | OFF |
+| Searching for nodes (registered but not active) | Slow pulse (breathe) |
+| Connected to node(s) | Solid dim glow |
+| Critically low battery (<5%) | Fast blink (10Hz) |
+| Low battery (5-15%) | Double blink pattern |
+| Charging | Slow breathe effect |
 
 ### Code
 Copy `include/led_status.h` and `src/led_status.cpp` from the admin repo.
 
 In node's `loop()`:
 ```cpp
+// Battery read every 5 seconds (~2ms I2C, imperceptible LED pause)
+static unsigned long lastBatRead = 0;
+static BatteryInfo cachedBat = {false, 0, 0, 0, -1, BAT_UNKNOWN};
+if (millis() - lastBatRead > 5000) {
+    lastBatRead = millis();
+    cachedBat = batteryRead();
+}
+
+// Flash LED status update every 200ms
 static unsigned long lastLedMs = 0;
 if (millis() - lastLedMs > 200) {
     lastLedMs = millis();
@@ -890,20 +890,15 @@ if (millis() - lastLedMs > 200) {
     } else {
         conn = CONN_DISCONNECTED;
     }
-    BatteryInfo bat = batteryRead();
-    ledStatusUpdate(conn, bat.percentage, bat.status == BAT_CHARGING);
+    ledStatusUpdate(conn, cachedBat.percentage, cachedBat.status == BAT_CHARGING);
 }
 ```
 
-### Pin assignment (CRITICAL — must match these exactly!)
+### Flash LED pin (GPIO 4) — no external wiring needed
 ```
-LED_R = GPIO 25  (external red LED — camera VSYNC pad on camera connector)
-LED_G = GPIO 26  (external green LED — camera SIOD pad on camera connector)  
-LED_B = GPIO 33  (built-in status LED, active LOW)
-
-DANGER — NEVER use these pins for LED or I2C:
-  GPIO 16/17 = PSRAM CS/CLK — will crash system!
-  GPIO 12/14/15 = SD card — will corrupt SD!
+GPIO 4 = Built-in flash LED (active HIGH via MOSFET)
+         Time-shared with INA219 I2C SDA (see Fix 13)
+         PWM brightness control at low duty cycle (~3%) for subtle glow
 ```
 
 ---
