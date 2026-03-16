@@ -30,10 +30,6 @@
                         <h2 class="mb-0">{{ people_connected }}</h2>
                     </div>
                 </div>
-                <div class="card-footer d-flex align-items-center justify-content-between">
-                    <a class="small text-white stretched-link" href="#">View Details</a>
-                    <div class="small text-white"><i class="fas fa-angle-right"></i></div>
-                </div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
@@ -70,10 +66,14 @@
         <div class="col-xl-6">
             <div class="card mb-4">
                 <div class="card-header">
-                    <i class="fas fa-chart-area me-1"></i>
-                    Connectivity Log
+                    <i class="fas fa-network-wired me-1"></i>
+                    Connected Nodes
                 </div>
-                <div class="card-body"><canvas id="myAreaChart" width="100%" height="40"></canvas></div>
+                <div class="card-body">
+                    <div id="registeredNodes" class="p-2 bg-light border rounded" style="min-height:60px;">
+                        <span class="text-muted">Loading...</span>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="col-xl-6">
@@ -133,4 +133,37 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/simple-datatables@7.1.2/dist/umd/simple-datatables.min.js" crossorigin="anonymous"></script>
 <script src="{{ url_for('static', path='js/datatables-simple-demo.js') }}"></script>
+<script>
+    function escHtml(s) {
+        var d = document.createElement('div');
+        d.appendChild(document.createTextNode(s));
+        return d.innerHTML;
+    }
+
+    function refreshNodes() {
+        fetch('/api/nodes', { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var el = document.getElementById('registeredNodes');
+            if (!data.nodes || data.nodes.length === 0) {
+                el.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>No nodes registered yet</span>';
+            } else {
+                var html = '<div class="mb-2"><strong>' + data.active + '</strong> active / <strong>' + data.total + '</strong> total</div>';
+                data.nodes.forEach(function(n) {
+                    var badge = n.status === 'active' ? 'bg-success' : 'bg-secondary';
+                    html += '<span class="badge ' + badge + ' me-1 mb-1">' + escHtml(n.node_id) +
+                            ' (' + n.seconds_since_heartbeat + 's ago)</span>';
+                });
+                el.innerHTML = html;
+            }
+        })
+        .catch(function() {
+            document.getElementById('registeredNodes').innerHTML =
+                '<span class="text-muted">Could not load nodes</span>';
+        });
+    }
+
+    refreshNodes();
+    setInterval(refreshNodes, 10000);
+</script>
 {% endblock %}

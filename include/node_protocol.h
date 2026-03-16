@@ -28,7 +28,7 @@
 #define NODE_UNICAST_PACING_MS  50      // delay between unicast sends
 
 // ── Message retention ──────────────────────────────────────────────
-#define MESSAGE_TTL_SECONDS     172800  // 48 hours in seconds
+#define MESSAGE_TTL_SECONDS     180     // 3 minutes in seconds
 
 // ── Node info stored in memory ─────────────────────────────────────
 struct NodeInfo {

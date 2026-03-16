@@ -29,15 +29,13 @@
 
           <div class="d-flex gap-2 mt-3">
             <form method="post" action="/admin/messaging/broadcasts/{{ b.id }}/mark_sent">
-              <button class="btn btn-success" type="submit"><i class="fas fa-check me-1"></i>Mark Sent (Simulation)</button>
+              <button class="btn btn-success" type="submit"><i class="fas fa-check me-1"></i>Mark Sent</button>
             </form>
             <form method="post" action="/admin/messaging/broadcasts/{{ b.id }}/cancel" onsubmit="return confirm('Cancel this broadcast?');">
               <button class="btn btn-outline-danger" type="submit"><i class="fas fa-ban me-1"></i>Cancel</button>
             </form>
           </div>
-          <div class="form-text mt-2">
-            “Mark Sent” is for UI/demo purposes until we connect the fog/IEEE 802.15.4 dispatcher.
-          </div>
+
         </div>
       </div>
     </div>

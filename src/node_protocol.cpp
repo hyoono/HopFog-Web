@@ -743,9 +743,9 @@ static void handleSyncBackDone(const char* nodeId) {
     logMsg('S', "SYNC_BACK complete from %s", nodeId);
 }
 
-// ── Message cleanup (48-hour TTL) ──────────────────────────────────
+// ── Message cleanup (TTL-based) ───────────────────────────────────
 //
-// Direct messages older than 48 hours are automatically deleted.
+// Direct messages older than MESSAGE_TTL_SECONDS are automatically deleted.
 // This runs periodically in nodeProtocolLoop().
 
 static unsigned long lastCleanupMs = 0;
@@ -753,7 +753,7 @@ static unsigned long lastCleanupMs = 0;
 static void cleanupOldMessages() {
     // Relative timestamp check: ESP32 doesn't have a synced real-time clock,
     // so we compare sent_at timestamps relative to the newest message.
-    // Messages with sent_at > 0 and more than 48h older than the newest
+    // Messages with sent_at > 0 and more than MESSAGE_TTL_SECONDS older than the newest
     // message are deleted.
     JsonDocument doc;
     readJsonArray(SD_DMS_FILE, doc);
@@ -771,7 +771,7 @@ static void cleanupOldMessages() {
 
     if (latestTs == 0) return;  // No valid timestamps
 
-    // Remove messages older than 48 hours (172800 seconds)
+    // Remove messages older than MESSAGE_TTL_SECONDS
     long cutoff = latestTs - MESSAGE_TTL_SECONDS;
     int removed = 0;
     int i = 0;
@@ -788,7 +788,7 @@ static void cleanupOldMessages() {
 
     if (removed > 0) {
         writeJsonArray(SD_DMS_FILE, doc);
-        logMsg('S', "Cleanup: removed %d messages older than 48h", removed);
+        logMsg('S', "Cleanup: removed %d expired messages (TTL %ds)", removed, MESSAGE_TTL_SECONDS);
     }
 }
 
