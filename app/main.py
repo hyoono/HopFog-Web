@@ -642,7 +642,7 @@ def toggle_user_status(
 
 
 @app.get("/api/users/online")
-def get_online_users(db: Session = Depends(get_db)):
+def get_online_users(db: Session = Depends(get_db), current_user: User = Depends(verify_token)):
     """Returns list of active (online) users for mobile app filtering."""
     users = db.query(User).filter(User.is_active == 1).all()
     return [
