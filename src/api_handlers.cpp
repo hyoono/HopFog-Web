@@ -1441,6 +1441,93 @@ void registerApiRoutes(AsyncWebServer &server) {
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /api/conversation/{other_user_id}?user_id=X     │
+    // │  Returns full message history for local archiving (Room DB)   │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("^\\/api\\/conversation\\/(\\d+)$", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("user_id")) {
+            sendJsonError(request, 400, "user_id required");
+            return;
+        }
+        int userId    = request->getParam("user_id")->value().toInt();
+        int otherUserId = request->pathArg(0).toInt();
+
+        if (userId <= 0 || otherUserId <= 0) {
+            sendJsonError(request, 400, "Invalid user IDs");
+            return;
+        }
+
+        // Find conversation between these two users
+        JsonDocument convoDoc;
+        readJsonArray(SD_CONVOS_FILE, convoDoc);
+
+        int convoId = 0;
+        for (JsonObject c : convoDoc.as<JsonArray>()) {
+            int u1 = c["user1_id"] | 0;
+            int u2 = c["user2_id"] | 0;
+            if ((u1 == userId && u2 == otherUserId) ||
+                (u1 == otherUserId && u2 == userId)) {
+                convoId = c["id"] | 0;
+                break;
+            }
+        }
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+
+        if (convoId > 0) {
+            // Collect messages for this conversation
+            JsonDocument dmDoc;
+            readJsonArray(SD_DMS_FILE, dmDoc);
+
+            // Build sortable list (sent_at, index)
+            struct MsgRef { unsigned long ts; int idx; };
+            MsgRef refs[512];
+            int count = 0;
+
+            int idx = 0;
+            for (JsonObject m : dmDoc.as<JsonArray>()) {
+                if ((m["conversation_id"] | 0) == convoId && count < 512) {
+                    refs[count].ts  = m["sent_at"] | 0UL;
+                    refs[count].idx = idx;
+                    count++;
+                }
+                idx++;
+            }
+
+            // Sort ascending by sent_at
+            for (int i = 0; i < count - 1; i++) {
+                for (int j = i + 1; j < count; j++) {
+                    if (refs[j].ts < refs[i].ts) {
+                        MsgRef tmp = refs[i];
+                        refs[i] = refs[j];
+                        refs[j] = tmp;
+                    }
+                }
+            }
+
+            // Build response in sorted order
+            JsonArray dmArr = dmDoc.as<JsonArray>();
+            for (int i = 0; i < count; i++) {
+                JsonObject m = dmArr[refs[i].idx].as<JsonObject>();
+                int senderId = m["sender_id"] | 0;
+                int receiverId = (senderId == userId) ? otherUserId : userId;
+
+                JsonObject o = arr.add<JsonObject>();
+                o["id"]          = m["id"];
+                o["sender_id"]   = senderId;
+                o["receiver_id"] = receiverId;
+                o["content"]     = m["message_text"];
+                o["sent_at"]     = m["sent_at"] | 0UL;
+            }
+        }
+
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
     // │  MOBILE: POST /send — send a direct message (JSON body)      │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/send", HTTP_POST, [](AsyncWebServerRequest *request) {

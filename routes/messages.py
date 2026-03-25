@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, and_
 from pydantic import BaseModel
 from typing import List, Optional
 
 from database.deps import get_db
 from database.models import Message, MessageRecipient, User
+from routes.auth import verify_token
 
 router = APIRouter(prefix="/api/messages", tags=["Messages"])
 

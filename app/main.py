@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import aliased
-from sqlalchemy import func as sql_func
+from sqlalchemy import func as sql_func, or_, and_
 
 from database.connection import engine
 from database.models import Base, Message, MessageRecipient, User, FogDevice, FogMessage, BroadcastMessage
@@ -311,6 +311,61 @@ def delete_message(message_id: int, db: Session = Depends(get_db)):
         db.commit()
         return {"message": "Message deleted successfully"}
     return {"error": "Message not found"}
+
+# ── Conversation History (for mobile local archiving) ──────────────
+@app.get("/api/conversation/{other_user_id}")
+def conversation_history(
+    other_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(verify_token)
+):
+    """
+    Returns the full message history between the authenticated user and
+    {other_user_id}, sorted oldest→newest.  Designed for the mobile app
+    to sync into a local Room/SQLite database.
+    """
+    other_user = db.query(User).filter(User.id == other_user_id).first()
+    if not other_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    current_id = current_user.id
+
+    # Messages sent by current_user TO other_user
+    sent = (
+        db.query(Message)
+        .join(MessageRecipient, Message.id == MessageRecipient.message_id)
+        .filter(
+            and_(
+                Message.sender_id == current_id,
+                MessageRecipient.user_id == other_user_id
+            )
+        )
+    )
+
+    # Messages sent by other_user TO current_user
+    received = (
+        db.query(Message)
+        .join(MessageRecipient, Message.id == MessageRecipient.message_id)
+        .filter(
+            and_(
+                Message.sender_id == other_user_id,
+                MessageRecipient.user_id == current_id
+            )
+        )
+    )
+
+    messages = sent.union(received).order_by(Message.created_at.asc()).all()
+
+    return [
+        {
+            "id": m.id,
+            "sender_id": m.sender_id,
+            "receiver_id": other_user_id if m.sender_id == current_id else current_id,
+            "content": m.body,
+            "sent_at": int(m.created_at.timestamp()) if m.created_at else 0,
+        }
+        for m in messages
+    ]
 
 # @app.get("/debug/users")
 # def debug_users(db: Session = Depends(get_db)):

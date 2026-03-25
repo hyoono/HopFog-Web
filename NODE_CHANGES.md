@@ -919,3 +919,131 @@ if (syncInProgress && millis() - lastSyncRxMs > 30000) {
     // Log warning
 }
 ```
+
+
+---
+
+## Fix 16: Conversation History Endpoint (for Mobile Local Archiving)
+
+**What:** Add `GET /api/conversation/{other_user_id}?user_id=X` endpoint.
+
+**Why:** The mobile app needs to fetch the complete message history between two users for local Room/SQLite caching. The existing `/messages?conversation_id=X&user_id=Y` works by conversation_id, but the mobile app knows users by user_id (not conversation_id).
+
+**Endpoint:** `GET /api/conversation/{other_user_id}?user_id=X`
+
+**Logic:**
+1. Get `other_user_id` from path, `user_id` from query param
+2. Find conversation in `/db/conversations.json` where `(user1_id==userId && user2_id==otherUserId)` OR `(user1_id==otherUserId && user2_id==userId)`
+3. If found, filter `/db/direct_messages.json` by matching `conversation_id`
+4. Sort by `sent_at` ascending (oldest first)
+5. Return JSON array
+
+**Response format:**
+```json
+[
+  {
+    "id": 10,
+    "sender_id": 1,
+    "receiver_id": 3,
+    "content": "Hello!",
+    "sent_at": 1677610000
+  },
+  {
+    "id": 11,
+    "sender_id": 3,
+    "receiver_id": 1,
+    "content": "Hi there!",
+    "sent_at": 1677610060
+  }
+]
+```
+
+**Field mapping from `direct_messages.json`:**
+- `id` → `m["id"]`
+- `sender_id` → `m["sender_id"]`
+- `receiver_id` → the OTHER user in the conversation (not the sender)
+- `content` → `m["message_text"]`
+- `sent_at` → `m["sent_at"]` (epoch seconds, integer)
+
+**Edge cases:**
+- No conversation found → return `[]`
+- Invalid user_id or other_user_id → return `400`
+
+**Implementation on node (uses same SD card JSON files as admin):**
+
+```cpp
+// In setupRoutes(), add BEFORE the /send route:
+server.on("^\\/api\\/conversation\\/(\\d+)$", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("user_id")) {
+        sendJsonError(request, 400, "user_id required");
+        return;
+    }
+    int userId      = request->getParam("user_id")->value().toInt();
+    int otherUserId = request->pathArg(0).toInt();
+
+    if (userId <= 0 || otherUserId <= 0) {
+        sendJsonError(request, 400, "Invalid user IDs");
+        return;
+    }
+
+    // Find conversation between these two users
+    JsonDocument convoDoc;
+    readJsonArray(SD_CONVOS_FILE, convoDoc);
+
+    int convoId = 0;
+    for (JsonObject c : convoDoc.as<JsonArray>()) {
+        int u1 = c["user1_id"] | 0;
+        int u2 = c["user2_id"] | 0;
+        if ((u1 == userId && u2 == otherUserId) ||
+            (u1 == otherUserId && u2 == userId)) {
+            convoId = c["id"] | 0;
+            break;
+        }
+    }
+
+    JsonDocument resp;
+    JsonArray arr = resp.to<JsonArray>();
+
+    if (convoId > 0) {
+        JsonDocument dmDoc;
+        readJsonArray(SD_DMS_FILE, dmDoc);
+
+        // Sort by sent_at ascending
+        struct MsgRef { unsigned long ts; int idx; };
+        MsgRef refs[512];
+        int count = 0;
+        int idx = 0;
+        for (JsonObject m : dmDoc.as<JsonArray>()) {
+            if ((m["conversation_id"] | 0) == convoId && count < 512) {
+                refs[count].ts  = m["sent_at"] | 0UL;
+                refs[count].idx = idx;
+                count++;
+            }
+            idx++;
+        }
+        for (int i = 0; i < count - 1; i++)
+            for (int j = i + 1; j < count; j++)
+                if (refs[j].ts < refs[i].ts) {
+                    MsgRef tmp = refs[i]; refs[i] = refs[j]; refs[j] = tmp;
+                }
+
+        JsonArray dmArr = dmDoc.as<JsonArray>();
+        for (int i = 0; i < count; i++) {
+            JsonObject m = dmArr[refs[i].idx].as<JsonObject>();
+            int senderId   = m["sender_id"] | 0;
+            int receiverId = (senderId == userId) ? otherUserId : userId;
+
+            JsonObject o = arr.add<JsonObject>();
+            o["id"]          = m["id"];
+            o["sender_id"]   = senderId;
+            o["receiver_id"] = receiverId;
+            o["content"]     = m["message_text"];
+            o["sent_at"]     = m["sent_at"] | 0UL;
+        }
+    }
+
+    String out;
+    serializeJson(resp, out);
+    request->send(200, "application/json", out);
+});
+```

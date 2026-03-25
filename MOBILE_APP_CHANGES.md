@@ -32,7 +32,7 @@ is still connected to WiFi. This happens because:
 
 ## API Compatibility (No Code Changes Needed)
 
-All 12 endpoints work correctly with both admin and node:
+All 13 endpoints work correctly with both admin and node:
 
 | # | Endpoint | Response | Status |
 |---|---|---|---|
@@ -48,6 +48,7 @@ All 12 endpoints work correctly with both admin and node:
 | 10 | `POST /agree-sos` | `{success, message}` | ✅ |
 | 11 | `POST /change-password` | `{success, message}` | ✅ |
 | 12 | `GET /announcements` | `[{id, title, message, created_at}]` | ✅ |
+| **13** | **`GET /api/conversation/{other_user_id}?user_id=X`** | **`[{id, sender_id, receiver_id, content, sent_at}]`** | **✅ NEW** |
 
 ---
 
@@ -193,4 +194,255 @@ The following admin-side features are **web dashboard only** and do not affect t
 - LED status indicators
 - Sync watchdog timeout
 
-The mobile app's API endpoints remain unchanged.
+The mobile app's existing API endpoints remain unchanged.
+
+---
+
+## Fix 3: Local Conversation Archiving (Room DB)
+
+> **Objective:** Store conversations locally on the phone for instant loading and offline access.
+
+### New Endpoint: `GET /api/conversation/{other_user_id}?user_id=X`
+
+**Description:** Returns the complete message history between `user_id` and `other_user_id`, sorted oldest → newest.
+
+**Use case:** The mobile app calls this endpoint once per conversation to seed the local SQLite database, then uses `/new-messages?last_id=X&user_id=Y` for incremental updates.
+
+**Request:**
+```
+GET /api/conversation/3?user_id=1
+```
+
+**Response:**
+```json
+[
+  {
+    "id": 10,
+    "sender_id": 1,
+    "receiver_id": 3,
+    "content": "Hello!",
+    "sent_at": 1677610000
+  },
+  {
+    "id": 11,
+    "sender_id": 3,
+    "receiver_id": 1,
+    "content": "Hi there! How are you?",
+    "sent_at": 1677610060
+  }
+]
+```
+
+**Edge cases:**
+- No conversation exists → returns empty array `[]`
+- Invalid user IDs → returns `400`
+- Returns max ~512 messages per conversation (ESP32 memory limit)
+
+---
+
+### Step 1: Add Room Dependencies
+
+In `app/build.gradle.kts`:
+
+```kotlin
+plugins {
+    // ... existing plugins
+    id("com.google.devtools.ksp") version "1.9.22-1.0.17" // Match your Kotlin version
+}
+
+dependencies {
+    val room_version = "2.6.1"
+
+    implementation("androidx.room:room-runtime:$room_version")
+    ksp("androidx.room:room-compiler:$room_version")
+    implementation("androidx.room:room-ktx:$room_version")
+
+    // ... existing dependencies
+}
+```
+
+---
+
+### Step 2: Create Message Entity
+
+**File:** `app/src/main/java/com/example/hopfog/data/MessageEntity.kt`
+
+```kotlin
+package com.example.hopfog.data
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import com.google.gson.annotations.SerializedName
+
+@Entity(tableName = "messages")
+data class MessageEntity(
+    @PrimaryKey
+    val id: Int,
+
+    @SerializedName("sender_id")
+    val senderId: Int,
+
+    @SerializedName("receiver_id")
+    val receiverId: Int,
+
+    val content: String,
+
+    @SerializedName("sent_at")
+    val sentAt: Long
+)
+```
+
+---
+
+### Step 3: Create DAO
+
+**File:** `app/src/main/java/com/example/hopfog/data/MessageDao.kt`
+
+```kotlin
+package com.example.hopfog.data
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface MessageDao {
+    @Query("""
+        SELECT * FROM messages
+        WHERE (senderId = :userId AND receiverId = :otherUserId)
+           OR (senderId = :otherUserId AND receiverId = :userId)
+        ORDER BY sentAt ASC
+    """)
+    fun getConversation(userId: Int, otherUserId: Int): Flow<List<MessageEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(messages: List<MessageEntity>)
+
+    @Query("SELECT MAX(id) FROM messages WHERE (senderId = :userId AND receiverId = :otherUserId) OR (senderId = :otherUserId AND receiverId = :userId)")
+    suspend fun getMaxMessageId(userId: Int, otherUserId: Int): Int?
+
+    @Query("DELETE FROM messages WHERE (senderId = :userId AND receiverId = :otherUserId) OR (senderId = :otherUserId AND receiverId = :userId)")
+    suspend fun deleteConversation(userId: Int, otherUserId: Int)
+}
+```
+
+---
+
+### Step 4: Create Database
+
+**File:** `app/src/main/java/com/example/hopfog/data/AppDatabase.kt`
+
+```kotlin
+package com.example.hopfog.data
+
+import android.content.Context
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+
+@Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun messageDao(): MessageDao
+
+    companion object {
+        @Volatile
+        private var INSTANCE: AppDatabase? = null
+
+        fun getDatabase(context: Context): AppDatabase {
+            return INSTANCE ?: synchronized(this) {
+                val instance = Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "hopfog_messages"
+                ).build()
+                INSTANCE = instance
+                instance
+            }
+        }
+    }
+}
+```
+
+---
+
+### Step 5: Create Repository
+
+**File:** `app/src/main/java/com/example/hopfog/data/ChatRepository.kt`
+
+```kotlin
+package com.example.hopfog.data
+
+import kotlinx.coroutines.flow.Flow
+
+class ChatRepository(
+    private val dao: MessageDao,
+    private val networkManager: NetworkManager // your existing NetworkManager
+) {
+    fun getConversation(userId: Int, otherUserId: Int): Flow<List<MessageEntity>> =
+        dao.getConversation(userId, otherUserId)
+
+    suspend fun syncConversation(userId: Int, otherUserId: Int) {
+        try {
+            val response = networkManager.getConversationHistory(otherUserId, userId)
+            if (response.isNotEmpty()) {
+                dao.insertAll(response)
+            }
+        } catch (e: Exception) {
+            // Network error — fall back to cached data
+        }
+    }
+}
+```
+
+---
+
+### Step 6: Add Network Call to NetworkManager
+
+Add this method to your existing `NetworkManager.kt`:
+
+```kotlin
+suspend fun getConversationHistory(otherUserId: Int, userId: Int): List<MessageEntity> {
+    val response = client.get("$BASE_URL/api/conversation/$otherUserId") {
+        parameter("user_id", userId)
+    }
+    return response.body()
+}
+```
+
+---
+
+### Step 7: Use in ViewModel
+
+```kotlin
+class ChatViewModel(
+    private val repository: ChatRepository,
+    private val userId: Int,
+    private val otherUserId: Int
+) : ViewModel() {
+
+    val messages: Flow<List<MessageEntity>> =
+        repository.getConversation(userId, otherUserId)
+
+    init {
+        // Sync from server on first load
+        viewModelScope.launch {
+            repository.syncConversation(userId, otherUserId)
+        }
+    }
+}
+```
+
+---
+
+### Sync Strategy
+
+| Scenario | Action |
+|----------|--------|
+| **First open** | Call `/api/conversation/{other_user_id}?user_id=X` → insert all into Room |
+| **Subsequent opens** | Load from Room instantly (offline-first), then sync in background |
+| **New messages** | Use `/new-messages?last_id=X&user_id=Y` to get only new messages, insert into Room |
+| **Send message** | POST to `/send`, then insert locally into Room immediately (optimistic) |
+
+This gives the user instant message loading with offline access.
