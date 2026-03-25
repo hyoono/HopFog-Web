@@ -139,6 +139,7 @@ def create_broadcast(
     subject: str = Form(...),
     body: str = Form(...),
     ttl_hours: int = Form(24),
+    scheduled_at: Optional[str] = Form(None),
     action: str = Form("draft"),  # draft or queue
     db: Session = Depends(get_db),
     current_user: User = Depends(verify_token),
@@ -153,12 +154,26 @@ def create_broadcast(
         msg_type = "announcement"
     if severity not in {"info", "warning", "critical"}:
         severity = "info"
+
+    # Auto-set severity based on type (items #4 & #5)
+    severity_map = {"announcement": "info", "alert": "warning", "sos": "critical"}
+    severity = severity_map.get(msg_type, severity)
+
     if ttl_hours < 1:
         ttl_hours = 1
     if ttl_hours > 24 * 30:
         ttl_hours = 24 * 30
 
     ttl_expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+
+    parsed_scheduled_at = None
+    if scheduled_at:
+        try:
+            parsed_scheduled_at = datetime.fromisoformat(scheduled_at)
+            if parsed_scheduled_at.tzinfo is None:
+                parsed_scheduled_at = parsed_scheduled_at.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
 
     status = "draft" if action == "draft" else "queued"
     priority = _priority_for(msg_type)
@@ -173,6 +188,7 @@ def create_broadcast(
         status=status,
         priority=priority,
         ttl_expires_at=ttl_expires_at,
+        scheduled_at=parsed_scheduled_at,
     )
     db.add(b)
     db.commit()

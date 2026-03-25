@@ -47,9 +47,14 @@
               <textarea class="form-control" name="body" rows="6" required placeholder="Write your announcement here..."></textarea>
             </div>
             <div class="mb-3">
+              <label class="form-label">Schedule Send Time <small class="text-muted">(optional)</small></label>
+              <input type="datetime-local" class="form-control" name="scheduled_at">
+              <div class="form-text">Leave empty to send immediately when queued. Set a date/time for scheduled dispatch.</div>
+            </div>
+            <div class="mb-3">
               <label class="form-label">TTL (hours)</label>
               <input type="number" class="form-control" name="ttl_hours" value="24" min="1" max="720">
-              <div class="form-text">How long this broadcast remains valid for delivery.</div>
+              <div class="form-text">How long this broadcast remains valid for delivery after sending.</div>
             </div>
             <div class="d-flex gap-2">
               <button class="btn btn-secondary" type="submit" name="action" value="draft">Save Draft</button>
@@ -101,4 +106,19 @@
 
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var typeSelect = document.querySelector('select[name="msg_type"]');
+    var severitySelect = document.querySelector('select[name="severity"]');
+    if (typeSelect && severitySelect) {
+        typeSelect.addEventListener('change', function() {
+            var map = { 'announcement': 'info', 'alert': 'warning', 'sos': 'critical' };
+            severitySelect.value = map[typeSelect.value] || 'info';
+        });
+    }
+});
+</script>
 {% endblock %}

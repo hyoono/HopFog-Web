@@ -38,7 +38,14 @@
                     <td>{{ message.id }}</td>
                     <td>{{ message.from }}</td>
                     <td>{{ message.to|join(', ') }}</td>
-                    <td>{{ message.message }}</td>
+                    <td>
+                        {% set msg_text = message.message %}
+                        {% if msg_text|length <= 3 %}
+                            ***
+                        {% else %}
+                            {{ msg_text[:2] }}{{ '•' * (msg_text|length - 2 if msg_text|length < 20 else 18) }}
+                        {% endif %}
+                    </td>
                     <td>{{ message.date.strftime('%Y-%m-%d %H:%M') if message.date else 'N/A' }}</td>
                 </tr>
                 {% else %}

@@ -221,6 +221,11 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         BroadcastMessage.msg_type.in_(["alert", "sos"])
     ).count()
 
+    # Recent SOS/Alert broadcasts for newsfeed
+    sos_alerts = db.query(BroadcastMessage).filter(
+        BroadcastMessage.msg_type.in_(["sos", "alert"])
+    ).order_by(BroadcastMessage.created_at.desc()).limit(20).all()
+
     # Query messages with sender and recipients
     messages_query = db.query(
         Message.id,
@@ -247,6 +252,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), current_user: Use
         "request": request,
         "current_user": current_user,
         "messages": messages,
+        "sos_alerts": sos_alerts,
         "fog_nodes_count": fog_nodes_count,
         "active_fog_nodes": active_fog_nodes,
         "inactive_fog_nodes": inactive_fog_nodes,
@@ -633,6 +639,21 @@ def toggle_user_status(
         }
     }
 
+
+
+@app.get("/api/users/online")
+def get_online_users(db: Session = Depends(get_db)):
+    """Returns list of active (online) users for mobile app filtering."""
+    users = db.query(User).filter(User.is_active == 1).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "is_active": bool(u.is_active),
+        }
+        for u in users
+    ]
 
 
 # Forgot Password - Simple Reset

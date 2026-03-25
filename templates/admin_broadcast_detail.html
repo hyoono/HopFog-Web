@@ -47,26 +47,14 @@
           <div class="row text-center">
             <div class="col-4 mb-3">
               <div class="h4 mb-0">{{ total }}</div>
-              <div class="text-muted small">Total</div>
+              <div class="text-muted small">Total Recipients</div>
             </div>
             <div class="col-4 mb-3">
-              <div class="h4 mb-0">{{ status_counts.get('queued', 0) }}</div>
-              <div class="text-muted small">Queued</div>
-            </div>
-            <div class="col-4 mb-3">
-              <div class="h4 mb-0">{{ status_counts.get('sent', 0) }}</div>
-              <div class="text-muted small">Sent</div>
-            </div>
-            <div class="col-4 mb-3">
-              <div class="h4 mb-0">{{ status_counts.get('delivered', 0) }}</div>
+              <div class="h4 mb-0 text-success">{{ status_counts.get('delivered', 0) + status_counts.get('read', 0) + status_counts.get('sent', 0) }}</div>
               <div class="text-muted small">Delivered</div>
             </div>
             <div class="col-4 mb-3">
-              <div class="h4 mb-0">{{ status_counts.get('read', 0) }}</div>
-              <div class="text-muted small">Read</div>
-            </div>
-            <div class="col-4 mb-3">
-              <div class="h4 mb-0">{{ status_counts.get('failed', 0) }}</div>
+              <div class="h4 mb-0 text-danger">{{ status_counts.get('failed', 0) }}</div>
               <div class="text-muted small">Failed</div>
             </div>
           </div>

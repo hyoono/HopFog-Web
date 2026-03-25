@@ -126,6 +126,7 @@ class BroadcastMessage(Base):
     status = Column(String(20), default="draft", nullable=False)  # draft/queued/sent/failed/cancelled
     priority = Column(Integer, default=10, nullable=False)        # SOS higher than alert higher than announcement
     ttl_expires_at = Column(DateTime(timezone=True), nullable=True)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)

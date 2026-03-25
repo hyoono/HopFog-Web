@@ -446,3 +446,28 @@ class ChatViewModel(
 | **Send message** | POST to `/send`, then insert locally into Room immediately (optimistic) |
 
 This gives the user instant message loading with offline access.
+
+---
+
+## Fix 14: Correct DM / SOS Message Tagging
+
+**Problem:** When a user sends an SOS and then sends a follow-up DM to admin, the conversation retains the DM status instead of maintaining SOS context. Vice versa: when a DM user sends an SOS, it may still show as DM.
+
+**Solution:** The mobile app should tag each message with a `msg_type` field:
+
+- When sending from SOS mode: set `msg_type: "sos_request"` on the message payload
+- When sending from regular chat: set `msg_type: "message"` on the message payload
+- The server `POST /api/resident-admin/send` endpoint already accepts a `kind` field (`message` or `sos_request`)
+
+**Android Implementation:**
+```kotlin
+// In your message sending function, pass the correct kind:
+val kind = if (isSOSMode) "sos_request" else "message"
+
+val formBody = FormBody.Builder()
+    .add("body", messageText)
+    .add("kind", kind)  // <-- This determines DM vs SOS
+    .build()
+```
+
+The server will use this `kind` field to properly categorize the message in the SOS Console vs regular DM inbox.

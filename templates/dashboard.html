@@ -89,41 +89,36 @@
 
     <div class="card mb-4">
         <div class="card-header">
-            <i class="fas fa-table me-1"></i>
-            Latest Messages
+            <i class="fas fa-bell me-1"></i>
+            SOS &amp; Alert Feed
         </div>
         <div class="card-body">
-            <table id="datatablesSimple">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>From</th>
-                        <th>To</th>
-                        <th>Message</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tfoot>
-                    <tr>
-                        <th>ID</th>
-                        <th>From</th>
-                        <th>To</th>
-                        <th>Message</th>
-                        <th>Date</th>
-                    </tr>
-                </tfoot>
-                <tbody>
-                    {% for message in messages %}
-                    <tr>
-                        <td>{{ message.id }}</td>
-                        <td>{{ message.from }}</td>
-                        <td>{{ message.to|join(', ') }}</td>
-                        <td>{{ message.message }}</td>
-                        <td>{{ message.date.strftime('%Y-%m-%d %H:%M') if message.date else 'N/A' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            {% if sos_alerts %}
+            {% for alert in sos_alerts %}
+            <div class="d-flex align-items-start mb-3 pb-3 border-bottom">
+                <div class="me-3">
+                    {% if alert.msg_type == 'sos' %}
+                        <span class="badge bg-danger rounded-pill p-2"><i class="fas fa-triangle-exclamation"></i></span>
+                    {% else %}
+                        <span class="badge bg-warning text-dark rounded-pill p-2"><i class="fas fa-exclamation-circle"></i></span>
+                    {% endif %}
+                </div>
+                <div class="flex-grow-1">
+                    <div class="d-flex justify-content-between">
+                        <strong>{{ alert.subject }}</strong>
+                        <small class="text-muted">{{ alert.created_at.strftime('%b %d, %H:%M') if alert.created_at else '' }}</small>
+                    </div>
+                    <div class="text-muted small mt-1" style="max-height:40px;overflow:hidden;">{{ alert.body[:120] }}{% if alert.body|length > 120 %}...{% endif %}</div>
+                    <div class="mt-1">
+                        <span class="badge bg-{{ 'danger' if alert.severity == 'critical' else ('warning text-dark' if alert.severity == 'warning' else 'info') }}">{{ alert.severity }}</span>
+                        <span class="badge bg-dark">{{ alert.status }}</span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="text-muted text-center py-3"><i class="fas fa-check-circle me-2"></i>No active SOS or alerts</div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -131,8 +126,6 @@
 
 {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/simple-datatables@7.1.2/dist/umd/simple-datatables.min.js" crossorigin="anonymous"></script>
-<script src="{{ url_for('static', path='js/datatables-simple-demo.js') }}"></script>
 <script>
     function escHtml(s) {
         var d = document.createElement('div');

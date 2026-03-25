@@ -17,14 +17,10 @@
             <tr>
               <th>ID</th>
               <th>Type</th>
-              <th>Severity</th>
               <th>Subject</th>
               <th>Status</th>
               <th>Total</th>
-              <th>Queued</th>
-              <th>Sent</th>
               <th>Delivered</th>
-              <th>Read</th>
               <th>Failed</th>
               <th></th>
             </tr>
@@ -33,21 +29,19 @@
             {% for row in summaries %}
             <tr>
               <td>{{ row.b.id }}</td>
-              <td>{{ row.b.msg_type }}</td>
-              <td>{{ row.b.severity }}</td>
+              <td>
+                <span class="badge bg-{{ 'danger' if row.b.msg_type == 'sos' else ('warning text-dark' if row.b.msg_type == 'alert' else 'info') }}">{{ row.b.msg_type }}</span>
+              </td>
               <td class="text-truncate" style="max-width: 220px;">{{ row.b.subject }}</td>
               <td><span class="badge bg-dark">{{ row.b.status }}</span></td>
               <td>{{ row.total }}</td>
-              <td>{{ row.queued }}</td>
-              <td>{{ row.sent }}</td>
-              <td>{{ row.delivered }}</td>
-              <td>{{ row.read }}</td>
-              <td>{{ row.failed }}</td>
+              <td class="text-success">{{ row.sent + row.delivered + row.read }}</td>
+              <td class="text-danger">{{ row.failed }}</td>
               <td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcasts/{{ row.b.id }}">Open</a></td>
             </tr>
             {% endfor %}
             {% if summaries|length == 0 %}
-            <tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>
+            <tr><td colspan="8" class="text-muted">No broadcasts to track yet.</td></tr>
             {% endif %}
           </tbody>
         </table>

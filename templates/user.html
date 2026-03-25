@@ -51,7 +51,14 @@
                     {% for user in users %}
                     <tr>
                         <td>{{ user.id }}</td>
-                        <td>{{ user.username }}</td>
+                        <td>
+                            {% if user.is_active %}
+                                <span class="text-success me-1" title="Online">●</span>
+                            {% else %}
+                                <span class="text-secondary me-1" title="Offline">●</span>
+                            {% endif %}
+                            {{ user.username }}
+                        </td>
                         <td>
                             {% set email_parts = user.email.split('@') %}
                             {% set local_part = email_parts[0] %}

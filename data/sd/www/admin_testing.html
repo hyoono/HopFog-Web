@@ -65,7 +65,7 @@
                     </ol>
                     <div class="card mb-4">
                         <div class="card-header bg-dark text-white">
-                            <i class="fas fa-terminal me-1"></i>XBee Serial Monitor
+                            <i class="fas fa-terminal me-1"></i>Wireless Serial Monitor
                             <span class="badge bg-secondary ms-2" id="rxByteCount">0 bytes received</span>
                             <button class="btn btn-sm btn-outline-light float-end" id="btnAutoRefresh" onclick="toggleAutoRefresh()">
                                 <i class="fas fa-sync-alt me-1"></i><span id="autoRefreshLabel">Auto-Refresh: OFF</span>
@@ -122,7 +122,7 @@
 
                             <div class="p-2 border-top d-flex gap-2">
                                 <input type="text" class="form-control form-control-sm font-monospace" id="rawSendText"
-                                       placeholder='Send raw text via XBee (e.g. {"cmd":"REGISTER","node_id":"test"})' maxlength="400">
+                                       placeholder='Send raw text via radio (e.g. {"cmd":"REGISTER","node_id":"test"})' maxlength="400">
                                 <button class="btn btn-sm btn-warning" onclick="sendRawXBee()" style="white-space:nowrap">
                                     <i class="fas fa-paper-plane me-1"></i>Send
                                 </button>
@@ -144,7 +144,7 @@
                         <div class="card-body">
                             <p class="text-muted mb-3">
                                 Manually send protocol commands to the node. Use these to test each step of the registration/sync flow independently.
-                                Check the <strong>XBee Serial Monitor</strong> above (enable Auto-Refresh) to see TX/RX activity.
+                                Check the <strong>Wireless Serial Monitor</strong> above (enable Auto-Refresh) to see TX/RX activity.
                             </p>
 
                             <div class="row mb-3">
@@ -226,12 +226,12 @@
 
                     <div class="card mb-4">
                         <div class="card-header bg-primary text-white">
-                            <i class="fas fa-satellite-dish me-1"></i>XBee S2C Communication Test
+                            <i class="fas fa-satellite-dish me-1"></i>Wireless Communication Test
                         </div>
                         <div class="card-body">
                             <p class="text-muted mb-3">
-                                Send a test message via the XBee S2C ZigBee radio.
-                                Open <strong>XCTU</strong> on a second XBee to see incoming frames.
+                                Send a test message via the wireless radio module.
+                                Open a second device to see incoming frames.
                             </p>
 
                             <div class="row mb-3">
@@ -289,7 +289,7 @@
                         </div>
                         <div class="card-body">
                             <p class="text-muted mb-3">
-                                Run automated test suites directly from this page. Tests use the existing XBee diagnostics and send endpoints.
+                                Run automated test suites directly from this page. Tests use the existing wireless diagnostics and send endpoints.
                                 Results are displayed below each test with PASS/FAIL criteria.
                             </p>
 
@@ -301,7 +301,7 @@
                                     </button>
                                 </div>
                                 <div class="card-body py-2">
-                                    <div class="small text-muted mb-2">Verifies XBee TX/RX are working and a node is reachable.</div>
+                                    <div class="small text-muted mb-2">Verifies wireless TX/RX are working and a node is reachable.</div>
                                     <div id="healthCheckResult" style="display:none;"></div>
                                 </div>
                             </div>
@@ -342,7 +342,7 @@
                                     </div>
                                 </div>
                                 <div class="card-body py-2">
-                                    <div class="small text-muted mb-2">Sends packets via XBee and measures packet loss rate and throughput. Pass criteria: &lt;2% loss.</div>
+                                    <div class="small text-muted mb-2">Sends packets via wireless radio and measures packet loss rate and throughput. Pass criteria: &lt;2% loss.</div>
                                     <div id="perfProgress" style="display:none;">
                                         <div class="progress mb-2" style="height:20px;">
                                             <div class="progress-bar progress-bar-striped progress-bar-animated" id="perfBar" style="width:0%">0%</div>
