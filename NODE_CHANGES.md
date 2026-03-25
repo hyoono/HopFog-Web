@@ -1010,11 +1010,11 @@ server.on("^\\/api\\/conversation\\/(\\d+)$", HTTP_GET, [](AsyncWebServerRequest
 
         // Sort by sent_at ascending
         struct MsgRef { unsigned long ts; int idx; };
-        MsgRef refs[512];
+        MsgRef refs[200];
         int count = 0;
         int idx = 0;
         for (JsonObject m : dmDoc.as<JsonArray>()) {
-            if ((m["conversation_id"] | 0) == convoId && count < 512) {
+            if ((m["conversation_id"] | 0) == convoId && count < 200) {
                 refs[count].ts  = m["sent_at"] | 0UL;
                 refs[count].idx = idx;
                 count++;

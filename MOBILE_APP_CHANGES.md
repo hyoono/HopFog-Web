@@ -247,11 +247,11 @@ In `app/build.gradle.kts`:
 ```kotlin
 plugins {
     // ... existing plugins
-    id("com.google.devtools.ksp") version "1.9.22-1.0.17" // Match your Kotlin version
+    id("com.google.devtools.ksp") version "..." // Match your Kotlin compiler version
 }
 
 dependencies {
-    val room_version = "2.6.1"
+    val room_version = "2.6.1" // Check https://developer.android.com/jetpack/androidx/releases/room for latest
 
     implementation("androidx.room:room-runtime:$room_version")
     ksp("androidx.room:room-compiler:$room_version")
