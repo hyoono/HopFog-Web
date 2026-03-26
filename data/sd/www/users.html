@@ -151,6 +151,12 @@
             if (local.length <= 2) return local[0] + '***@' + domain;
             return local.substring(0, 2) + '***' + local[local.length - 1] + '@' + domain;
         }
+        function fmtDate(ts) {
+            if (!ts) return 'N/A';
+            var d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
+            if (isNaN(d.getTime())) return String(ts);
+            return d.toLocaleString();
+        }
         function escapeHtml(t) { var d = document.createElement('div'); d.appendChild(document.createTextNode(t)); return d.innerHTML; }
         document.addEventListener('DOMContentLoaded', function() {
             Promise.all([
@@ -173,11 +179,7 @@
                         actionsHtml += '<button class="btn btn-sm btn-secondary" disabled title="Cannot modify admin status"><i class="fas fa-lock"></i></button>';
                     }
                     var onlineDot = onlineIds.has(user.id) ? '<span style="color:#28a745;font-size:0.8em" title="Online">● </span>' : '<span style="color:#ccc;font-size:0.8em" title="Offline">● </span>';
-                    var createdAt = user.created_at;
-                    if (typeof createdAt === 'number') { createdAt = new Date(createdAt * 1000).toLocaleString(); }
-                    else if (createdAt) { var d = new Date(createdAt); if (!isNaN(d.getTime())) createdAt = d.toLocaleString(); }
-                    else { createdAt = 'N/A'; }
-                    tr.innerHTML = '<td>'+user.id+'</td><td>'+onlineDot+escapeHtml(user.username)+'</td><td>'+escapeHtml(maskEmail(user.email))+'</td><td>'+roleHtml+'</td><td>'+statusHtml+'</td><td>'+createdAt+'</td><td>'+actionsHtml+'</td>';
+                    tr.innerHTML = '<td>'+user.id+'</td><td>'+onlineDot+escapeHtml(user.username)+'</td><td>'+escapeHtml(maskEmail(user.email))+'</td><td>'+roleHtml+'</td><td>'+statusHtml+'</td><td>'+fmtDate(user.created_at)+'</td><td>'+actionsHtml+'</td>';
                     tbody.appendChild(tr);
                 });
                 var dt = document.getElementById('datatablesSimple');
