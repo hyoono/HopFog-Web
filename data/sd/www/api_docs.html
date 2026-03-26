@@ -82,11 +82,8 @@
                         <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
                         <div class="sb-sidenav-menu-heading">Messaging</div>
                         <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
-                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
-                        <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
-                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
+                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <a class="nav-link active" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
                     </div>
                 </div>
@@ -159,7 +156,20 @@
                     auth: true, params: []
                 },
                 {
+                    method: "GET", path: "/api/users/online", desc: "Get array of currently logged-in user IDs",
+                    auth: true, params: []
+                },
+                {
                     method: "POST", path: "/api/admin/create-mobile-user", desc: "Create a mobile user account",
+                    auth: true,
+                    params: [
+                        { name: "username", type: "text", required: true, desc: "Display name" },
+                        { name: "email", type: "text", required: true, desc: "Email address" },
+                        { name: "password", type: "password", required: true, desc: "Password" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/admin/create-admin-user", desc: "Create an admin user account",
                     auth: true,
                     params: [
                         { name: "username", type: "text", required: true, desc: "Display name" },
@@ -173,6 +183,10 @@
                     params: [
                         { name: "id", type: "number", required: true, desc: "User ID", isPath: true }
                     ]
+                },
+                {
+                    method: "GET", path: "/api/battery", desc: "Get battery status (voltage, current, percentage)",
+                    auth: true, params: []
                 }
             ]
         },
@@ -207,10 +221,14 @@
             ]
         },
         {
-            group: "Fog Devices",
+            group: "Fog Devices & Nodes",
             endpoints: [
                 {
-                    method: "GET", path: "/api/fog-devices", desc: "List all fog nodes",
+                    method: "GET", path: "/api/fog-devices", desc: "List all registered fog devices",
+                    auth: true, params: []
+                },
+                {
+                    method: "GET", path: "/api/nodes", desc: "List connected wireless nodes with heartbeat status",
                     auth: true, params: []
                 },
                 {
@@ -218,6 +236,20 @@
                     auth: true,
                     params: [
                         { name: "device_name", type: "text", required: true, desc: "Device name (e.g. 'FogNode-Alpha')" }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/nodes/{id}/sync", desc: "Send sync data to a node",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "text", required: true, desc: "Node ID", isPath: true }
+                    ]
+                },
+                {
+                    method: "POST", path: "/api/nodes/{id}/get-stats", desc: "Request stats from a node",
+                    auth: true,
+                    params: [
+                        { name: "id", type: "text", required: true, desc: "Node ID", isPath: true }
                     ]
                 },
                 {
@@ -318,14 +350,14 @@
             ]
         },
         {
-            group: "XBee Communication",
+            group: "Wireless Communication",
             endpoints: [
                 {
-                    method: "GET", path: "/api/xbee/status", desc: "Get XBee module configuration (pins, baud, mode)",
+                    method: "GET", path: "/api/xbee/status", desc: "Get wireless module configuration (pins, baud, mode)",
                     auth: true, params: []
                 },
                 {
-                    method: "POST", path: "/api/xbee/test", desc: "Send a test message via XBee broadcast",
+                    method: "POST", path: "/api/xbee/test", desc: "Send a test message via wireless broadcast",
                     auth: true,
                     params: [
                         { name: "message", type: "text", required: false, desc: "Custom message (max 200 chars, default: 'Hello from HopFog!')" }
@@ -420,6 +452,14 @@
                         { name: "user_id", type: "number", required: true, desc: "Your user ID" },
                         { name: "old_password", type: "password", required: true, desc: "Current password" },
                         { name: "new_password", type: "password", required: true, desc: "New password" }
+                    ]
+                },
+                {
+                    method: "GET", path: "/api/conversation/{other_user_id}?user_id={user_id}", desc: "Get full message history between two users",
+                    auth: true,
+                    params: [
+                        { name: "other_user_id", type: "number", required: true, desc: "Other user's ID", isPath: true },
+                        { name: "user_id", type: "number", required: true, desc: "Your user ID", isPath: true }
                     ]
                 }
             ]

@@ -41,11 +41,8 @@
                         <a class="nav-link active" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
                         <div class="sb-sidenav-menu-heading">Messaging</div>
                         <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
-                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
-                        <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
-                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
+                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
                     </div>
                 </div>
@@ -64,29 +61,15 @@
                     </ol>
                     <div class="card mb-4">
                         <div class="card-header">
-                            <i class="fas fa-broadcast-tower me-1"></i>
-                            Connected Nodes
+                            <i class="fas fa-network-wired me-1"></i>
+                            Network Devices
                             <button class="btn btn-sm btn-outline-primary float-end" onclick="refreshNodes()"><i class="fas fa-sync"></i> Refresh</button>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
                             <table class="table table-bordered table-hover">
-                                <thead><tr><th>Node ID</th><th>Device Name</th><th>IP Address</th><th>Status</th><th>Last Heartbeat</th><th>Free Heap</th><th>Uptime</th><th>Device Addr</th><th>Actions</th></tr></thead>
-                                <tbody id="nodesTableBody"><tr><td colspan="9" class="text-center">Loading…</td></tr></tbody>
-                            </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card mb-4">
-                        <div class="card-header">
-                            <i class="fas fa-server me-1"></i>
-                            Registered Fog Devices
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                            <table class="table table-bordered table-hover">
-                                <thead><tr><th>Fog Nodes</th><th>People Connected</th><th>Storage</th><th>Status</th><th>Average Latency</th></tr></thead>
-                                <tbody id="fogTableBody"></tbody>
+                                <thead><tr><th>Device</th><th>Status</th><th>Last Seen</th><th>People Connected</th><th>Storage</th><th>Uptime</th><th>Actions</th></tr></thead>
+                                <tbody id="nodesTableBody"><tr><td colspan="7" class="text-center">Loading…</td></tr></tbody>
                             </table>
                             </div>
                         </div>
@@ -106,40 +89,73 @@
     <script src="/static/js/scripts.js"></script>
     <script>
         function refreshNodes() {
-            fetch('/api/nodes').then(function(r){return r.json();}).then(function(data) {
+            Promise.all([
+                fetch('/api/nodes').then(function(r){return r.json();}),
+                fetch('/api/fog-devices').then(function(r){return r.json();}).catch(function(){return [];})
+            ]).then(function(results) {
+                var nodesData = results[0]; var fogDevices = results[1];
                 var tbody = document.getElementById('nodesTableBody');
                 tbody.innerHTML = '';
-                if (!data.nodes || data.nodes.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No nodes connected</td></tr>';
-                    return;
+                // Build a lookup of fog devices by name for merging
+                var fogMap = {};
+                fogDevices.forEach(function(fd) { fogMap[fd.device_name || ''] = fd; });
+                var hasRows = false;
+                // Show XBee-connected nodes with fog device data merged
+                if (nodesData.nodes && nodesData.nodes.length > 0) {
+                    nodesData.nodes.forEach(function(n) {
+                        hasRows = true;
+                        var tr = document.createElement('tr');
+                        var statusBadge = n.status === 'active'
+                            ? '<span class="badge bg-success">Online</span>'
+                            : '<span class="badge bg-warning">Stale</span>';
+                        var hb = n.seconds_since_heartbeat < 60
+                            ? n.seconds_since_heartbeat + 's ago'
+                            : Math.floor(n.seconds_since_heartbeat / 60) + 'm ago';
+                        var uptime = n.uptime ? formatUptime(n.uptime) : 'N/A';
+                        // Merge fog device info
+                        var fog = fogMap[n.device_name || ''] || fogMap[n.node_id || ''] || {};
+                        var people = fog.connected_users || 0;
+                        var storage = fog.storage_used ? fog.storage_used + ' / ' + (fog.storage_total || '') : 'N/A';
+                        tr.innerHTML = '<td>' + esc(n.device_name || n.node_id || '') + '</td>'
+                            + '<td>' + statusBadge + '</td>'
+                            + '<td>' + hb + '</td>'
+                            + '<td>' + people + '</td>'
+                            + '<td>' + storage + '</td>'
+                            + '<td>' + uptime + '</td>'
+                            + '<td>'
+                            + '<button class="btn btn-sm btn-outline-info me-1" onclick="syncNode(\'' + esc(n.node_id) + '\')"><i class="fas fa-sync"></i> Sync</button>'
+                            + '<button class="btn btn-sm btn-outline-secondary" onclick="getStats(\'' + esc(n.node_id) + '\')"><i class="fas fa-chart-bar"></i> Stats</button>'
+                            + '</td>';
+                        tbody.appendChild(tr);
+                        // Remove from fogMap so we don't duplicate
+                        delete fogMap[n.device_name || ''];
+                        delete fogMap[n.node_id || ''];
+                    });
                 }
-                data.nodes.forEach(function(n) {
+                // Show remaining fog devices not connected via XBee
+                Object.keys(fogMap).forEach(function(name) {
+                    if (!name) return;
+                    hasRows = true;
+                    var fd = fogMap[name];
                     var tr = document.createElement('tr');
-                    var statusBadge = n.status === 'active'
-                        ? '<span class="badge bg-success">Active</span>'
-                        : '<span class="badge bg-warning">Stale</span>';
-                    var hb = n.seconds_since_heartbeat < 60
-                        ? n.seconds_since_heartbeat + 's ago'
-                        : Math.floor(n.seconds_since_heartbeat / 60) + 'm ago';
-                    var heap = n.free_heap ? (n.free_heap / 1024).toFixed(0) + ' KB' : 'N/A';
-                    var uptime = n.uptime ? formatUptime(n.uptime) : 'N/A';
-                    var addr = n.xbee_addr ? n.xbee_addr.substring(0, 4) + '..' + n.xbee_addr.slice(-4) : 'N/A';
-                    tr.innerHTML = '<td>' + esc(n.node_id || '') + '</td>'
-                        + '<td>' + esc(n.device_name || '') + '</td>'
-                        + '<td>' + esc(n.ip_address || 'N/A') + '</td>'
+                    var statusBadge = fd.status === 'online'
+                        ? '<span class="badge bg-success">Online</span>'
+                        : '<span class="badge bg-secondary">Offline</span>';
+                    var storage = fd.storage_used ? fd.storage_used + ' / ' + (fd.storage_total || '') : 'N/A';
+                    tr.innerHTML = '<td>' + esc(name) + '</td>'
                         + '<td>' + statusBadge + '</td>'
-                        + '<td>' + hb + '</td>'
-                        + '<td>' + heap + '</td>'
-                        + '<td>' + uptime + '</td>'
-                        + '<td><small>' + addr + '</small></td>'
-                        + '<td>'
-                        + '<button class="btn btn-sm btn-outline-info me-1" onclick="syncNode(\'' + esc(n.node_id) + '\')"><i class="fas fa-sync"></i></button>'
-                        + '<button class="btn btn-sm btn-outline-secondary" onclick="getStats(\'' + esc(n.node_id) + '\')"><i class="fas fa-chart-bar"></i></button>'
-                        + '</td>';
+                        + '<td>—</td>'
+                        + '<td>' + (fd.connected_users || 0) + '</td>'
+                        + '<td>' + storage + '</td>'
+                        + '<td>—</td>'
+                        + '<td>—</td>';
                     tbody.appendChild(tr);
                 });
+                if (!hasRows) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No devices found</td></tr>';
+                }
             }).catch(function() {
-                document.getElementById('nodesTableBody').innerHTML = '<tr><td colspan="9" class="text-center text-danger">Failed to load nodes</td></tr>';
+                document.getElementById('nodesTableBody').innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load devices</td></tr>';
             });
         }
         function formatUptime(s) {
@@ -158,20 +174,7 @@
                 alert(d.message || 'Stats request sent');
             });
         }
-        document.addEventListener('DOMContentLoaded', function() {
-            refreshNodes();
-            fetch('/api/fog-devices').then(function(r){return r.json();}).then(function(devices) {
-                var tbody = document.getElementById('fogTableBody');
-                if (devices.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-center">No fog devices found</td></tr>'; return; }
-                devices.forEach(function(node) {
-                    var tr = document.createElement('tr');
-                    var statusHtml = node.status === 'online' ? '<span class="badge bg-success">\u25cf Online</span>' : '<span class="badge bg-danger">\u25cf Offline</span>';
-                    var storageHtml = '<span class="text-success">'+(node.storage_used||'0')+'</span> '+(node.storage_total||'');
-                    tr.innerHTML = '<td>'+(node.device_name||'')+'</td><td>'+(node.connected_users||0)+'</td><td>'+storageHtml+'</td><td>'+statusHtml+'</td><td><span class="text-success">'+(node.latency||'N/A')+'</span></td>';
-                    tbody.appendChild(tr);
-                });
-            });
-        });
+        document.addEventListener('DOMContentLoaded', refreshNodes);
     </script>
 </body>
 </html>

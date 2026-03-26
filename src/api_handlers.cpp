@@ -142,9 +142,13 @@ void registerApiRoutes(AsyncWebServer &server) {
                 return;
             }
 
-            // Success — return JSON with user info (matching mobile app expectations)
+            // Success — create session so user appears online
+            String token = createSessionToken(userId);
+
+            // Return JSON with user info (matching mobile app expectations)
             JsonDocument resp;
             resp["success"] = true;
+            resp["access_token"] = token;
             JsonObject u = resp["user"].to<JsonObject>();
             u["user_id"]        = userId;
             u["username"]       = userDoc["username"] | "";

@@ -41,11 +41,8 @@
                         <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
                         <div class="sb-sidenav-menu-heading">Messaging</div>
                         <a class="nav-link" href="/admin/messaging"><div class="sb-nav-link-icon"><i class="fas fa-bullhorn"></i></div>Admin Messaging</a>
-                        <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
-                        <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
-                        <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
+                        <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
                     </div>
                 </div>
@@ -108,15 +105,15 @@
                             </div>
                         </div>
                         <div class="col-xl-3 col-md-6">
-                            <div class="card bg-danger text-white mb-4">
+                            <div class="card bg-info text-white mb-4">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-center">
-                                        <span>SOS &amp; Alert</span>
-                                        <h2 class="mb-0" id="sosAlerts">0</h2>
+                                        <span>Connected Nodes</span>
+                                        <h2 class="mb-0" id="connectedNodesCount">0</h2>
                                     </div>
                                 </div>
                                 <div class="card-footer d-flex align-items-center justify-content-between">
-                                    <a class="small text-white stretched-link" href="/admin/messaging">View Details</a>
+                                    <a class="small text-white stretched-link" href="/fog_nodes">View Nodes</a>
                                     <div class="small text-white"><i class="fas fa-angle-right"></i></div>
                                 </div>
                             </div>
@@ -150,7 +147,7 @@
                         </div>
                     </div>
                     <div class="row">
-                        <div class="col-xl-6">
+                        <div class="col-12">
                             <div class="card mb-4">
                                 <div class="card-header">
                                     <i class="fas fa-network-wired me-1"></i>
@@ -159,23 +156,6 @@
                                 <div class="card-body">
                                     <div id="registeredNodes" class="p-2 bg-light border rounded" style="min-height:60px;">
                                         <span class="text-muted">Loading...</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-xl-6">
-                            <div class="card mb-4">
-                                <div class="card-header d-flex justify-content-between align-items-center">
-                                    <span><i class="fas fa-exclamation-triangle me-1"></i> Active Alerts</span>
-                                    <span id="alertPagination" class="small"></span>
-                                </div>
-                                <div class="card-body">
-                                    <div id="alertCarousel" style="min-height:150px">
-                                        <div class="text-center text-muted py-5">No active alerts</div>
-                                    </div>
-                                    <div class="d-flex justify-content-between mt-2" id="alertNav" style="display:none!important">
-                                        <button class="btn btn-sm btn-outline-secondary" onclick="prevAlert()"><i class="fas fa-chevron-left"></i> Prev</button>
-                                        <button class="btn btn-sm btn-outline-secondary" onclick="nextAlert()">Next <i class="fas fa-chevron-right"></i></button>
                                     </div>
                                 </div>
                             </div>
@@ -208,37 +188,6 @@
     <script src="/static/vendor/chart.min.js"></script>
     <script src="/static/vendor/simple-datatables/simple-datatables.min.js"></script>
     <script>
-        var alerts = [];
-        var alertIdx = 0;
-
-        function showAlert(idx) {
-            var c = document.getElementById('alertCarousel');
-            var p = document.getElementById('alertPagination');
-            var n = document.getElementById('alertNav');
-            if (!alerts || alerts.length === 0) {
-                c.innerHTML = '<div class="text-center text-muted py-5">No active alerts</div>';
-                p.textContent = '';
-                n.style.display = 'none';
-                return;
-            }
-            if (idx < 0) idx = alerts.length - 1;
-            if (idx >= alerts.length) idx = 0;
-            alertIdx = idx;
-            var a = alerts[idx];
-            var sev = a.severity || 'normal';
-            var sevBadge = sev === 'critical' ? 'bg-danger' : sev === 'high' ? 'bg-warning text-dark' : 'bg-info';
-            var typeBadge = a.msg_type === 'sos' ? '<span class="badge bg-danger me-1">SOS</span>' : '<span class="badge bg-warning text-dark me-1">Alert</span>';
-            c.innerHTML = '<div class="border rounded p-3">'
-                + '<div class="d-flex justify-content-between align-items-start mb-2">'
-                + '<div>' + typeBadge + '<span class="badge ' + sevBadge + '">' + sev + '</span></div>'
-                + '<small class="text-muted">' + (a.created_at || '') + '</small></div>'
-                + '<h5>' + escHtml(a.subject || 'Untitled') + '</h5>'
-                + '<p class="mb-0">' + escHtml(a.body || '') + '</p></div>';
-            p.textContent = (idx + 1) + ' / ' + alerts.length;
-            n.style.display = alerts.length > 1 ? 'flex' : 'none';
-        }
-        function nextAlert() { showAlert(alertIdx + 1); }
-        function prevAlert() { showAlert(alertIdx - 1); }
         function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
         function updateBattery(id, data) {
@@ -255,17 +204,16 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            // ── Dashboard metrics ──
             fetch('/api/dashboard')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     document.getElementById('fogNodesCount').textContent = data.fog_nodes_count || 0;
                     document.getElementById('peopleConnected').textContent = data.people_connected || 0;
                     document.getElementById('storage').textContent = data.storage_display || 'N/A';
-                    document.getElementById('sosAlerts').textContent = data.total_sos_alerts || 0;
                     if (data.current_user) {
                         document.getElementById('sidebarUsername').textContent = data.current_user.username || 'HopFog User';
                     }
-                    // Storage progress bar
                     if (data.sd_total_bytes && data.sd_total_bytes > 0) {
                         var pct = Math.min(100, Math.round((data.sd_used_bytes / data.sd_total_bytes) * 100));
                         document.getElementById('storageBar').style.width = pct + '%';
@@ -274,54 +222,58 @@
                         var totalGB = (data.sd_total_bytes / (1024*1024*1024)).toFixed(2);
                         document.getElementById('storageDetail').textContent = usedGB + ' / ' + totalGB + ' GB';
                     }
-                    // Active alerts carousel
-                    if (data.active_alerts && data.active_alerts.length > 0) {
-                        alerts = data.active_alerts;
-                        showAlert(0);
-                    }
                 });
-            // Battery
+            // ── Battery ──
             fetch('/api/battery')
                 .then(function(r) { return r.json(); })
                 .then(function(data) { updateBattery('adminBat', data); })
                 .catch(function() {});
-            // SOS & Alert Newsfeed (replaces old messages table)
-            fetch('/api/broadcasts')
-                .then(function(r) { return r.json(); })
-                .then(function(broadcasts) {
-                    var feed = document.getElementById('sosFeed');
-                    var items = broadcasts.filter(function(b) {
-                        return b.msg_type === 'sos' || b.msg_type === 'alert';
-                    });
-                    items.sort(function(a, b) { return (b.created_at || 0) - (a.created_at || 0); });
-                    if (items.length === 0) {
-                        feed.innerHTML = '<div class="text-center text-muted py-3"><i class="fas fa-check-circle me-1"></i>No SOS or Alert messages</div>';
-                        return;
-                    }
-                    var html = '';
-                    items.forEach(function(b) {
-                        var sevCls = b.severity === 'critical' ? 'danger' : b.severity === 'warning' ? 'warning' : 'info';
-                        var typeBadge = b.msg_type === 'sos' ? '<span class="badge bg-danger me-1">SOS</span>' : '<span class="badge bg-warning text-dark me-1">Alert</span>';
-                        var ts = b.created_at ? new Date(b.created_at * 1000).toLocaleString() : '';
-                        html += '<div class="border-start border-3 border-' + sevCls + ' rounded p-3 mb-2 bg-light">';
-                        html += '<div class="d-flex justify-content-between align-items-start">';
-                        html += '<div>' + typeBadge + '<span class="badge bg-' + sevCls + '">' + escHtml(b.severity || '') + '</span></div>';
-                        html += '<small class="text-muted">' + ts + '</small></div>';
-                        html += '<div class="fw-bold mt-1">' + escHtml(b.subject || 'Untitled') + '</div>';
-                        html += '<div class="text-muted small mt-1">' + escHtml((b.body || '').substring(0, 120)) + (b.body && b.body.length > 120 ? '...' : '') + '</div>';
-                        html += '</div>';
-                    });
-                    feed.innerHTML = html;
-                })
-                .catch(function() {
-                    document.getElementById('sosFeed').innerHTML = '<div class="text-center text-muted py-3">Could not load feed</div>';
+            // ── SOS & Alert Feed (merged: admin broadcasts + resident SOS) ──
+            Promise.all([
+                fetch('/api/broadcasts').then(function(r){return r.json();}).catch(function(){return [];}),
+                fetch('/api/resident-admin/messages').then(function(r){return r.json();}).catch(function(){return [];})
+            ]).then(function(results) {
+                var broadcasts = results[0]; var residentMsgs = results[1];
+                var feed = document.getElementById('sosFeed');
+                var items = [];
+                // Admin-created SOS/Alert broadcasts
+                broadcasts.filter(function(b){return b.msg_type==='sos'||b.msg_type==='alert';}).forEach(function(b) {
+                    items.push({source:'Admin', msg_type:b.msg_type, severity:b.severity||'info', subject:b.subject||'Untitled', body:b.body||'', created_at:b.created_at||0, status:b.status||''});
                 });
-            // Connected nodes (like testing page)
+                // Resident SOS requests
+                residentMsgs.filter(function(r){return r.kind==='sos_request';}).forEach(function(r) {
+                    items.push({source:'Resident #'+(r.sender_id||'?'), msg_type:'sos', severity:'critical', subject:r.subject||'SOS Request', body:r.body||'', created_at:r.created_at||0, status:r.status||''});
+                });
+                items.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
+                if (items.length === 0) {
+                    feed.innerHTML = '<div class="text-center text-muted py-3"><i class="fas fa-check-circle me-1"></i>No SOS or Alert messages</div>';
+                    return;
+                }
+                var html = '';
+                items.forEach(function(b) {
+                    var sevCls = b.severity==='critical' ? 'danger' : b.severity==='warning' ? 'warning' : 'info';
+                    var typeBadge = b.msg_type==='sos' ? '<span class="badge bg-danger me-1">SOS</span>' : '<span class="badge bg-warning text-dark me-1">Alert</span>';
+                    var ts = b.created_at ? new Date(b.created_at * 1000).toLocaleString() : '';
+                    html += '<div class="border-start border-3 border-' + sevCls + ' rounded p-3 mb-2 bg-light">';
+                    html += '<div class="d-flex justify-content-between align-items-start">';
+                    html += '<div>' + typeBadge + '<span class="badge bg-' + sevCls + '">' + escHtml(b.severity) + '</span>';
+                    html += ' <span class="badge bg-dark">' + escHtml(b.source) + '</span></div>';
+                    html += '<small class="text-muted">' + ts + '</small></div>';
+                    html += '<div class="fw-bold mt-1">' + escHtml(b.subject) + '</div>';
+                    html += '<div class="text-muted small mt-1">' + escHtml((b.body).substring(0,120)) + (b.body.length>120?'...':'') + '</div>';
+                    html += '</div>';
+                });
+                feed.innerHTML = html;
+            }).catch(function(){
+                document.getElementById('sosFeed').innerHTML = '<div class="text-center text-muted py-3">Could not load feed</div>';
+            });
+            // ── Connected nodes ──
             function refreshNodes() {
                 fetch('/api/nodes')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var el = document.getElementById('registeredNodes');
+                    document.getElementById('connectedNodesCount').textContent = data.active || 0;
                     if (!data.nodes || data.nodes.length === 0) {
                         el.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>No nodes registered yet</span>';
                     } else {
