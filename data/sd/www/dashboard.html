@@ -231,9 +231,15 @@
             // ── SOS & Alert Feed (merged: admin broadcasts + resident SOS) ──
             Promise.all([
                 fetch('/api/broadcasts').then(function(r){return r.json();}).catch(function(){return [];}),
-                fetch('/api/resident-admin/messages').then(function(r){return r.json();}).catch(function(){return [];})
+                fetch('/api/resident-admin/messages').then(function(r){return r.json();}).catch(function(){return [];}),
+                fetch('/api/users').then(function(r){return r.json();}).catch(function(){return [];})
             ]).then(function(results) {
-                var broadcasts = results[0]; var residentMsgs = results[1];
+                var broadcasts = Array.isArray(results[0]) ? results[0] : [];
+                var residentMsgs = Array.isArray(results[1]) ? results[1] : [];
+                var users = Array.isArray(results[2]) ? results[2] : [];
+                // Build user lookup map
+                var userMap = {};
+                users.forEach(function(u) { userMap[u.id] = u.username || ('User #' + u.id); });
                 var feed = document.getElementById('sosFeed');
                 var items = [];
                 // Admin-created SOS/Alert broadcasts
@@ -242,7 +248,8 @@
                 });
                 // Resident SOS requests
                 residentMsgs.filter(function(r){return r.kind==='sos_request';}).forEach(function(r) {
-                    items.push({source:'Resident #'+(r.sender_id||'?'), msg_type:'sos', severity:'critical', subject:r.subject||'SOS Request', body:r.body||'', created_at:r.created_at||0, status:r.status||''});
+                    var senderName = userMap[r.sender_id] || ('User #' + (r.sender_id||'?'));
+                    items.push({source:senderName, msg_type:'sos', severity:'critical', subject:r.subject||'SOS Request', body:r.body||'', created_at:r.created_at||0, status:r.status||''});
                 });
                 items.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 if (items.length === 0) {

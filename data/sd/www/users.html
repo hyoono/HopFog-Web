@@ -161,10 +161,13 @@
         document.addEventListener('DOMContentLoaded', function() {
             Promise.all([
                 fetch('/api/users').then(function(r){return r.json();}),
-                fetch('/api/users/online').then(function(r){return r.json();}).catch(function(){return [];})
+                fetch('/api/users/online').then(function(r){
+                    if (!r.ok) return [];
+                    return r.json().then(function(d) { return Array.isArray(d) ? d : []; });
+                }).catch(function(){return [];})
             ]).then(function(results) {
                 var users = results[0];
-                var onlineIds = new Set(results[1]);
+                var onlineIds = new Set(results[1].map(function(id) { return Number(id); }));
                 var tbody = document.getElementById('usersTableBody');
                 if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center">No users found</td></tr>'; }
                 users.forEach(function(user) {
@@ -178,7 +181,7 @@
                     } else {
                         actionsHtml += '<button class="btn btn-sm btn-secondary" disabled title="Cannot modify admin status"><i class="fas fa-lock"></i></button>';
                     }
-                    var onlineDot = onlineIds.has(user.id) ? '<span style="color:#28a745;font-size:0.8em" title="Online">● </span>' : '<span style="color:#ccc;font-size:0.8em" title="Offline">● </span>';
+                    var onlineDot = onlineIds.has(Number(user.id)) ? '<span style="color:#28a745;font-size:0.8em" title="Online">● </span>' : '<span style="color:#ccc;font-size:0.8em" title="Offline">● </span>';
                     tr.innerHTML = '<td>'+user.id+'</td><td>'+onlineDot+escapeHtml(user.username)+'</td><td>'+escapeHtml(maskEmail(user.email))+'</td><td>'+roleHtml+'</td><td>'+statusHtml+'</td><td>'+fmtDate(user.created_at)+'</td><td>'+actionsHtml+'</td>';
                     tbody.appendChild(tr);
                 });

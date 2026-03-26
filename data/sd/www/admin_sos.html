@@ -153,8 +153,16 @@
             }).catch(function(){alert('Error dismissing SOS request.');});
         }
         document.addEventListener('DOMContentLoaded', function(){
-            // Load incoming SOS requests — filter to only show actionable ones (queued|delivered|read)
-            fetch('/api/resident-admin/messages').then(function(r){return r.json();}).then(function(requests){
+            // Load incoming SOS requests — resolve sender IDs to usernames
+            Promise.all([
+                fetch('/api/resident-admin/messages').then(function(r){return r.json();}).catch(function(){return [];}),
+                fetch('/api/users').then(function(r){return r.json();}).catch(function(){return [];})
+            ]).then(function(results){
+                var requests = Array.isArray(results[0]) ? results[0] : [];
+                var users = Array.isArray(results[1]) ? results[1] : [];
+                // Build user lookup map
+                var userMap = {};
+                users.forEach(function(u) { userMap[u.id] = u.username || ('User #' + u.id); });
                 // Filter: only sos_request kind, only actionable statuses
                 var filtered=requests.filter(function(r){
                     return r.kind==='sos_request' && (r.status==='queued'||r.status==='delivered'||r.status==='read');
@@ -164,8 +172,9 @@
                 var tbody=document.getElementById('incomingSosBody');
                 if(filtered.length===0){tbody.innerHTML='<tr><td colspan="6" class="text-muted">No incoming SOS requests right now.</td></tr>';return;}
                 filtered.forEach(function(r){
+                    var senderName = userMap[r.sender_id] || ('User #' + (r.sender_id||'?'));
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>#'+r.id+'</td><td>'+(r.sender_id||'')+'</td><td>'+escapeHtml(r.subject||'SOS Request')+'</td><td style="max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(r.body||'')+'</td><td>'+fmtTime(r.created_at)+'</td><td class="text-end"><button class="btn btn-sm btn-warning" onclick="escalateSos('+r.id+',\'alert\')">Escalate to Alert</button> <button class="btn btn-sm btn-danger" onclick="escalateSos('+r.id+',\'sos\')">Broadcast SOS</button> <button class="btn btn-sm btn-outline-secondary" onclick="dismissSos('+r.id+')">Dismiss</button></td>';
+                    tr.innerHTML='<td>#'+r.id+'</td><td>'+escapeHtml(senderName)+'</td><td>'+escapeHtml(r.subject||'SOS Request')+'</td><td style="max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(r.body||'')+'</td><td>'+fmtTime(r.created_at)+'</td><td class="text-end"><button class="btn btn-sm btn-warning" onclick="escalateSos('+r.id+',\'alert\')">Escalate to Alert</button> <button class="btn btn-sm btn-danger" onclick="escalateSos('+r.id+',\'sos\')">Broadcast SOS</button> <button class="btn btn-sm btn-outline-secondary" onclick="dismissSos('+r.id+')">Dismiss</button></td>';
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('incomingSosBody').innerHTML='<tr><td colspan="6" class="text-muted">No incoming SOS requests right now.</td></tr>';});

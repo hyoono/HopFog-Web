@@ -21,13 +21,25 @@ static unsigned long currentEpoch() {
     return (unsigned long)now;
 }
 
-// ── Helper: authenticate request from cookie ────────────────────────
+// ── Helper: authenticate request from cookie or Authorization header ─
 
 static int authenticateRequest(AsyncWebServerRequest *request) {
-    if (!request->hasHeader("Cookie")) return -1;
-    String cookie = request->header("Cookie");
-    String token  = extractTokenFromCookie(cookie);
-    return validateToken(token);
+    // 1. Try cookie-based auth (web browser)
+    if (request->hasHeader("Cookie")) {
+        String cookie = request->header("Cookie");
+        String token  = extractTokenFromCookie(cookie);
+        int uid = validateToken(token);
+        if (uid >= 0) return uid;
+    }
+    // 2. Try Authorization: Bearer <token> (mobile app)
+    if (request->hasHeader("Authorization")) {
+        String auth = request->header("Authorization");
+        if (auth.startsWith("Bearer ")) {
+            String token = auth.substring(7);
+            return validateToken(token);
+        }
+    }
+    return -1;
 }
 
 static void sendJsonError(AsyncWebServerRequest *request, int code, const char *msg) {
@@ -1679,11 +1691,32 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         int convoId = findOrCreateConversation(userId, adminId, true);
 
-        // ── Send SOS alert via XBee S2C ─────────────────────────────
-        // Look up the triggering user's name for the alert payload.
+        // ── Look up the triggering user's name ──────────────────────
         JsonDocument userDoc = getUserById(userId);
         String userName = userDoc["username"] | "Unknown";
-        // Send SOS alert via XBee in JSON format (for node protocol)
+
+        // ── Write to resident_admin_msgs.json so SOS Console & Dashboard see it ──
+        {
+            JsonDocument resDoc;
+            if (!readJsonArray(SD_RES_MSG_FILE, resDoc)) { resDoc.to<JsonArray>(); }
+            JsonArray arr = resDoc.as<JsonArray>();
+            int reqId = nextId(SD_RES_MSG_FILE);
+
+            JsonObject m = arr.add<JsonObject>();
+            m["id"]           = reqId;
+            m["sender_id"]    = userId;
+            m["kind"]         = "sos_request";
+            m["subject"]      = "[SOS] " + userName + " triggered SOS";
+            m["body"]         = "SOS activated via mobile app by " + userName;
+            m["priority"]     = 90;
+            m["status"]       = "queued";
+            m["admin_action"] = "none";
+            m["created_at"]   = currentEpoch();
+
+            writeJsonArray(SD_RES_MSG_FILE, resDoc);
+        }
+
+        // ── Send SOS alert via XBee S2C ─────────────────────────────
         JsonDocument sosAlertCmd;
         sosAlertCmd["cmd"] = "SOS_ALERT";
         sosAlertCmd["node_id"] = "admin";

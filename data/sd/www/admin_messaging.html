@@ -60,37 +60,79 @@
                         <li class="breadcrumb-item"><a href="/dashboard">Dashboard</a></li>
                         <li class="breadcrumb-item active">Admin Messaging</li>
                     </ol>
-                    <div class="row">
+                    <!-- Quick Actions — prominent buttons first -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6 col-lg-3">
+                            <a class="btn btn-primary btn-lg w-100 py-3 d-flex flex-column align-items-center" href="/admin/messaging/broadcasts">
+                                <i class="fas fa-paper-plane fa-2x mb-2"></i>
+                                <span>Broadcasts</span>
+                                <small class="text-white-50">Create &amp; manage</small>
+                            </a>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <a class="btn btn-danger btn-lg w-100 py-3 d-flex flex-column align-items-center" href="/admin/messaging/sos">
+                                <i class="fas fa-triangle-exclamation fa-2x mb-2"></i>
+                                <span>SOS Console</span>
+                                <small class="text-white-50">Emergency alerts</small>
+                            </a>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <a class="btn btn-warning btn-lg w-100 py-3 d-flex flex-column align-items-center text-dark" href="/admin/messaging/queue">
+                                <i class="fas fa-layer-group fa-2x mb-2"></i>
+                                <span>Queue Monitor</span>
+                                <small>Pending messages</small>
+                            </a>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <a class="btn btn-info btn-lg w-100 py-3 d-flex flex-column align-items-center text-white" href="/admin/messaging/tracking">
+                                <i class="fas fa-chart-line fa-2x mb-2"></i>
+                                <span>Delivery Tracking</span>
+                                <small class="text-white-50">Status reports</small>
+                            </a>
+                        </div>
+                    </div>
+                    <!-- Metrics Row -->
+                    <div class="row mb-4">
                         <div class="col-xl-4 col-md-6">
                             <div class="card bg-primary text-white mb-4">
-                                <div class="card-body">Total Broadcasts: <strong id="totalBroadcasts">0</strong></div>
-                                <div class="card-footer d-flex align-items-center justify-content-between">
-                                    <a class="small text-white stretched-link" href="/admin/messaging/broadcasts">View Broadcasts</a>
-                                    <div class="small text-white"><i class="fas fa-angle-right"></i></div>
+                                <div class="card-body d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-bullhorn me-2"></i>Total Broadcasts</span>
+                                    <h3 class="mb-0" id="totalBroadcasts">0</h3>
                                 </div>
                             </div>
                         </div>
                         <div class="col-xl-4 col-md-6">
                             <div class="card bg-warning text-dark mb-4">
-                                <div class="card-body">Queued: <strong id="queuedCount">0</strong></div>
-                                <div class="card-footer d-flex align-items-center justify-content-between">
-                                    <a class="small text-dark stretched-link" href="/admin/messaging/queue">Queue Monitor</a>
-                                    <div class="small text-dark"><i class="fas fa-angle-right"></i></div>
+                                <div class="card-body d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-clock me-2"></i>Queued</span>
+                                    <h3 class="mb-0" id="queuedCount">0</h3>
                                 </div>
                             </div>
                         </div>
                         <div class="col-xl-4 col-md-6">
                             <div class="card bg-secondary text-white mb-4">
-                                <div class="card-body">Drafts: <strong id="draftsCount">0</strong></div>
-                                <div class="card-footer d-flex align-items-center justify-content-between">
-                                    <a class="small text-white stretched-link" href="/admin/messaging/broadcasts">Create New</a>
-                                    <div class="small text-white"><i class="fas fa-angle-right"></i></div>
+                                <div class="card-body d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-file-alt me-2"></i>Drafts</span>
+                                    <h3 class="mb-0" id="draftsCount">0</h3>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    <!-- Incoming SOS Requests -->
                     <div class="card mb-4">
-                        <div class="card-header"><i class="fas fa-siren-on me-1"></i> Recent SOS</div>
+                        <div class="card-header bg-danger text-white"><i class="fas fa-inbox me-1"></i> Incoming SOS Requests</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped align-middle">
+                                    <thead><tr><th>ID</th><th>From</th><th>Subject</th><th>Time</th><th class="text-end">Action</th></tr></thead>
+                                    <tbody id="incomingSosBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Recent SOS Broadcasts -->
+                    <div class="card mb-4">
+                        <div class="card-header"><i class="fas fa-history me-1"></i> Recent SOS Broadcasts</div>
                         <div class="card-body">
                             <div class="table-responsive">
                                 <table class="table table-sm table-striped align-middle">
@@ -99,12 +141,6 @@
                                 </table>
                             </div>
                         </div>
-                    </div>
-                    <div class="row g-3">
-                        <div class="col-md-3"><a class="btn btn-outline-primary w-100" href="/admin/messaging/broadcasts"><i class="fas fa-paper-plane me-2"></i>Broadcasts</a></div>
-                        <div class="col-md-3"><a class="btn btn-outline-warning w-100" href="/admin/messaging/queue"><i class="fas fa-layer-group me-2"></i>Queue Monitor</a></div>
-                        <div class="col-md-3"><a class="btn btn-outline-info w-100" href="/admin/messaging/tracking"><i class="fas fa-chart-line me-2"></i>Delivery Tracking</a></div>
-                        <div class="col-md-3"><a class="btn btn-outline-danger w-100" href="/admin/messaging/sos"><i class="fas fa-triangle-exclamation me-2"></i>SOS Console</a></div>
                     </div>
                 </div>
             </main>
@@ -132,6 +168,7 @@
         }
         function fmtTime(epoch){if(!epoch) return '';try{return new Date(epoch*1000).toLocaleString();}catch(e){return '';}}
         document.addEventListener('DOMContentLoaded', function() {
+            // Load broadcasts for metrics + recent SOS
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts) {
                 var total = broadcasts.length, queued = 0, drafts = 0;
                 broadcasts.forEach(function(b) { if (b.status==='queued') queued++; if (b.status==='draft') drafts++; });
@@ -150,6 +187,26 @@
                     tbody.appendChild(tr);
                 });
             }).catch(function(){document.getElementById('recentSosBody').innerHTML='<tr><td colspan="6" class="text-muted">No SOS broadcasts yet.</td></tr>';});
+            // Load incoming SOS requests from residents
+            Promise.all([
+                fetch('/api/resident-admin/messages').then(function(r){return r.json();}).catch(function(){return [];}),
+                fetch('/api/users').then(function(r){return r.json();}).catch(function(){return [];})
+            ]).then(function(results) {
+                var requests = Array.isArray(results[0]) ? results[0] : [];
+                var users = Array.isArray(results[1]) ? results[1] : [];
+                var userMap = {};
+                users.forEach(function(u) { userMap[u.id] = u.username || ('User #' + u.id); });
+                var filtered = requests.filter(function(r){ return r.kind==='sos_request' && r.status==='queued'; });
+                filtered.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
+                var tbody = document.getElementById('incomingSosBody');
+                if (filtered.length===0) { tbody.innerHTML='<tr><td colspan="5" class="text-muted">No incoming SOS requests.</td></tr>'; return; }
+                filtered.slice(0, 5).forEach(function(r) {
+                    var senderName = userMap[r.sender_id] || ('User #' + (r.sender_id||'?'));
+                    var tr = document.createElement('tr');
+                    tr.innerHTML = '<td>#'+r.id+'</td><td>'+escapeHtml(senderName)+'</td><td>'+escapeHtml(r.subject||'SOS Request')+'</td><td>'+fmtTime(r.created_at)+'</td><td class="text-end"><a class="btn btn-sm btn-danger" href="/admin/messaging/sos">Handle</a></td>';
+                    tbody.appendChild(tr);
+                });
+            }).catch(function(){document.getElementById('incomingSosBody').innerHTML='<tr><td colspan="5" class="text-muted">No incoming SOS requests.</td></tr>';});
         });
     </script>
 </body>

@@ -471,3 +471,74 @@ val formBody = FormBody.Builder()
 ```
 
 The server will use this `kind` field to properly categorize the message in the SOS Console vs regular DM inbox.
+
+---
+
+## Fix 15: Send Authorization Header with API Requests
+
+**Problem:** Mobile users don't appear as "online" in the web admin's Users page because the app doesn't send its auth token with subsequent API requests after login.
+
+**Root Cause:** The server now tracks active sessions and exposes `GET /api/users/online` which returns user IDs with active session tokens. The app receives an `access_token` from `POST /login` but may not be sending it in the `Authorization` header for subsequent requests.
+
+**Solution:** After login, store the `access_token` and send it as `Authorization: Bearer <token>` in ALL subsequent API requests.
+
+**Android Implementation:**
+
+```kotlin
+// After login response:
+val accessToken = jsonResponse.getString("access_token")
+// Store it (e.g., SharedPreferences or in-memory singleton)
+
+// For ALL subsequent requests, add the header:
+val request = Request.Builder()
+    .url("http://hopfog.com/api/users")
+    .addHeader("Authorization", "Bearer $accessToken")
+    .build()
+```
+
+**Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile
+
+This ensures that:
+1. Mobile users appear as "online" (green dot) in the admin Users page
+2. The admin can see which mobile users are currently active
+3. API calls that require authentication will succeed
+
+---
+
+## Fix 16: SOS Conversation Mode Switching
+
+**Problem:** Once a conversation is created in SOS mode (`POST /sos`), ALL subsequent messages in that conversation inherit the SOS flag. Similarly, a DM conversation always stays as DM. Users can't switch modes within the same admin conversation.
+
+**Root Cause:** The server uses a per-conversation `is_sos` flag (in `conversations.json`), not a per-message type field.
+
+**Solution:** When the user triggers SOS:
+1. The app should call `POST /sos` (which creates/finds a conversation with `is_sos=1`)
+2. The server now ALSO writes to `resident_admin_msgs.json` (which feeds the SOS Console)
+3. For DM messages to admin, use `POST /create-chat` (which creates with `is_sos=0`)
+
+The user effectively has two "conversations" with admin — one for SOS, one for DM. This is the intended behavior.
+
+**Android Implementation:**
+
+```kotlin
+// When user triggers SOS:
+fun triggerSOS(userId: Int) {
+    val body = FormBody.Builder()
+        .add("user_id", userId.toString())
+        .build()
+    // POST /sos → returns {conversation_id, contact_name}
+    // Use this conversation_id for SOS messages
+}
+
+// When user wants regular DM to admin:
+fun startDMWithAdmin(userId: Int, adminId: Int) {
+    val body = FormBody.Builder()
+        .add("user1_id", userId.toString())
+        .add("user2_id", adminId.toString())
+        .build()
+    // POST /create-chat → returns {conversation_id, contact_name}
+    // Use this conversation_id for regular DM messages
+}
+```
+
+**Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile
