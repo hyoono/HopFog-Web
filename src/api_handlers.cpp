@@ -841,20 +841,8 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         int id = createBroadcast(uid, msgType.c_str(), severity.c_str(),
                                  audience.c_str(), subject.c_str(), body.c_str(),
-                                 status.c_str(), priority, ttlHours);
-
-        // Store scheduled_at if provided (requirement #6)
-        if (scheduledAt.length() > 0) {
-            JsonDocument bDoc;
-            readJsonArray(SD_BCASTS_FILE, bDoc);
-            for (JsonObject b : bDoc.as<JsonArray>()) {
-                if ((b["id"] | 0) == id) {
-                    b["scheduled_at"] = scheduledAt;
-                    break;
-                }
-            }
-            writeJsonArray(SD_BCASTS_FILE, bDoc);
-        }
+                                 status.c_str(), priority, ttlHours,
+                                 scheduledAt.length() > 0 ? scheduledAt.c_str() : nullptr);
 
         // Create recipient records for all active residents
         createRecipientsForBroadcast(id);

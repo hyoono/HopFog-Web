@@ -42,7 +42,8 @@ bool disconnectFogDevice(int deviceId);
 // ── Broadcast helpers ───────────────────────────────────────────────
 int  createBroadcast(int createdBy, const char *msgType, const char *severity,
                      const char *audience, const char *subject, const char *body,
-                     const char *status, int priority, int ttlHours = 0);
+                     const char *status, int priority, int ttlHours = 0,
+                     const char *scheduledAt = nullptr);
 
 // ── Status update helpers ────────────────────────────────────────────
 bool updateBroadcastStatus(int broadcastId, const char *newStatus);

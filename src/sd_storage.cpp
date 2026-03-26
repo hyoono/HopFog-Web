@@ -325,7 +325,8 @@ bool disconnectFogDevice(int deviceId) {
 
 int createBroadcast(int createdBy, const char *msgType, const char *severity,
                     const char *audience, const char *subject, const char *body,
-                    const char *status, int priority, int ttlHours) {
+                    const char *status, int priority, int ttlHours,
+                    const char *scheduledAt) {
     JsonDocument doc;
     if (!readJsonArray(SD_BCASTS_FILE, doc)) {
         doc.to<JsonArray>();
@@ -349,6 +350,9 @@ int createBroadcast(int createdBy, const char *msgType, const char *severity,
     if (ttlHours > 0) {
         bc["ttl_hours"]      = ttlHours;
         bc["ttl_expires_at"] = now + (unsigned long)ttlHours * 3600UL;
+    }
+    if (scheduledAt && scheduledAt[0] != '\0') {
+        bc["scheduled_at"] = scheduledAt;
     }
 
     writeJsonArray(SD_BCASTS_FILE, doc);
