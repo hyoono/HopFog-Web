@@ -35,6 +35,7 @@
                     <div class="nav">
                         <div class="sb-sidenav-menu-heading">Core</div>
                         <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
                         <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
                         <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
@@ -43,7 +44,6 @@
                         <a class="nav-link active" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
                         <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
                         <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
                         <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
@@ -76,6 +76,7 @@
                                         <div class="mb-3"><label class="form-label">Title / Subject</label><input class="form-control" name="subject" maxlength="200" required placeholder="e.g., Water Interruption Notice"></div>
                                         <div class="mb-3"><label class="form-label">Body</label><textarea class="form-control" name="body" rows="6" required placeholder="Write your announcement here..."></textarea></div>
                                         <div class="mb-3"><label class="form-label">TTL (hours)</label><input type="number" class="form-control" name="ttl_hours" value="24" min="1" max="720"><div class="form-text">How long this broadcast remains valid for delivery.</div></div>
+                                        <div class="mb-3"><label class="form-label">Schedule For</label><input type="datetime-local" class="form-control" name="scheduled_at"><div class="form-text">Optional. Leave blank to send immediately when queued.</div></div>
                                         <div class="d-flex gap-2">
                                             <button class="btn btn-secondary" type="submit" name="action" value="draft">Save Draft</button>
                                             <button class="btn btn-primary" type="submit" name="action" value="queue">Queue to Send</button>
@@ -148,6 +149,13 @@
                     document.getElementById('createBroadcastForm').reset();loadBroadcasts();
                     setTimeout(function(){el.style.display='none';},3000);
                 }).catch(function(){var el=document.getElementById('broadcastAlert');el.className='alert alert-danger';el.textContent='Error creating broadcast.';el.style.display='block';});
+            });
+            // Auto-link severity to message type (requirement #4/#5)
+            var typeSelect = document.querySelector('select[name="msg_type"]');
+            var sevSelect = document.querySelector('select[name="severity"]');
+            typeSelect.addEventListener('change', function() {
+                var map = { announcement: 'info', alert: 'warning', sos: 'critical' };
+                sevSelect.value = map[typeSelect.value] || 'info';
             });
         });
     </script>

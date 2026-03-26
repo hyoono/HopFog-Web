@@ -376,6 +376,25 @@ void registerApiRoutes(AsyncWebServer &server) {
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
+    // │  USERS: GET /api/users/online  — active session user IDs     │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/api/users/online", HTTP_GET, [](AsyncWebServerRequest *request) {
+        int uid = authenticateRequest(request);
+        if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
+
+        int ids[MAX_ACTIVE_TOKENS];
+        int count = getActiveUserIds(ids, MAX_ACTIVE_TOKENS);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+        for (int i = 0; i < count; i++) arr.add(ids[i]);
+
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
     // │  USERS: POST /api/admin/create-mobile-user                   │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/api/admin/create-mobile-user", HTTP_POST,
@@ -797,6 +816,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         String body     = request->hasParam("body", true)       ? request->getParam("body", true)->value()      : "";
         String status   = request->hasParam("status", true)     ? request->getParam("status", true)->value()    : "draft";
         int ttlHours    = request->hasParam("ttl_hours", true)  ? request->getParam("ttl_hours", true)->value().toInt() : 24;
+        String scheduledAt = request->hasParam("scheduled_at", true) ? request->getParam("scheduled_at", true)->value() : "";
 
         // Validate enums (match original Python)
         msgType.toLowerCase();
@@ -805,6 +825,11 @@ void registerApiRoutes(AsyncWebServer &server) {
         if (msgType != "announcement" && msgType != "alert" && msgType != "sos") msgType = "announcement";
         if (severity != "info" && severity != "warning" && severity != "critical") severity = "info";
         if (status != "draft" && status != "queued") status = "draft";
+
+        // Auto-link severity to message type (requirement #4/#5)
+        if (msgType == "sos")              severity = "critical";
+        else if (msgType == "alert")       severity = "warning";
+        else if (msgType == "announcement") severity = "info";
 
         // Clamp TTL: 1 hour minimum, 720 hours (30 days) maximum
         if (ttlHours < 1) ttlHours = 1;
@@ -817,6 +842,19 @@ void registerApiRoutes(AsyncWebServer &server) {
         int id = createBroadcast(uid, msgType.c_str(), severity.c_str(),
                                  audience.c_str(), subject.c_str(), body.c_str(),
                                  status.c_str(), priority, ttlHours);
+
+        // Store scheduled_at if provided (requirement #6)
+        if (scheduledAt.length() > 0) {
+            JsonDocument bDoc;
+            readJsonArray(SD_BCASTS_FILE, bDoc);
+            for (JsonObject b : bDoc.as<JsonArray>()) {
+                if ((b["id"] | 0) == id) {
+                    b["scheduled_at"] = scheduledAt;
+                    break;
+                }
+            }
+            writeJsonArray(SD_BCASTS_FILE, bDoc);
+        }
 
         // Create recipient records for all active residents
         createRecipientsForBroadcast(id);

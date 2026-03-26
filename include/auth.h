@@ -27,4 +27,8 @@ String extractTokenFromCookie(const String &cookieHeader);
 // Count currently active sessions (logged-in users)
 int countActiveSessions();
 
+// Fill an array with user IDs that have active sessions.
+// Returns the number of IDs written (up to maxOut).
+int getActiveUserIds(int *outIds, int maxOut);
+
 #endif // AUTH_H

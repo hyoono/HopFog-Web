@@ -35,6 +35,7 @@
                     <div class="nav">
                         <div class="sb-sidenav-menu-heading">Core</div>
                         <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
                         <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
                         <a class="nav-link active" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
@@ -43,7 +44,6 @@
                         <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
                         <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
                         <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
                         <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
@@ -65,13 +65,13 @@
                     <div class="card mb-4">
                         <div class="card-header">
                             <i class="fas fa-broadcast-tower me-1"></i>
-                            XBee Connected Nodes
+                            Connected Nodes
                             <button class="btn btn-sm btn-outline-primary float-end" onclick="refreshNodes()"><i class="fas fa-sync"></i> Refresh</button>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
                             <table class="table table-bordered table-hover">
-                                <thead><tr><th>Node ID</th><th>Device Name</th><th>IP Address</th><th>Status</th><th>Last Heartbeat</th><th>Free Heap</th><th>Uptime</th><th>XBee Addr</th><th>Actions</th></tr></thead>
+                                <thead><tr><th>Node ID</th><th>Device Name</th><th>IP Address</th><th>Status</th><th>Last Heartbeat</th><th>Free Heap</th><th>Uptime</th><th>Device Addr</th><th>Actions</th></tr></thead>
                                 <tbody id="nodesTableBody"><tr><td colspan="9" class="text-center">Loading…</td></tr></tbody>
                             </table>
                             </div>
@@ -110,7 +110,7 @@
                 var tbody = document.getElementById('nodesTableBody');
                 tbody.innerHTML = '';
                 if (!data.nodes || data.nodes.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No XBee nodes connected</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No nodes connected</td></tr>';
                     return;
                 }
                 data.nodes.forEach(function(n) {

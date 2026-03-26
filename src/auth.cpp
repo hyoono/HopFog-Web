@@ -152,3 +152,17 @@ int countActiveSessions() {
     }
     return count;
 }
+
+int getActiveUserIds(int *outIds, int maxOut) {
+    int count = 0;
+    for (int i = 0; i < MAX_ACTIVE_TOKENS && count < maxOut; i++) {
+        if (!sessions[i].used) continue;
+        // Deduplicate (a user could theoretically have multiple tokens)
+        bool found = false;
+        for (int j = 0; j < count; j++) {
+            if (outIds[j] == sessions[i].userId) { found = true; break; }
+        }
+        if (!found) outIds[count++] = sessions[i].userId;
+    }
+    return count;
+}

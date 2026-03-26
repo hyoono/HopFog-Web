@@ -35,6 +35,7 @@
                     <div class="nav">
                         <div class="sb-sidenav-menu-heading">Core</div>
                         <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
                         <a class="nav-link" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
                         <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
@@ -43,7 +44,6 @@
                         <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
                         <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
                         <a class="nav-link active" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
                         <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
@@ -68,7 +68,7 @@
                         <div class="card-body">
                             <div class="table-responsive">
                                 <table class="table table-striped table-sm align-middle">
-                                    <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Subject</th><th>Status</th><th>Total</th><th>Queued</th><th>Sent</th><th>Delivered</th><th>Read</th><th>Failed</th><th></th></tr></thead>
+                                    <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Subject</th><th>Status</th><th>Total</th><th>Delivered</th><th>Failed</th><th></th></tr></thead>
                                     <tbody id="trackingBody"></tbody>
                                 </table>
                             </div>
@@ -102,15 +102,15 @@
         document.addEventListener('DOMContentLoaded', function(){
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
                 var tbody=document.getElementById('trackingBody');
-                if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>';return;}
+                if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="9" class="text-muted">No broadcasts to track yet.</td></tr>';return;}
                 broadcasts.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 broadcasts.forEach(function(b){
                     var sc=b.status_counts||{};
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:220px;">'+escapeHtml(b.subject)+'</td><td>'+statusBadge(b.status)+'</td><td>'+(sc.total||0)+'</td><td>'+(sc.queued||0)+'</td><td>'+(sc.sent||0)+'</td><td>'+(sc.delivered||0)+'</td><td>'+(sc.read||0)+'</td><td>'+(sc.failed||0)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:220px;">'+escapeHtml(b.subject)+'</td><td>'+statusBadge(b.status)+'</td><td>'+(sc.total||0)+'</td><td>'+(sc.delivered||0)+'</td><td>'+(sc.failed||0)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
-            }).catch(function(){document.getElementById('trackingBody').innerHTML='<tr><td colspan="12" class="text-muted">No broadcasts to track yet.</td></tr>';});
+            }).catch(function(){document.getElementById('trackingBody').innerHTML='<tr><td colspan="9" class="text-muted">No broadcasts to track yet.</td></tr>';});
         });
     </script>
 </body>

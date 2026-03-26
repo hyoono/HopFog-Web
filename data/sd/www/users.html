@@ -35,6 +35,7 @@
                     <div class="nav">
                         <div class="sb-sidenav-menu-heading">Core</div>
                         <a class="nav-link" href="/dashboard"><div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>Dashboard</a>
+                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/logs"><div class="sb-nav-link-icon"><i class="fas fa-chart-area"></i></div>Logs</a>
                         <a class="nav-link active" href="/users"><div class="sb-nav-link-icon"><i class="fas fa-columns"></i></div>Users</a>
                         <a class="nav-link" href="/fog_nodes"><div class="sb-nav-link-icon"><i class="fas fa-table"></i></div>Fog Nodes &amp; Network</a>
@@ -43,7 +44,6 @@
                         <a class="nav-link" href="/admin/messaging/broadcasts"><div class="sb-nav-link-icon"><i class="fas fa-paper-plane"></i></div>Broadcasts</a>
                         <a class="nav-link" href="/admin/messaging/queue"><div class="sb-nav-link-icon"><i class="fas fa-layer-group"></i></div>Queue Monitor</a>
                         <a class="nav-link" href="/admin/messaging/tracking"><div class="sb-nav-link-icon"><i class="fas fa-chart-line"></i></div>Delivery Tracking</a>
-                        <a class="nav-link" href="/admin/messaging/sos"><div class="sb-nav-link-icon"><i class="fas fa-triangle-exclamation"></i></div>SOS Console</a>
                         <a class="nav-link" href="/admin/messaging/testing"><div class="sb-nav-link-icon"><i class="fas fa-vial"></i></div>Testing</a>
                         <div class="sb-sidenav-menu-heading">Developer</div>
                         <a class="nav-link" href="/api-docs"><div class="sb-nav-link-icon"><i class="fas fa-code"></i></div>API Explorer</a>
@@ -156,7 +156,12 @@
         }
         function escapeHtml(t) { var d = document.createElement('div'); d.appendChild(document.createTextNode(t)); return d.innerHTML; }
         document.addEventListener('DOMContentLoaded', function() {
-            fetch('/api/users').then(function(r){return r.json();}).then(function(users) {
+            Promise.all([
+                fetch('/api/users').then(function(r){return r.json();}),
+                fetch('/api/users/online').then(function(r){return r.json();}).catch(function(){return [];})
+            ]).then(function(results) {
+                var users = results[0];
+                var onlineIds = new Set(results[1]);
                 var tbody = document.getElementById('usersTableBody');
                 if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center">No users found</td></tr>'; }
                 users.forEach(function(user) {
@@ -170,7 +175,8 @@
                     } else {
                         actionsHtml += '<button class="btn btn-sm btn-secondary" disabled title="Cannot modify admin status"><i class="fas fa-lock"></i></button>';
                     }
-                    tr.innerHTML = '<td>'+user.id+'</td><td>'+escapeHtml(user.username)+'</td><td>'+escapeHtml(maskEmail(user.email))+'</td><td>'+roleHtml+'</td><td>'+statusHtml+'</td><td>'+(user.created_at||'N/A')+'</td><td>'+actionsHtml+'</td>';
+                    var onlineDot = onlineIds.has(user.id) ? '<span style="color:#28a745;font-size:0.8em" title="Online">● </span>' : '<span style="color:#ccc;font-size:0.8em" title="Offline">● </span>';
+                    tr.innerHTML = '<td>'+user.id+'</td><td>'+onlineDot+escapeHtml(user.username)+'</td><td>'+escapeHtml(maskEmail(user.email))+'</td><td>'+roleHtml+'</td><td>'+statusHtml+'</td><td>'+(user.created_at||'N/A')+'</td><td>'+actionsHtml+'</td>';
                     tbody.appendChild(tr);
                 });
                 var dt = document.getElementById('datatablesSimple');
