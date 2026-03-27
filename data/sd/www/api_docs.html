@@ -385,14 +385,14 @@
                     ]
                 },
                 {
-                    method: "GET", path: "/users?user_id={user_id}", desc: "List all users (excluding self)",
+                    method: "GET", path: "/users?user_id={user_id}", desc: "List non-admin users (excluding self) with online status",
                     auth: false,
                     params: [
                         { name: "user_id", type: "number", required: true, desc: "Your user ID", isPath: true }
                     ]
                 },
                 {
-                    method: "GET", path: "/conversations?user_id={user_id}", desc: "List conversations for a user",
+                    method: "GET", path: "/conversations?user_id={user_id}", desc: "List non-admin conversations for a user",
                     auth: false,
                     params: [
                         { name: "user_id", type: "number", required: true, desc: "User ID", isPath: true }

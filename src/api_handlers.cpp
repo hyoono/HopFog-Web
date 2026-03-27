@@ -1371,20 +1371,19 @@ void registerApiRoutes(AsyncWebServer &server) {
             if (uid == requestingUserId) continue;  // exclude self
             int isActive = u["is_active"] | 0;
             if (!isActive) continue;  // exclude deactivated users
+            String role = u["role"] | "mobile";
+            if (role == "admin") continue;  // exclude admin accounts from mobile client
+
             bool online = false;
             for (int i = 0; i < onlineCount; i++) {
                 if (onlineIds[i] == uid) { online = true; break; }
             }
-
-            String role = u["role"] | "mobile";
-            bool isAdmin = (role == "admin");
 
             JsonObject o = arr.add<JsonObject>();
             o["id"]        = uid;
             o["username"]  = u["username"];
             o["role"]      = role;
             o["is_online"] = online;
-            o["is_admin"]  = isAdmin;
         }
 
         String out;
@@ -1430,6 +1429,7 @@ void registerApiRoutes(AsyncWebServer &server) {
                     break;
                 }
             }
+            if (otherRole == "admin") continue;  // hide admin conversations from mobile
 
             // Find last message in this conversation
             int convoId = c["id"] | 0;
@@ -1452,7 +1452,6 @@ void registerApiRoutes(AsyncWebServer &server) {
             o["last_message"]    = lastMsg.length() > 0 ? lastMsg : JsonVariant();
             o["timestamp"]       = lastTs.length() > 0  ? lastTs  : JsonVariant();
             o["other_user_id"]   = otherId;
-            o["is_admin"]        = (otherRole == "admin");
         }
 
         String out;
