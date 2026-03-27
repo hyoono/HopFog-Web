@@ -41,7 +41,7 @@ All 13 endpoints work correctly with both admin and node:
 | 3 | `GET /conversations?user_id=X` | `[{conversation_id, contact_name, last_message, timestamp, other_user_id, is_admin}]` | ✅ |
 | 4 | `GET /messages?conversation_id=X&user_id=Y` | `[{message_id, message_text, sent_at, sender_id, is_from_current_user, sender_username}]` | ✅ |
 | 5 | `POST /send` | `{success, message, secondsRemaining}` | ✅ |
-| 6 | `GET /users?user_id=X` | `[{id, username, role, is_online}]` | ✅ UPDATED |
+| 6 | `GET /users?user_id=X` | `[{id, username, role, is_online, is_admin}]` | ✅ UPDATED |
 | 7 | `POST /create-chat` | `{conversation_id, contact_name}` | ✅ |
 | 8 | `POST /sos` | `{conversation_id, contact_name}` | ✅ |
 | 9 | `GET /new-messages?last_id=X&user_id=Y` | `[Message]` | ✅ |
@@ -735,7 +735,7 @@ searchEditText.addTextChangedListener(object : TextWatcher {
 
 **Problem:** Admin accounts should NOT appear in the "New Messages" or "Chats" screens. Residents should contact admin ONLY through the SOS function.
 
-**This fix builds on Fix 17 (which introduced the concept) and Fix 18-19 (which add the `is_online` and filtering). Here is the complete implementation.**
+**Server change:** `GET /users?user_id=X` now returns an `is_admin` boolean field for each user. `GET /conversations?user_id=X` returns `is_admin` for each conversation contact. Use these fields for filtering.
 
 **Android Implementation:**
 
@@ -743,39 +743,58 @@ searchEditText.addTextChangedListener(object : TextWatcher {
 
 **File:** `app/src/main/java/com/example/hopfog/NewMessageActivity.kt`
 
+The server response for `GET /users?user_id=X` now includes `is_admin`:
+```json
+[
+  {"id": 2, "username": "alice", "role": "mobile", "is_online": true, "is_admin": false},
+  {"id": 1, "username": "admin", "role": "admin", "is_online": true, "is_admin": true}
+]
+```
+
+Filter using the `is_admin` field:
 ```kotlin
-// When loading users from GET /api/users, always filter out admin:
+// When loading users from GET /users?user_id=X, filter out admin accounts:
 val chatableUsers = allUsers.filter { user ->
-    user.role != "admin" &&    // NEVER show admin in New Messages
-    user.isActive == 1 &&
+    !user.isAdmin &&           // Use the is_admin field from server response
     user.id != currentUserId
 }
 // Optionally also filter to online-only (see Fix 18)
+```
+
+Make sure your User data class includes the `is_admin` field:
+```kotlin
+@Serializable
+data class User(
+    val id: Int,
+    val username: String,
+    val role: String = "mobile",
+    @SerialName("is_online") val isOnline: Boolean = false,
+    @SerialName("is_admin") val isAdmin: Boolean = false   // NEW
+)
 ```
 
 ### Part B: Remove admin conversations from "Chats" list
 
 **File:** `app/src/main/java/com/example/hopfog/ChatsActivity.kt` (or ChatsFragment)
 
+The server response for `GET /conversations?user_id=X` already includes `is_admin`:
+```json
+[
+  {"conversation_id": 1, "contact_name": "admin", "last_message": "Help!", "timestamp": "...", "other_user_id": 1, "is_admin": true},
+  {"conversation_id": 2, "contact_name": "bob", "last_message": "Hi!", "timestamp": "...", "other_user_id": 3, "is_admin": false}
+]
+```
+
+Filter using the `is_admin` field:
 ```kotlin
 // When loading conversations from GET /conversations?user_id=X:
 val conversations: List<Conversation> = parseConversationsFromResponse(responseBody)
 
 // Filter out any conversation where the contact is an admin
-// You need to know admin user IDs. Two approaches:
-
-// Approach 1: Use the /api/users response to build an admin ID set
-val adminIds = allUsers.filter { it.role == "admin" }.map { it.id }.toSet()
 val visibleConversations = conversations.filter { conv ->
-    // Keep the conversation only if the other party is NOT admin
-    // The contact_name or contact_id from the conversation can identify the other party
-    conv.contactId !in adminIds
+    !conv.isAdmin   // Use the is_admin field directly from server response
 }
-
-// Approach 2: If conversation has an is_sos field, show SOS conversations 
-// in a separate "SOS" section (not in regular Chats)
-val regularChats = conversations.filter { !it.isSos }
-val sosChats = conversations.filter { it.isSos }  // Show these in SOS tab only
+// Admin conversations (SOS) should only be accessible through the SOS button
 ```
 
 ### Part C: Show SOS button prominently
@@ -784,7 +803,7 @@ val sosChats = conversations.filter { it.isSos }  // Show these in SOS tab only
 
 ```kotlin
 // In your bottom navigation or main screen:
-// - "Chats" tab → shows only non-admin conversations
+// - "Chats" tab → shows only non-admin conversations (filtered by is_admin)
 // - "SOS" button → prominent red button for admin contact
 //   → Tapping SOS calls POST /sos which creates conversation with admin
 //   → Opens the SOS chat view
@@ -802,8 +821,8 @@ sosButton.setOnClickListener {
 **Result:**
 - Admin accounts are completely hidden from "New Messages" and "Chats"
 - The ONLY way to contact admin is through the SOS function
-- This eliminates the DM/SOS tagging confusion permanently
-- Regular DMs between residents still work normally
+- Both `/users` and `/conversations` provide `is_admin` for easy filtering
+- No need to cross-reference user lists — just check the boolean field
 
 **Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile (branch: copilot/add-local-conversation-archiving)
 
@@ -840,20 +859,31 @@ if (savedToken.isNotEmpty()) {
 
 **Problem:** Two endpoints now return additional fields that the mobile app should use for filtering:
 
-### A. `GET /users?user_id=X` — now returns `role` and `is_online`
+### A. `GET /users?user_id=X` — now returns `role`, `is_online`, and `is_admin`
 
 **Old response:** `[{id, username}]`
-**New response:** `[{id, username, role, is_online}]`
+**New response:** `[{id, username, role, is_online, is_admin}]`
 
-The `SelectableUser` data class already has these fields (with defaults). No model changes needed.
-
-**Use `role` to filter admin accounts** — The server excludes deactivated users and the requesting user, but does NOT exclude admin accounts (to maintain backward compat). The app should filter:
+**Use `is_admin` to filter admin accounts** — The server returns all active users (including admins) with an `is_admin` boolean field. The app should filter:
 
 ```kotlin
 // In the New Messages screen:
 val filteredUsers = allUsers.filter { user ->
-    user.role != "admin"    // Hide admin accounts from New Messages
+    !user.isAdmin    // Hide admin accounts from New Messages — use is_admin field
 }
+```
+
+**Update the User/SelectableUser model** to include `is_admin`:
+
+```kotlin
+@Serializable
+data class SelectableUser(
+    val id: Int,
+    val username: String,
+    val role: String = "mobile",
+    @SerialName("is_online") val isOnline: Boolean = false,
+    @SerialName("is_admin") val isAdmin: Boolean = false    // NEW
+)
 ```
 
 **Use `is_online` for the "Online Only" toggle:**
