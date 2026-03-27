@@ -401,6 +401,15 @@ void registerApiRoutes(AsyncWebServer &server) {
         int ids[MAX_ACTIVE_TOKENS];
         int count = getActiveUserIds(ids, MAX_ACTIVE_TOKENS);
 
+        // Failsafe: requesting user authenticated, so they ARE online
+        bool selfFound = false;
+        for (int i = 0; i < count; i++) {
+            if (ids[i] == uid) { selfFound = true; break; }
+        }
+        if (!selfFound && count < MAX_ACTIVE_TOKENS) {
+            ids[count++] = uid;
+        }
+
         JsonDocument resp;
         JsonArray arr = resp.to<JsonArray>();
         for (int i = 0; i < count; i++) arr.add(ids[i]);
@@ -705,10 +714,10 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         // Update broadcast status
         updateBroadcastStatus(bId, "sent");
-        // Update all recipients to "sent" with sent_at timestamp
-        updateRecipientsStatus(bId, "sent");
+        // Update all recipients to "delivered" (broadcast = delivered in our network)
+        updateRecipientsStatus(bId, "delivered");
         // Create audit event
-        addBroadcastEvent(bId, "marked_sent", "Manually marked as sent (simulation)");
+        addBroadcastEvent(bId, "delivered", "Delivered via wireless broadcast");
 
         // ── Send via XBee S2C (JSON command for node protocol) ────────
         JsonDocument markCmd;
@@ -884,8 +893,8 @@ void registerApiRoutes(AsyncWebServer &server) {
             serializeJson(bcastCmd, bcastJson);
             nodeProtocolSendToAllNodes(bcastJson.c_str(), bcastJson.length());
             updateBroadcastStatus(id, "sent");
-            updateRecipientsStatus(id, "sent");
-            addBroadcastEvent(id, "marked_sent", "Auto-sent via XBee unicast-to-all");
+            updateRecipientsStatus(id, "delivered");
+            addBroadcastEvent(id, "delivered", "Delivered via wireless broadcast");
             status = "sent";
         }
 

@@ -147,7 +147,7 @@
                 if(b.status_counts){
                     var sc=b.status_counts;
                     document.getElementById('dsTotal').textContent=sc.total||0;
-                    document.getElementById('dsDelivered').textContent=sc.delivered||0;
+                    document.getElementById('dsDelivered').textContent=(sc.delivered||0)+(sc.sent||0);
                     document.getElementById('dsFailed').textContent=sc.failed||0;
                 }
 

@@ -92,12 +92,8 @@ static String generateRandomToken() {
 }
 
 String createSessionToken(int userId) {
-    // Evict any existing token for this user
-    for (int i = 0; i < MAX_ACTIVE_TOKENS; i++) {
-        if (sessions[i].used && sessions[i].userId == userId) {
-            sessions[i].used = false;
-        }
-    }
+    // Allow concurrent sessions (web + mobile can both be online)
+    // Only evict if table is full (handled below)
 
     // Find free slot
     for (int i = 0; i < MAX_ACTIVE_TOKENS; i++) {

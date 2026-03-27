@@ -68,8 +68,7 @@
                                 <div class="card-body">
                                     <div class="small text-muted mb-2">Audience: <strong>All Residents</strong></div>
                                     <form id="createBroadcastForm">
-                                        <div class="mb-3"><label class="form-label">Type</label><select class="form-select" name="msg_type"><option value="announcement">Announcement</option><option value="alert">Alert</option><option value="sos">SOS</option></select></div>
-                                        <div class="mb-3"><label class="form-label">Severity</label><select class="form-select" name="severity"><option value="info">Info</option><option value="warning">Warning</option><option value="critical">Critical</option></select></div>
+                                        <div class="mb-3"><label class="form-label">Type</label><select class="form-select" name="msg_type"><option value="announcement">📢 Announcement (Info)</option><option value="alert">⚠️ Alert (Warning)</option><option value="sos">🚨 SOS (Critical)</option></select></div>
                                         <div class="mb-3"><label class="form-label">Title / Subject</label><input class="form-control" name="subject" maxlength="200" required placeholder="e.g., Water Interruption Notice"></div>
                                         <div class="mb-3"><label class="form-label">Body</label><textarea class="form-control" name="body" rows="6" required placeholder="Write your announcement here..."></textarea></div>
                                         <div class="mb-3"><label class="form-label">TTL (hours)</label><input type="number" class="form-control" name="ttl_hours" value="24" min="1" max="720"><div class="form-text">How long this broadcast remains valid for delivery.</div></div>
@@ -88,7 +87,7 @@
                                 <div class="card-body">
                                     <div class="table-responsive">
                                         <table class="table table-striped table-sm align-middle">
-                                            <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Subject</th><th>Status</th><th>Created</th><th></th></tr></thead>
+                                            <thead><tr><th>ID</th><th>Type</th><th>Subject</th><th>Status</th><th>Created</th><th></th></tr></thead>
                                             <tbody id="broadcastsBody"></tbody>
                                         </table>
                                     </div>
@@ -120,16 +119,21 @@
             else if(s==='draft') cls='bg-warning text-dark';
             return '<span class="badge '+cls+'">'+escapeHtml(s)+'</span>';
         }
+        function typeBadge(t){
+            if(t==='sos') return '<span class="badge bg-danger">🚨 SOS</span>';
+            if(t==='alert') return '<span class="badge bg-warning text-dark">⚠️ Alert</span>';
+            return '<span class="badge bg-info text-dark">📢 Announcement</span>';
+        }
         function fmtTime(epoch){if(!epoch) return '';try{return new Date(epoch*1000).toLocaleString();}catch(e){return '';}}
         function loadBroadcasts(){
             fetch('/api/broadcasts').then(function(r){return r.json();}).then(function(broadcasts){
                 var tbody=document.getElementById('broadcastsBody');tbody.innerHTML='';
-                if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="7" class="text-muted">No broadcasts yet.</td></tr>';return;}
+                if(broadcasts.length===0){tbody.innerHTML='<tr><td colspan="6" class="text-muted">No broadcasts yet.</td></tr>';return;}
                 // Sort by created_at descending (newest first)
                 broadcasts.sort(function(a,b){return (b.created_at||0)-(a.created_at||0);});
                 broadcasts.forEach(function(b){
                     var tr=document.createElement('tr');
-                    tr.innerHTML='<td>'+b.id+'</td><td>'+escapeHtml(b.msg_type)+'</td><td>'+escapeHtml(b.severity)+'</td><td class="text-truncate" style="max-width:260px;">'+escapeHtml(b.subject)+'</td><td>'+statusBadge(b.status)+'</td><td>'+fmtTime(b.created_at)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
+                    tr.innerHTML='<td>'+b.id+'</td><td>'+typeBadge(b.msg_type)+'</td><td class="text-truncate" style="max-width:260px;">'+escapeHtml(b.subject)+'</td><td>'+statusBadge(b.status)+'</td><td>'+fmtTime(b.created_at)+'</td><td><a class="btn btn-sm btn-outline-primary" href="/admin/messaging/broadcast_detail?id='+b.id+'">Open</a></td>';
                     tbody.appendChild(tr);
                 });
             });
@@ -146,13 +150,6 @@
                     document.getElementById('createBroadcastForm').reset();loadBroadcasts();
                     setTimeout(function(){el.style.display='none';},3000);
                 }).catch(function(){var el=document.getElementById('broadcastAlert');el.className='alert alert-danger';el.textContent='Error creating broadcast.';el.style.display='block';});
-            });
-            // Auto-link severity to message type (requirement #4/#5)
-            var typeSelect = document.querySelector('select[name="msg_type"]');
-            var sevSelect = document.querySelector('select[name="severity"]');
-            typeSelect.addEventListener('change', function() {
-                var map = { announcement: 'info', alert: 'warning', sos: 'critical' };
-                sevSelect.value = map[typeSelect.value] || 'info';
             });
         });
     </script>

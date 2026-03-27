@@ -496,7 +496,7 @@ val request = Request.Builder()
     .build()
 ```
 
-**Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile
+**Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile (branch: copilot/add-local-conversation-archiving)
 
 This ensures that:
 1. Mobile users appear as "online" (green dot) in the admin Users page
@@ -542,3 +542,53 @@ fun startDMWithAdmin(userId: Int, adminId: Int) {
 ```
 
 **Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile
+
+---
+
+## Fix 17: Disable Regular DM to Admin — SOS-Only Admin Contact
+
+**Problem:** When a resident triggers SOS and then continues messaging the admin through regular DM, the message is still tagged as SOS (or vice versa). The per-conversation `is_sos` flag makes it impossible to reliably distinguish individual messages.
+
+**Solution:** Remove the ability to send regular DMs to the admin account. All admin contact should go through the SOS function exclusively. This simplifies the UX and eliminates the DM/SOS confusion.
+
+**Android Implementation:**
+
+1. **Hide admin from the user list / new chat screen:**
+
+```kotlin
+// In your user list adapter or when fetching users for new chat:
+// Filter out admin accounts so residents can't start a regular DM with admin
+val chatableUsers = allUsers.filter { it.role != "admin" }
+```
+
+2. **Block DM to admin in the send function:**
+
+```kotlin
+// In your message sending function, check if the recipient is admin:
+fun sendMessage(conversationId: Int, recipientId: Int, messageText: String, userId: Int) {
+    // If the conversation is with admin, redirect to SOS flow
+    if (isAdminConversation(conversationId)) {
+        // Show a dialog: "To contact the admin, please use the SOS function"
+        showSOSRedirectDialog()
+        return
+    }
+    // ... normal send logic ...
+}
+```
+
+3. **Show SOS as the only way to reach admin in the UI:**
+
+```kotlin
+// In your contact list or conversation list:
+// If there's an admin conversation, show it with SOS branding only
+// Remove any "Message Admin" or "DM Admin" button
+// Keep only "SOS" button for admin contact
+```
+
+**Result:**
+- Residents can ONLY contact admin through the SOS function (`POST /sos`)
+- Regular DMs between residents still work normally (`POST /create-chat` + `POST /send`)
+- The admin sees ALL resident-initiated messages in the SOS Console (as intended)
+- No more confusion between DM and SOS tagging
+
+**Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile (branch: copilot/add-local-conversation-archiving)
