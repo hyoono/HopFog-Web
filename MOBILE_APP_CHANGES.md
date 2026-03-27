@@ -49,6 +49,7 @@ All 13 endpoints work correctly with both admin and node:
 | 11 | `POST /change-password` | `{success, message}` | ✅ |
 | 12 | `GET /announcements` | `[{id, title, message, created_at}]` | ✅ |
 | **13** | **`GET /api/conversation/{other_user_id}?user_id=X`** | **`[{id, sender_id, receiver_id, content, sent_at}]`** | **✅ NEW** |
+| **14** | **`GET /api/users`** | **`[{id, username, email, role, is_active, is_online, created_at}]`** | **✅ UPDATED** |
 
 ---
 
@@ -590,5 +591,218 @@ fun sendMessage(conversationId: Int, recipientId: Int, messageText: String, user
 - Regular DMs between residents still work normally (`POST /create-chat` + `POST /send`)
 - The admin sees ALL resident-initiated messages in the SOS Console (as intended)
 - No more confusion between DM and SOS tagging
+
+---
+
+## Fix 18: Show Online Users in "New Messages" Screen
+
+**Problem:** The "New Messages" screen (where users select a contact to start a conversation) shows ALL registered users, regardless of whether they're online or offline. Users should only see who is currently available.
+
+**Server Change:** `GET /api/users` now includes an `is_online` field (boolean) for each user. This is set based on active session tokens — no need for a separate API call.
+
+**Example Response:**
+```json
+[
+  {"id": 1, "username": "admin", "email": "admin@local", "role": "admin", "is_active": 1, "is_online": true},
+  {"id": 2, "username": "john", "email": "john@local", "role": "mobile", "is_active": 1, "is_online": false}
+]
+```
+
+**Android Implementation:**
+
+**File:** `app/src/main/java/com/example/hopfog/NewMessageActivity.kt` (or wherever the New Messages screen is)
+
+1. **Update the User data class to include `is_online`:**
+
+```kotlin
+data class User(
+    val id: Int,
+    val username: String,
+    val email: String,
+    val role: String,
+    @SerializedName("is_active")
+    val isActive: Int,
+    @SerializedName("is_online")
+    val isOnline: Boolean = false
+)
+```
+
+2. **Filter users: show online only, exclude admin, exclude self:**
+
+```kotlin
+// When fetching users from GET /api/users:
+val allUsers: List<User> = parseUsersFromResponse(responseBody)
+
+// Filter: only online, non-admin, active users (excluding self)
+val chatableUsers = allUsers.filter { user ->
+    user.isOnline &&           // Only show online users
+    user.role != "admin" &&    // Exclude admin accounts (use SOS instead)
+    user.isActive == 1 &&      // Only active accounts
+    user.id != currentUserId   // Exclude self
+}
+```
+
+3. **Show online indicator in the user list adapter:**
+
+```kotlin
+// In your RecyclerView adapter for user list items:
+fun bindUser(user: User) {
+    usernameTextView.text = user.username
+    // Show green dot for online users
+    onlineDotView.visibility = if (user.isOnline) View.VISIBLE else View.GONE
+}
+```
+
+4. **Add a toggle to show all users vs. online only:**
+
+```kotlin
+// Optional: Add a switch/toggle in the toolbar
+var showOnlineOnly = true
+
+fun refreshUserList() {
+    val filtered = if (showOnlineOnly) {
+        allUsers.filter { it.isOnline && it.role != "admin" && it.id != currentUserId }
+    } else {
+        allUsers.filter { it.role != "admin" && it.id != currentUserId }
+    }
+    adapter.submitList(filtered)
+}
+```
+
+**Result:**
+- New Messages screen shows only online, non-admin users by default
+- Users can optionally toggle to see all users
+- Green dot indicates who is online
+
+---
+
+## Fix 19: Filter Viewable Users in "New Messages" Screen
+
+**Problem:** Users need the ability to select which users are viewable — e.g., only online users, or a custom selection.
+
+**Android Implementation:**
+
+**File:** `app/src/main/java/com/example/hopfog/NewMessageActivity.kt`
+
+1. **Add filter chips or a filter menu:**
+
+```kotlin
+// In your activity/fragment layout, add filter options:
+// - "Online Only" (default ON)
+// - "All Users"
+// - Search by name
+
+enum class UserFilter {
+    ONLINE_ONLY,
+    ALL_USERS
+}
+
+private var currentFilter = UserFilter.ONLINE_ONLY
+private var searchQuery = ""
+
+fun applyFilters(users: List<User>): List<User> {
+    return users.filter { user ->
+        // Always exclude admin accounts and self
+        user.role != "admin" && user.id != currentUserId &&
+        // Apply online filter
+        (currentFilter == UserFilter.ALL_USERS || user.isOnline) &&
+        // Apply search filter
+        (searchQuery.isEmpty() || user.username.contains(searchQuery, ignoreCase = true))
+    }
+}
+```
+
+2. **Add search bar to filter by username:**
+
+```kotlin
+// In your toolbar or layout:
+searchEditText.addTextChangedListener(object : TextWatcher {
+    override fun afterTextChanged(s: Editable?) {
+        searchQuery = s?.toString() ?: ""
+        adapter.submitList(applyFilters(allUsers))
+    }
+    // ... other overrides
+})
+```
+
+**Result:**
+- Users can filter the contact list by online status and search by name
+- Admin accounts are always hidden from the contact list
+
+---
+
+## Fix 20: Remove Admin Accounts from "New Messages" and "Chats"
+
+**Problem:** Admin accounts should NOT appear in the "New Messages" or "Chats" screens. Residents should contact admin ONLY through the SOS function.
+
+**This fix builds on Fix 17 (which introduced the concept) and Fix 18-19 (which add the `is_online` and filtering). Here is the complete implementation.**
+
+**Android Implementation:**
+
+### Part A: Remove admin from "New Messages" (user selection screen)
+
+**File:** `app/src/main/java/com/example/hopfog/NewMessageActivity.kt`
+
+```kotlin
+// When loading users from GET /api/users, always filter out admin:
+val chatableUsers = allUsers.filter { user ->
+    user.role != "admin" &&    // NEVER show admin in New Messages
+    user.isActive == 1 &&
+    user.id != currentUserId
+}
+// Optionally also filter to online-only (see Fix 18)
+```
+
+### Part B: Remove admin conversations from "Chats" list
+
+**File:** `app/src/main/java/com/example/hopfog/ChatsActivity.kt` (or ChatsFragment)
+
+```kotlin
+// When loading conversations from GET /conversations?user_id=X:
+val conversations: List<Conversation> = parseConversationsFromResponse(responseBody)
+
+// Filter out any conversation where the contact is an admin
+// You need to know admin user IDs. Two approaches:
+
+// Approach 1: Use the /api/users response to build an admin ID set
+val adminIds = allUsers.filter { it.role == "admin" }.map { it.id }.toSet()
+val visibleConversations = conversations.filter { conv ->
+    // Keep the conversation only if the other party is NOT admin
+    // The contact_name or contact_id from the conversation can identify the other party
+    conv.contactId !in adminIds
+}
+
+// Approach 2: If conversation has an is_sos field, show SOS conversations 
+// in a separate "SOS" section (not in regular Chats)
+val regularChats = conversations.filter { !it.isSos }
+val sosChats = conversations.filter { it.isSos }  // Show these in SOS tab only
+```
+
+### Part C: Show SOS button prominently
+
+**File:** `app/src/main/java/com/example/hopfog/MainActivity.kt` or main navigation
+
+```kotlin
+// In your bottom navigation or main screen:
+// - "Chats" tab → shows only non-admin conversations
+// - "SOS" button → prominent red button for admin contact
+//   → Tapping SOS calls POST /sos which creates conversation with admin
+//   → Opens the SOS chat view
+
+// The SOS button should be always visible and prominent:
+sosButton.setOnClickListener {
+    if (!hasAgreedToSOS) {
+        showSOSAgreementDialog()  // POST /agree-sos first
+    } else {
+        triggerSOS()  // POST /sos → opens SOS chat
+    }
+}
+```
+
+**Result:**
+- Admin accounts are completely hidden from "New Messages" and "Chats"
+- The ONLY way to contact admin is through the SOS function
+- This eliminates the DM/SOS tagging confusion permanently
+- Regular DMs between residents still work normally
 
 **Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile (branch: copilot/add-local-conversation-archiving)

@@ -373,17 +373,36 @@ void registerApiRoutes(AsyncWebServer &server) {
         JsonDocument doc;
         readJsonArray(SD_USERS_FILE, doc);
 
-        // Strip password hashes before sending
+        // Get active (online) user IDs for is_online field
+        int onlineIds[MAX_ACTIVE_TOKENS];
+        int onlineCount = getActiveUserIds(onlineIds, MAX_ACTIVE_TOKENS);
+        // Failsafe: requesting user is authenticated, so they ARE online
+        bool selfFound = false;
+        for (int i = 0; i < onlineCount; i++) {
+            if (onlineIds[i] == uid) { selfFound = true; break; }
+        }
+        if (!selfFound && onlineCount < MAX_ACTIVE_TOKENS) {
+            onlineIds[onlineCount++] = uid;
+        }
+
+        // Strip password hashes before sending, add is_online
         JsonDocument resp;
         JsonArray arr = resp.to<JsonArray>();
         for (JsonObject u : doc.as<JsonArray>()) {
             JsonObject o = arr.add<JsonObject>();
-            o["id"]         = u["id"];
+            int userId   = u["id"] | 0;
+            o["id"]         = userId;
             o["username"]   = u["username"];
             o["email"]      = u["email"];
             o["role"]       = u["role"];
             o["is_active"]  = u["is_active"];
             o["created_at"] = u["created_at"];
+            // Check if this user has an active session
+            bool online = false;
+            for (int i = 0; i < onlineCount; i++) {
+                if (onlineIds[i] == userId) { online = true; break; }
+            }
+            o["is_online"]  = online;
         }
 
         String out;
