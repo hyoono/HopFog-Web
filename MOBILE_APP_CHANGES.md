@@ -806,12 +806,17 @@ if (savedToken.isNotEmpty()) {
 
 ---
 
-## Fix 22: Server-Side Admin Filtering (Simplified)
+## Fix 22: Server-Side Admin Filtering (Root Cause Fixed)
 
-**Problem:** Previously the server returned all users (including admins) with an `is_admin` flag,
-requiring the mobile app to filter them out client-side. This has been changed — the server now
-filters admin accounts **server-side**. Admin users and admin conversations are never sent to
-mobile clients.
+**Problem:** The server returned all users (including admins) without any filtering.
+Admin users appeared in the mobile app's "New Messages" and "Chats" screens.
+"Online Only" showed no users because the `is_online` field was missing from the response.
+
+**Root Cause (fixed):** The `GET /users` route had a **duplicate handler** in `web_server.cpp`
+that was registered FIRST, overriding the filtered handler in `api_handlers.cpp`.
+ESPAsyncWebServer uses first-match routing, so the unfiltered handler always won.
+The fix consolidates the mobile API logic into the `web_server.cpp` handler with
+admin filtering, `role`, `is_online`, and `markUserActive()` tracking.
 
 ### A. `GET /users?user_id=X` — admin users excluded server-side
 

@@ -98,17 +98,36 @@ void setupWebServer(AsyncWebServer &server) {
     server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
         // Mobile API: GET /users?user_id=X → JSON user list
         if (request->hasParam("user_id")) {
-            int userId = request->getParam("user_id")->value().toInt();
+            int requestingUserId = request->getParam("user_id")->value().toInt();
+            markUserActive(requestingUserId);
+
             JsonDocument doc;
             readJsonArray(SD_USERS_FILE, doc);
+
+            // Get online user IDs
+            int onlineIds[MAX_ACTIVE_TOKENS + MAX_USERS];
+            int onlineCount = getActiveUserIds(onlineIds, MAX_ACTIVE_TOKENS + MAX_USERS);
+
             JsonDocument resp;
             JsonArray arr = resp.to<JsonArray>();
             for (JsonObject u : doc.as<JsonArray>()) {
-                if (!(u["is_active"] | 0)) continue;
-                if ((u["id"] | 0) == userId) continue;
+                int uid = u["id"] | 0;
+                if (uid == requestingUserId) continue;  // exclude self
+                int isActive = u["is_active"] | 0;
+                if (!isActive) continue;  // exclude deactivated users
+                String role = u["role"] | "mobile";
+                if (role == "admin") continue;  // exclude admin accounts from mobile client
+
+                bool online = false;
+                for (int i = 0; i < onlineCount; i++) {
+                    if (onlineIds[i] == uid) { online = true; break; }
+                }
+
                 JsonObject o = arr.add<JsonObject>();
-                o["id"]       = u["id"];
-                o["username"] = u["username"];
+                o["id"]        = uid;
+                o["username"]  = u["username"];
+                o["role"]      = role;
+                o["is_online"] = online;
             }
             String out;
             serializeJson(resp, out);

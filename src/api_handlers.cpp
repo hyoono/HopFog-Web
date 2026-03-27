@@ -1344,52 +1344,9 @@ void registerApiRoutes(AsyncWebServer &server) {
         request->send(200, "application/json", outStr);
     });
 
-    // ╭───────────────────────────────────────────────────────────────╮
-    // │  MOBILE: GET /users?user_id=X — user list for New Messages   │
-    // │  Returns [{id, username, role, is_online}]                   │
-    // │  Excludes the requesting user (user_id param)                │
-    // ╰───────────────────────────────────────────────────────────────╯
-    server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!request->hasParam("user_id")) {
-            sendJsonError(request, 400, "user_id required");
-            return;
-        }
-        int requestingUserId = request->getParam("user_id")->value().toInt();
-        markUserActive(requestingUserId);
-
-        JsonDocument doc;
-        readJsonArray(SD_USERS_FILE, doc);
-
-        // Get online user IDs
-        int onlineIds[MAX_ACTIVE_TOKENS + MAX_USERS];
-        int onlineCount = getActiveUserIds(onlineIds, MAX_ACTIVE_TOKENS + MAX_USERS);
-
-        JsonDocument resp;
-        JsonArray arr = resp.to<JsonArray>();
-        for (JsonObject u : doc.as<JsonArray>()) {
-            int uid = u["id"] | 0;
-            if (uid == requestingUserId) continue;  // exclude self
-            int isActive = u["is_active"] | 0;
-            if (!isActive) continue;  // exclude deactivated users
-            String role = u["role"] | "mobile";
-            if (role == "admin") continue;  // exclude admin accounts from mobile client
-
-            bool online = false;
-            for (int i = 0; i < onlineCount; i++) {
-                if (onlineIds[i] == uid) { online = true; break; }
-            }
-
-            JsonObject o = arr.add<JsonObject>();
-            o["id"]        = uid;
-            o["username"]  = u["username"];
-            o["role"]      = role;
-            o["is_online"] = online;
-        }
-
-        String out;
-        serializeJson(resp, out);
-        request->send(200, "application/json", out);
-    });
+    // NOTE: GET /users is handled in web_server.cpp (registered first).
+    // When called with ?user_id=X it returns the mobile JSON response;
+    // without the param it serves the admin HTML page.
 
     // ╭───────────────────────────────────────────────────────────────╮
     // │  MOBILE: GET /conversations?user_id=X                        │
