@@ -1371,6 +1371,8 @@ void registerApiRoutes(AsyncWebServer &server) {
             if (uid == requestingUserId) continue;  // exclude self
             int isActive = u["is_active"] | 0;
             if (!isActive) continue;  // exclude deactivated users
+            String role = u["role"] | "";
+            if (role != "mobile") continue;  // only expose mobile users to mobile clients
 
             bool online = false;
             for (int i = 0; i < onlineCount; i++) {
