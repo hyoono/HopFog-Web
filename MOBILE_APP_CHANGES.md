@@ -38,10 +38,10 @@ All 13 endpoints work correctly with both admin and node:
 |---|---|---|---|
 | 1 | `POST /login` | `{success, user: {user_id, username, email, has_agreed_sos}}` | ✅ |
 | 2 | `GET /status` | `{"online": true}` | ✅ |
-| 3 | `GET /conversations?user_id=X` | `[{conversation_id, contact_name, last_message, timestamp}]` | ✅ |
+| 3 | `GET /conversations?user_id=X` | `[{conversation_id, contact_name, last_message, timestamp, other_user_id, is_admin}]` | ✅ |
 | 4 | `GET /messages?conversation_id=X&user_id=Y` | `[{message_id, message_text, sent_at, sender_id, is_from_current_user, sender_username}]` | ✅ |
 | 5 | `POST /send` | `{success, message, secondsRemaining}` | ✅ |
-| 6 | `GET /users?user_id=X` | `[{id, username}]` | ✅ |
+| 6 | `GET /users?user_id=X` | `[{id, username, role, is_online}]` | ✅ UPDATED |
 | 7 | `POST /create-chat` | `{conversation_id, contact_name}` | ✅ |
 | 8 | `POST /sos` | `{conversation_id, contact_name}` | ✅ |
 | 9 | `GET /new-messages?last_id=X&user_id=Y` | `[Message]` | ✅ |
@@ -806,3 +806,90 @@ sosButton.setOnClickListener {
 - Regular DMs between residents still work normally
 
 **Reference Repository:** https://github.com/christian-dela-cruz/HopFogMobile (branch: copilot/add-local-conversation-archiving)
+
+---
+
+## Fix 21: Token Restoration + Auto Re-login on 401
+
+**Problem:** After the ESP32 restarts, all in-memory sessions are lost. The mobile app has a stale `access_token` saved in SharedPreferences. API calls succeed because mobile endpoints use `user_id` query parameter (not auth tokens), but the user doesn't appear online because `validateToken()` returns -1 for the stale token.
+
+**Root Cause:** The server now tracks user activity via `markUserActive()` on every mobile API call (using the `user_id` param). This means mobile users will appear online within 5 minutes of their last API call, even with stale tokens. **No mobile app changes required for online status tracking.**
+
+However, for security, the app should still re-login when it detects a stale token.
+
+**File:** `app/src/main/java/com/example/hopfog/NetworkManager.kt`
+
+**Add token restoration on app startup** — In the Application class or main activity's `onCreate`:
+
+```kotlin
+// Restore access token from saved session
+val savedToken = SessionManager.getAccessToken(context)
+if (savedToken.isNotEmpty()) {
+    NetworkManager.setAccessToken(savedToken)
+}
+```
+
+**Result:**
+- Mobile users now appear as "online" (green dot) in admin Users page — the server tracks activity via `user_id` parameter on every mobile API call
+- The 5-minute activity window means users who have used the app within 5 minutes appear online
+- Token restoration ensures the `Authorization: Bearer` header is sent on subsequent requests
+
+---
+
+## Fix 22: Updated API Response Formats
+
+**Problem:** Two endpoints now return additional fields that the mobile app should use for filtering:
+
+### A. `GET /users?user_id=X` — now returns `role` and `is_online`
+
+**Old response:** `[{id, username}]`
+**New response:** `[{id, username, role, is_online}]`
+
+The `SelectableUser` data class already has these fields (with defaults). No model changes needed.
+
+**Use `role` to filter admin accounts** — The server excludes deactivated users and the requesting user, but does NOT exclude admin accounts (to maintain backward compat). The app should filter:
+
+```kotlin
+// In the New Messages screen:
+val filteredUsers = allUsers.filter { user ->
+    user.role != "admin"    // Hide admin accounts from New Messages
+}
+```
+
+**Use `is_online` for the "Online Only" toggle:**
+
+```kotlin
+// When "Online Only" is selected:
+val onlineUsers = filteredUsers.filter { it.isOnline }
+```
+
+### B. `GET /conversations?user_id=X` — now returns `other_user_id` and `is_admin`
+
+**Old response:** `[{conversation_id, contact_name, last_message, timestamp}]`
+**New response:** `[{conversation_id, contact_name, last_message, timestamp, other_user_id, is_admin}]`
+
+**Update the `ChatConversation` model** (already has these fields with defaults):
+
+```kotlin
+@Serializable
+data class ChatConversation(
+    @SerialName("conversation_id") val conversationId: Int,
+    @SerialName("contact_name") val contactName: String,
+    @SerialName("last_message") val lastMessage: String?,
+    @SerialName("timestamp") val timestamp: String?,
+    @SerialName("other_user_id") val otherUserId: Int = 0,     // NEW
+    @SerialName("is_admin") val isAdmin: Boolean = false        // NEW
+)
+```
+
+**Filter admin conversations from Chats:**
+
+```kotlin
+// In the Chats screen, hide admin conversations:
+val filteredConversations = conversations.filter { !it.isAdmin }
+```
+
+**Result:**
+- "New Messages" shows only non-admin, active users
+- "Online Only" toggle works correctly
+- "Chats" hides admin conversations (users contact admin via SOS only)

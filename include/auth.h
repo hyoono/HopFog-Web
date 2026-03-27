@@ -31,4 +31,12 @@ int countActiveSessions();
 // Returns the number of IDs written (up to maxOut).
 int getActiveUserIds(int *outIds, int maxOut);
 
+// Mark a user as recently active (called on each mobile API request).
+// This supplements session-based tracking — mobile users are tracked
+// even if their token is stale after an ESP32 restart.
+void markUserActive(int userId);
+
+// Check if a user was recently active (within ACTIVITY_TIMEOUT_MS).
+bool isUserActive(int userId);
+
 #endif // AUTH_H

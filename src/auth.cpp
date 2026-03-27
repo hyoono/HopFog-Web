@@ -21,9 +21,24 @@ struct Session {
 
 static Session sessions[MAX_ACTIVE_TOKENS];
 
+// ── Activity tracker (supplements sessions for mobile users) ────────
+// Mobile users may have stale tokens after ESP32 restart but still
+// make API calls with user_id query params.  We track their activity
+// so they appear online in the admin Users page.
+#define ACTIVITY_TIMEOUT_MS (5UL * 60 * 1000)   // 5 minutes
+struct UserActivity {
+    int            userId;
+    unsigned long  lastSeen;   // millis()
+    bool           used;
+};
+static UserActivity activity[MAX_USERS];
+
 void authInit() {
     for (int i = 0; i < MAX_ACTIVE_TOKENS; i++) {
         sessions[i].used = false;
+    }
+    for (int i = 0; i < MAX_USERS; i++) {
+        activity[i].used = false;
     }
     dbgprintln("[Auth] Initialised");
 }
@@ -151,14 +166,73 @@ int countActiveSessions() {
 
 int getActiveUserIds(int *outIds, int maxOut) {
     int count = 0;
+    unsigned long now = millis();
+
+    // 1. Token-based sessions (web admin, recent mobile logins)
     for (int i = 0; i < MAX_ACTIVE_TOKENS && count < maxOut; i++) {
         if (!sessions[i].used) continue;
-        // Deduplicate (a user could theoretically have multiple tokens)
         bool found = false;
         for (int j = 0; j < count; j++) {
             if (outIds[j] == sessions[i].userId) { found = true; break; }
         }
         if (!found) outIds[count++] = sessions[i].userId;
     }
+
+    // 2. Activity-based tracking (mobile users with stale tokens)
+    for (int i = 0; i < MAX_USERS && count < maxOut; i++) {
+        if (!activity[i].used) continue;
+        if ((now - activity[i].lastSeen) > ACTIVITY_TIMEOUT_MS) {
+            activity[i].used = false;  // expired
+            continue;
+        }
+        bool found = false;
+        for (int j = 0; j < count; j++) {
+            if (outIds[j] == activity[i].userId) { found = true; break; }
+        }
+        if (!found) outIds[count++] = activity[i].userId;
+    }
+
     return count;
+}
+
+void markUserActive(int userId) {
+    if (userId <= 0) return;
+    unsigned long now = millis();
+
+    // Update existing entry
+    for (int i = 0; i < MAX_USERS; i++) {
+        if (activity[i].used && activity[i].userId == userId) {
+            activity[i].lastSeen = now;
+            return;
+        }
+    }
+    // Find free slot
+    for (int i = 0; i < MAX_USERS; i++) {
+        if (!activity[i].used) {
+            activity[i].userId   = userId;
+            activity[i].lastSeen = now;
+            activity[i].used     = true;
+            return;
+        }
+    }
+    // No free slot (all used) — recycle the oldest entry
+    int oldest = 0;
+    for (int i = 1; i < MAX_USERS; i++) {
+        if (activity[i].used && activity[i].lastSeen < activity[oldest].lastSeen) oldest = i;
+    }
+    activity[oldest].userId   = userId;
+    activity[oldest].lastSeen = now;
+    activity[oldest].used     = true;
+}
+
+bool isUserActive(int userId) {
+    unsigned long now = millis();
+    for (int i = 0; i < MAX_USERS; i++) {
+        if (activity[i].used && activity[i].userId == userId) {
+            if ((now - activity[i].lastSeen) <= ACTIVITY_TIMEOUT_MS) return true;
+            activity[i].used = false;
+            return false;
+        }
+    }
+    return false;
 }

@@ -374,14 +374,15 @@ void registerApiRoutes(AsyncWebServer &server) {
         readJsonArray(SD_USERS_FILE, doc);
 
         // Get active (online) user IDs for is_online field
-        int onlineIds[MAX_ACTIVE_TOKENS];
-        int onlineCount = getActiveUserIds(onlineIds, MAX_ACTIVE_TOKENS);
+        // Buffer must hold both session-based + activity-based users
+        int onlineIds[MAX_ACTIVE_TOKENS + MAX_USERS];
+        int onlineCount = getActiveUserIds(onlineIds, MAX_ACTIVE_TOKENS + MAX_USERS);
         // Failsafe: requesting user is authenticated, so they ARE online
         bool selfFound = false;
         for (int i = 0; i < onlineCount; i++) {
             if (onlineIds[i] == uid) { selfFound = true; break; }
         }
-        if (!selfFound && onlineCount < MAX_ACTIVE_TOKENS) {
+        if (!selfFound && onlineCount < (MAX_ACTIVE_TOKENS + MAX_USERS)) {
             onlineIds[onlineCount++] = uid;
         }
 
@@ -417,15 +418,15 @@ void registerApiRoutes(AsyncWebServer &server) {
         int uid = authenticateRequest(request);
         if (uid < 0) { sendJsonError(request, 401, "Unauthorized"); return; }
 
-        int ids[MAX_ACTIVE_TOKENS];
-        int count = getActiveUserIds(ids, MAX_ACTIVE_TOKENS);
+        int ids[MAX_ACTIVE_TOKENS + MAX_USERS];
+        int count = getActiveUserIds(ids, MAX_ACTIVE_TOKENS + MAX_USERS);
 
         // Failsafe: requesting user authenticated, so they ARE online
         bool selfFound = false;
         for (int i = 0; i < count; i++) {
             if (ids[i] == uid) { selfFound = true; break; }
         }
-        if (!selfFound && count < MAX_ACTIVE_TOKENS) {
+        if (!selfFound && count < (MAX_ACTIVE_TOKENS + MAX_USERS)) {
             ids[count++] = uid;
         }
 
@@ -1344,6 +1345,51 @@ void registerApiRoutes(AsyncWebServer &server) {
     });
 
     // ╭───────────────────────────────────────────────────────────────╮
+    // │  MOBILE: GET /users?user_id=X — user list for New Messages   │
+    // │  Returns [{id, username, role, is_online}]                   │
+    // │  Excludes the requesting user (user_id param)                │
+    // ╰───────────────────────────────────────────────────────────────╯
+    server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("user_id")) {
+            sendJsonError(request, 400, "user_id required");
+            return;
+        }
+        int requestingUserId = request->getParam("user_id")->value().toInt();
+        markUserActive(requestingUserId);
+
+        JsonDocument doc;
+        readJsonArray(SD_USERS_FILE, doc);
+
+        // Get online user IDs
+        int onlineIds[MAX_ACTIVE_TOKENS + MAX_USERS];
+        int onlineCount = getActiveUserIds(onlineIds, MAX_ACTIVE_TOKENS + MAX_USERS);
+
+        JsonDocument resp;
+        JsonArray arr = resp.to<JsonArray>();
+        for (JsonObject u : doc.as<JsonArray>()) {
+            int uid = u["id"] | 0;
+            if (uid == requestingUserId) continue;  // exclude self
+            int isActive = u["is_active"] | 0;
+            if (!isActive) continue;  // exclude deactivated users
+
+            bool online = false;
+            for (int i = 0; i < onlineCount; i++) {
+                if (onlineIds[i] == uid) { online = true; break; }
+            }
+
+            JsonObject o = arr.add<JsonObject>();
+            o["id"]        = uid;
+            o["username"]  = u["username"];
+            o["role"]      = u["role"];
+            o["is_online"] = online;
+        }
+
+        String out;
+        serializeJson(resp, out);
+        request->send(200, "application/json", out);
+    });
+
+    // ╭───────────────────────────────────────────────────────────────╮
     // │  MOBILE: GET /conversations?user_id=X                        │
     // ╰───────────────────────────────────────────────────────────────╯
     server.on("/conversations", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -1352,6 +1398,7 @@ void registerApiRoutes(AsyncWebServer &server) {
             return;
         }
         int userId = request->getParam("user_id")->value().toInt();
+        markUserActive(userId);
 
         JsonDocument convoDoc;
         readJsonArray(SD_CONVOS_FILE, convoDoc);
@@ -1372,9 +1419,11 @@ void registerApiRoutes(AsyncWebServer &server) {
 
             int otherId = (u1 == userId) ? u2 : u1;
             String contactName = "Unknown";
+            String otherRole   = "";
             for (JsonObject u : usersDoc.as<JsonArray>()) {
                 if ((u["id"] | 0) == otherId) {
                     contactName = u["username"] | "Unknown";
+                    otherRole   = u["role"] | "";
                     break;
                 }
             }
@@ -1399,6 +1448,8 @@ void registerApiRoutes(AsyncWebServer &server) {
             o["contact_name"]    = contactName;
             o["last_message"]    = lastMsg.length() > 0 ? lastMsg : JsonVariant();
             o["timestamp"]       = lastTs.length() > 0  ? lastTs  : JsonVariant();
+            o["other_user_id"]   = otherId;
+            o["is_admin"]        = (otherRole == "admin");
         }
 
         String out;
@@ -1416,6 +1467,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         }
         int convoId = request->getParam("conversation_id")->value().toInt();
         int userId  = request->getParam("user_id")->value().toInt();
+        markUserActive(userId);
 
         JsonDocument dmDoc;
         readJsonArray(SD_DMS_FILE, dmDoc);
@@ -1458,6 +1510,7 @@ void registerApiRoutes(AsyncWebServer &server) {
     server.on("/new-messages", HTTP_GET, [](AsyncWebServerRequest *request) {
         int lastId = request->hasParam("last_id") ? request->getParam("last_id")->value().toInt() : 0;
         int userId = request->hasParam("user_id") ? request->getParam("user_id")->value().toInt() : 0;
+        markUserActive(userId);
 
         // Find all conversations this user is part of
         JsonDocument convoDoc;
@@ -1521,6 +1574,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         }
         int userId    = request->getParam("user_id")->value().toInt();
         int otherUserId = request->pathArg(0).toInt();
+        markUserActive(userId);
 
         if (userId <= 0 || otherUserId <= 0) {
             sendJsonError(request, 400, "Invalid user IDs");
@@ -1607,6 +1661,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         int convoId  = getParamInt(request, jsonBody, "conversation_id");
         int senderId = getParamInt(request, jsonBody, "sender_id");
         String text  = getParam(request, jsonBody, "message_text");
+        markUserActive(senderId);
 
         if (convoId <= 0 || senderId <= 0 || text.isEmpty()) {
             JsonDocument r; r["success"] = false; r["message"] = "Missing fields";
@@ -1665,6 +1720,7 @@ void registerApiRoutes(AsyncWebServer &server) {
 
         int user1Id = getParamInt(request, jsonBody, "user1_id");
         int user2Id = getParamInt(request, jsonBody, "user2_id");
+        markUserActive(user1Id);
 
         if (user1Id <= 0 || user2Id <= 0) {
             sendJsonError(request, 400, "user1_id and user2_id required");
@@ -1693,6 +1749,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         getJsonBody(request, jsonBody);
 
         int userId = getParamInt(request, jsonBody, "user_id");
+        markUserActive(userId);
         if (userId <= 0) {
             sendJsonError(request, 400, "user_id required");
             return;
@@ -1775,6 +1832,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         getJsonBody(request, jsonBody);
 
         int userId = getParamInt(request, jsonBody, "user_id");
+        markUserActive(userId);
         if (userId <= 0) {
             JsonDocument r; r["success"] = false; r["message"] = "user_id required";
             String out; serializeJson(r, out);
@@ -1801,6 +1859,7 @@ void registerApiRoutes(AsyncWebServer &server) {
         int userId  = getParamInt(request, jsonBody, "user_id");
         String oldPw = getParam(request, jsonBody, "old_password");
         String newPw = getParam(request, jsonBody, "new_password");
+        markUserActive(userId);
 
         if (userId <= 0 || oldPw.isEmpty() || newPw.isEmpty()) {
             JsonDocument r; r["success"] = false; r["message"] = "Missing fields";
